@@ -6,11 +6,17 @@ private enum EditSheet: String, Identifiable {
     var id: Self { self }
 }
 
+extension FocusedValues {
+    @Entry var librarySearch: Binding<Bool>?
+}
+
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     let windowTitle: String
     @State private var sheet: EditSheet?
     @State private var deleteLibrary = false
+    @State private var columns = NavigationSplitViewVisibility.automatic
+    @State private var searchPresented = false
 
     var body: some View {
         ZStack {
@@ -45,7 +51,7 @@ struct LibraryView: View {
     }
 
     private var navigation: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar.navigationSplitViewColumnWidth(min: 175, ideal: 208, max: 285)
         } detail: {
             if model.libraryID == nil {
@@ -72,22 +78,15 @@ struct LibraryView: View {
             }
         }
         .overlay(alignment: .top) { Divider().allowsHitTesting(false).accessibilityHidden(true) }
-        .searchable(text: $model.query, placement: .toolbar, prompt: "Search library")
+        .searchable(text: $model.query, isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
+        .focusedSceneValue(\.librarySearch, Binding(get: { searchPresented }, set: { present in
+            if present { columns = .all }
+            searchPresented = present
+        }))
         .onChange(of: model.query) { model.detailID = nil }
         .onChange(of: model.shelf) { model.detailID = nil; model.query = ""; model.loadPlaylist() }
         .onChange(of: model.libraryID) { sheet = nil }
-        .toolbar {
-            libraryTitle
-            ToolbarItemGroup {
-                if model.libraryID != nil {
-                    Button { model.pickSource() } label: { Label("Add Source Folder", systemImage: "folder.badge.plus") }
-                        .help("Add Source Folder")
-                }
-                if model.pinEnabled {
-                    Button { model.lock() } label: { Label("Lock Vieweroo", systemImage: "lock") }.help("Lock Vieweroo")
-                }
-            }
-        }
+        .toolbar { libraryTitle }
     }
 
     @ToolbarContentBuilder
@@ -146,6 +145,10 @@ struct LibraryView: View {
             HStack {
                 Button { sheet = .privacy } label: { Label("Privacy", systemImage: "lock.shield") }.buttonStyle(.plain)
                 Spacer()
+                if model.pinEnabled {
+                    Button { model.lock() } label: { Label("Lock Vieweroo", systemImage: "lock").labelStyle(.iconOnly) }
+                        .buttonStyle(.plain).help("Lock Vieweroo (⇧⌘L)")
+                }
                 Button { model.refresh() } label: { Label("Refresh Library", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
                     .buttonStyle(.plain).disabled(model.libraryID == nil || model.scanBusy).help("Refresh Library")
             }.padding(VSpace.group)

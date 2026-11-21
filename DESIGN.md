@@ -17,7 +17,7 @@ Use the shared `VSpace` values in points. Choose the distance by the relationshi
 
 In the library window, carry the native sidebar divider to the top of the title bar. Run one separator beneath the toolbar across both columns. Align the window title to the collection heading’s 24 pt inset while the sidebar is visible.
 
-Let the window handle mouse events over its title so dragging and double-clicking the text behave like the empty title bar.
+Keep the area from the library title to the trailing window edge available for native window gestures. Use the system title bar background so clicks reach the window, including above scrollable content. Put search in the sidebar, folder import in Source Folders and the PIN lock next to Privacy.
 
 Align the poster, title, actions and section headings to the same leading edge. Set collection titles in the system large title, the selected video in title bold and section headings in title 3. Use body or headline weight for a title in a list. Use secondary system text for metadata and monospaced digits for a moving clock. A compact row may truncate a title at two lines. The detail view gives the full title room to wrap.
 

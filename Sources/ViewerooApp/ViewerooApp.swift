@@ -5,6 +5,7 @@ import ViewerooCore
 @main
 struct ViewerooApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @FocusedBinding(\.librarySearch) private var librarySearch
     @State private var model: LibraryModel
     private let title: String
 
@@ -29,6 +30,11 @@ struct ViewerooApp: App {
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
+            CommandGroup(after: .sidebar) {
+                Button("Search Library") { librarySearch = true }
+                    .keyboardShortcut("f")
+                    .disabled(model.phase != .ready || model.playing || model.libraryID == nil || librarySearch == nil)
+            }
             CommandGroup(after: .newItem) {
                 Button("Add Source Folder…") { model.pickSource() }
                     .keyboardShortcut("o")
@@ -57,7 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool { false }
 }
 
-// Keep the native title for system surfaces. The library toolbar draws its own aligned title.
+// Keep AppKit's title bar background so empty areas receive native window gestures.
+// While browsing, the toolbar supplies the aligned title.
 struct LibraryWindowConfiguration: NSViewRepresentable {
     let browsing: Bool
 
@@ -67,7 +74,6 @@ struct LibraryWindowConfiguration: NSViewRepresentable {
             guard let window else { return }
             let visibility: NSWindow.TitleVisibility = browsing ? .hidden : .visible
             if window.titleVisibility != visibility { window.titleVisibility = visibility }
-            if window.titlebarAppearsTransparent != browsing { window.titlebarAppearsTransparent = browsing }
         }
 
         override func viewDidMoveToWindow() {
