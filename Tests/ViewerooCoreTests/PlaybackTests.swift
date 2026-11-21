@@ -87,6 +87,7 @@ import ViewerooCore
     }
     #expect(controller.error == nil)
     #expect(controller.position >= 0.4)
+    #expect(controller.videoAspectRatio == 1.5)
     #expect(controller.player.allowsExternalPlayback)
     controller.markLoopStart()
     let loopStart = try #require(controller.loopStart)
@@ -106,6 +107,7 @@ import ViewerooCore
     #expect(controller.player.rate == 0)
     #expect(!controller.player.allowsExternalPlayback)
     #expect(controller.title.isEmpty)
+    #expect(controller.videoAspectRatio == nil)
     #expect(controller.previewDirectory == nil)
     #expect(sessions == 1)
     #expect(watched > 0)

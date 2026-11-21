@@ -14,6 +14,7 @@ final class PlayerController: ObservableObject {
     @Published private(set) var ended = false
     @Published private(set) var position = 0.0
     @Published private(set) var duration = 0.0
+    @Published private(set) var videoAspectRatio: CGFloat?
     @Published private(set) var playing = false
     @Published private(set) var loopStart: Double?
     @Published private(set) var loopEnd: Double?
@@ -54,6 +55,14 @@ final class PlayerController: ObservableObject {
         player.allowsExternalPlayback = true
         player.replaceCurrentItem(with: item)
 
+        observations.append(item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self, self.generation == token else { return }
+                let size = item.presentationSize
+                guard size.width > 0, size.height > 0, size.width.isFinite, size.height.isFinite else { return }
+                self.videoAspectRatio = size.width / size.height
+            }
+        })
         observations.append(item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor in
                 guard let self, self.generation == token else { return }
@@ -237,6 +246,7 @@ final class PlayerController: ObservableObject {
         reportUnsupported = nil
         position = 0
         duration = 0
+        videoAspectRatio = nil
         previewDirectory = nil
     }
 }

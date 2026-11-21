@@ -21,7 +21,7 @@ Keep the area from the library title to the trailing window edge available for n
 
 Align the poster, title, actions and section headings to the same leading edge. Set collection titles in the system large title, the selected video in title bold and section headings in title 3. Use body or headline weight for a title in a list. Use secondary system text for metadata and monospaced digits for a moving clock. A compact row may truncate a title at two lines. The detail view gives the full title room to wrap.
 
-Follow the system appearance and accent. Use SF Symbols with a short action label or tooltip and an accessible name. Use a filled heart for a saved favorite and a filled thumb for an active rating. Preserve native focus rings and keyboard activation. Keep artwork in a 16∶9 frame with an 8 pt continuous corner. The video surface itself fits the source aspect ratio against black.
+Follow the system appearance and accent. Use SF Symbols with a short action label or tooltip and an accessible name. Use a filled heart for a saved favorite and a filled thumb for an active rating. Preserve native focus rings and keyboard activation. Keep artwork in a 16∶9 frame with an 8 pt continuous corner. In the windowed player, fit the playback surface to the video's presentation aspect ratio and center it on the window background. In full screen, fit the complete picture against black.
 
 ## Choosing a video
 
@@ -29,7 +29,7 @@ The library grid opens details. The large poster on a detail page starts playbac
 
 **More to Watch** offers up to eight playable titles from the current library. Prefer the same studio, then a shared performer, then a shared tag. Fill the remaining places in catalog order, starting after the current video. Include the relationship in the subtitle when available. Choosing a title starts it at its saved position. The list stays out of the layout when there are no alternatives.
 
-Adapt to the width available to each surface. At 760 pt of detail space the list can sit beside the poster. Below that, put it in a horizontal shelf after the viewing actions and show a compact poster beside the title. At 960 pt of player width, show a 300 pt side list. In a smaller player, expose the same list from a labeled header button. Full screen uses the video area for playback.
+Adapt to the width available to each surface. At 760 pt of detail space the list can sit beside the poster. Below that, put it in a horizontal shelf after the viewing actions and show a compact poster beside the title. At 960 pt of player width, show a 300 pt side list. Give it unused horizontal space when height limits the picture, up to 400 pt or one third of the window width, whichever is smaller. In a smaller player, expose the same list from a labeled header button. Full screen uses the video area for playback.
 
 ## Watching
 

@@ -6,6 +6,8 @@ struct PlayerScreen: View {
     let model: LibraryModel
     @StateObject private var window = PlayerWindow()
     @State private var entryID: Int64?
+    @State private var videoAspectRatio: CGFloat = 16.0 / 9
+    @State private var viewportHeight: CGFloat = 0
     @State private var showingRelated = false
     @State private var lastActivity = Date.now
     @State private var idle = false
@@ -30,9 +32,7 @@ struct PlayerScreen: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         ZStack {
-                            Color.black
-                            PlayerSurface(player: model.playback.player)
-                                .accessibilityHidden(true)
+                            videoSurface
                             Rectangle().fill(.clear).contentShape(Rectangle())
                                 .gesture(TapGesture(count: 2).onEnded { window.toggle() }
                                     .exclusively(before: TapGesture().onEnded {
@@ -54,6 +54,7 @@ struct PlayerScreen: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
                         .onContinuousHover { phase in
                             if window.fullScreen, case .active = phase { revealControls() }
                         }
@@ -62,7 +63,7 @@ struct PlayerScreen: View {
                     if let entry, hasRelated && wide && !window.fullScreen {
                         Divider()
                         ScrollView { related(to: entry) }
-                            .frame(width: 300)
+                            .frame(width: relatedWidth(in: geometry.size.width))
                     }
                 }
             }
@@ -70,6 +71,7 @@ struct PlayerScreen: View {
         .ignoresSafeArea(.container, edges: window.fullScreen ? .top : [])
         .background(PlayerWindowReader(presentation: window))
         .onReceive(model.playback.$entryID.removeDuplicates()) { entryID = $0 }
+        .onReceive(model.playback.$videoAspectRatio.removeDuplicates()) { videoAspectRatio = $0 ?? 16.0 / 9 }
         .onReceive(model.playback.$playing.removeDuplicates()) { active in
             if playing != active { playing = active; revealControls() }
         }
@@ -86,6 +88,27 @@ struct PlayerScreen: View {
             idle = true
         }
         .onDisappear { model.playback.stop() }
+    }
+
+    private var videoSurface: some View {
+        GeometryReader { viewport in
+            let bounds = CGRect(origin: .zero, size: viewport.size)
+            let picture = window.fullScreen ? bounds : AVMakeRect(
+                aspectRatio: CGSize(width: videoAspectRatio, height: 1), insideRect: bounds
+            )
+            PlayerSurface(player: model.playback.player)
+                .frame(width: picture.width, height: picture.height)
+                .background(.black)
+                .position(x: bounds.midX, y: bounds.midY)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func relatedWidth(in width: CGFloat) -> CGFloat {
+        guard viewportHeight > 0 else { return 300 }
+        let spareWidth = width - viewportHeight * videoAspectRatio
+        let maximum = min(400, width / 3)
+        return min(maximum, max(300, spareWidth))
     }
 
     private func revealControls() {
@@ -260,6 +283,7 @@ private struct PlayerSurface: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.controlsStyle = .none
+        view.videoGravity = .resizeAspect
         view.allowsPictureInPicturePlayback = false
         view.updatesNowPlayingInfoCenter = false
         view.player = player
