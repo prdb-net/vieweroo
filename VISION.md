@@ -26,9 +26,9 @@ You can correct the studio directly on the video. Vieweroo keeps your choice acr
 
 The interface should feel familiar on a Mac and invite you to browse. Large thumbnails and legible titles help you choose what to watch. After playback, you return to your previous place in the studio view, search results, or playlist.
 
-A video’s detail page and windowed player offer other playable videos from the active library. Related titles come first, followed by more of the collection. Choose one to switch immediately and resume it at its saved position. Returning from the player takes you back to where you started browsing.
+Open a title to explore its studio, cast and related videos, or use the tile’s Play button to watch immediately. On the title page, playback replaces the poster in place. The same page offers other playable videos from the active library. Related titles come first, followed by more of the collection. Choose one to switch immediately and resume it at its saved position. Returning from the player takes you back to where you started browsing.
 
-Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated. The sidebar shows how many are ready. Click the status to see what is being prepared, waiting or unavailable.
+Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated. Move the pointer across a video thumbnail or title poster to see cached moments and their times. Previewing is silent and preserves playback history and resume positions. The sidebar shows how many are ready. Click the status to see what is being prepared, waiting or unavailable.
 
 ## A player for repeat viewing
 
@@ -73,30 +73,29 @@ These ideas are planned for after the minimum viable product (MVP). During devel
 
 5. **Smart collections.** Save a set of filters as a collection, such as favorites from a particular studio with a particular tag. Its contents update as videos meet or cease to meet those conditions.
 6. **Performers who appear together.** A performer's profile shows who else appears in their videos in your library. Select a second performer to browse the titles they share.
-7. **Thumbnail scrubbing.** Move the pointer across a video's thumbnail to preview different moments. This helps distinguish similarly named titles while browsing.
-8. **Play queue.** Choose “Play Next” as you browse, rearrange the queue, and save it as a playlist if you want to keep the sequence.
+7. **Play queue.** Choose “Play Next” as you browse, rearrange the queue, and save it as a playlist if you want to keep the sequence.
 
 ### Maintaining the collection
 
-9. **Reconnect moved files.** When you rename a video or move its folder, Vieweroo reconnects the file to its existing library entry so its bookmarks, ratings, and history follow it.
-10. **Multiple versions of a title.** Choose between versions such as 1080p and 4K from a single title entry. If the 4K copy is on a disconnected drive, you can play an available local copy.
-11. **PRDB match review.** Review uncertain matches together, with the filename, thumbnail, and suggested PRDB title side by side. You can also revisit a previously matched video to correct its assignment.
-12. **Library backup and restore.** Back up tags, playlists, ratings, bookmarks, and viewing history. When moving to another Mac, restore the library and reconnect it to your existing video folders.
+8. **Reconnect moved files.** When you rename a video or move its folder, Vieweroo reconnects the file to its existing library entry so its bookmarks, ratings, and history follow it.
+9. **Multiple versions of a title.** Choose between versions such as 1080p and 4K from a single title entry. If the 4K copy is on a disconnected drive, you can play an available local copy.
+10. **PRDB match review.** Review uncertain matches together, with the filename, thumbnail, and suggested PRDB title side by side. You can also revisit a previously matched video to correct its assignment.
+11. **Library backup and restore.** Back up tags, playlists, ratings, bookmarks, and viewing history. When moving to another Mac, restore the library and reconnect it to your existing video folders.
 
 ### Control over viewing data and access
 
-13. **Private playback sessions.** Pause recording for a session. Playback during that session leaves viewing history, watch statistics, and previously saved playback positions untouched.
-14. **Selective history deletion.** Clear viewing data for a particular video or time period while keeping the bookmarks, tags, and playlists you created.
-15. **Automatic locking.** With PIN protection enabled, you can have Vieweroo lock when you lock your Mac or after an inactivity interval you choose. Active playback counts as use for the inactivity timer.
+12. **Private playback sessions.** Pause recording for a session. Playback during that session leaves viewing history, watch statistics, and previously saved playback positions untouched.
+13. **Selective history deletion.** Clear viewing data for a particular video or time period while keeping the bookmarks, tags, and playlists you created.
+14. **Automatic locking.** With PIN protection enabled, you can have Vieweroo lock when you lock your Mac or after an inactivity interval you choose. Active playback counts as use for the inactivity timer.
 
 ### Contributing to PRDB
 
-16. **Hash contributions.** Submit confirmed file hash and title associations to PRDB so future lookups can identify the same file.
+15. **Hash contributions.** Submit confirmed file hash and title associations to PRDB so future lookups can identify the same file.
 
 ### Playback compatibility
 
-17. **Additional video formats.** Test AVPlayer with more container and codec combinations and expand the set of formats Vieweroo imports based on the results.
+16. **Additional video formats.** Test AVPlayer with more container and codec combinations and expand the set of formats Vieweroo imports based on the results.
 
 ### Watching on two displays
 
-18. **Independent player windows.** Open a second video while the first keeps playing. Each video can play full screen on its own display, with independent playback controls, sound, and resume position. Locking Vieweroo stops both videos and hides their windows’ contents.
+17. **Independent player windows.** Open a second video while the first keeps playing. Each video can play full screen on its own display, with independent playback controls, sound, and resume position. Locking Vieweroo stops both videos and hides their windows’ contents.

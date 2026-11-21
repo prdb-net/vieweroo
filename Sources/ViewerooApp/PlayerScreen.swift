@@ -4,11 +4,8 @@ import ViewerooCore
 
 struct PlayerScreen: View {
     let model: LibraryModel
-    @StateObject private var window = PlayerWindow()
-    @State private var entryID: Int64?
+    @ObservedObject var window: PlayerWindow
     @State private var videoAspectRatio: CGFloat = 16.0 / 9
-    @State private var viewportHeight: CGFloat = 0
-    @State private var showingRelated = false
     @State private var lastActivity = Date.now
     @State private var idle = false
     @State private var playing = false
@@ -23,66 +20,35 @@ struct PlayerScreen: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let entry = window.fullScreen ? nil : model.entries.first { $0.id == entryID }
-            let hasRelated = entry.map { model.hasAlternatives(to: $0) } ?? false
-            let wide = geometry.size.width >= 960
-            VStack(spacing: 0) {
-                if !window.fullScreen { header(entry: entry, relatedButton: hasRelated && !wide) }
-                HStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        ZStack {
-                            videoSurface
-                            Rectangle().fill(.clear).contentShape(Rectangle())
-                                .gesture(TapGesture(count: 2).onEnded { window.toggle() }
-                                    .exclusively(before: TapGesture().onEnded {
-                                        if model.playback.duration > 0 { model.playback.togglePlayback() }
-                                    }))
-                                .accessibilityHidden(true)
-                            PlayerStatus(controller: model.playback)
-                            if window.fullScreen {
-                                VStack(spacing: 0) {
-                                    header(entry: entry, relatedButton: false)
-                                        .background(.black.opacity(0.86))
-                                    Spacer()
-                                    transport.background(.black.opacity(0.86))
-                                }
-                                .environment(\.colorScheme, .dark)
-                                .opacity(hideControls ? 0 : 1)
-                                .allowsHitTesting(!hideControls)
-                                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hideControls)
-                            }
+        VStack(spacing: 0) {
+            if window.fullScreen {
+                picture
+                    .background(.black)
+                    .overlay {
+                        VStack(spacing: 0) {
+                            header.background(.black.opacity(0.86))
+                            Spacer()
+                            transport.background(.black.opacity(0.86))
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-                        .onContinuousHover { phase in
-                            if window.fullScreen, case .active = phase { revealControls() }
-                        }
-                        if !window.fullScreen { transport }
+                        .environment(\.colorScheme, .dark)
+                        .opacity(hideControls ? 0 : 1)
+                        .allowsHitTesting(!hideControls)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hideControls)
                     }
-                    if let entry, hasRelated && wide && !window.fullScreen {
-                        Divider()
-                        ScrollView { related(to: entry) }
-                            .frame(width: relatedWidth(in: geometry.size.width))
-                    }
-                }
+                    .onContinuousHover { if case .active = $0 { revealControls() } }
+            } else {
+                Color.black.aspectRatio(16 / 9, contentMode: .fit)
+                    .overlay { picture }
+                    .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
+                transport
             }
         }
-        .ignoresSafeArea(.container, edges: window.fullScreen ? .top : [])
-        .background {
-            PlayerWindowReader(presentation: window)
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-        .onReceive(model.playback.$entryID.removeDuplicates()) { entryID = $0 }
         .onReceive(model.playback.$videoAspectRatio.removeDuplicates()) { videoAspectRatio = $0 ?? 16.0 / 9 }
         .onReceive(model.playback.$playing.removeDuplicates()) { active in
             if playing != active { playing = active; revealControls() }
         }
         .onReceive(window.keyboardActivity) { revealControls() }
         .onChange(of: window.fullScreen) {
-            showingRelated = false
             overHeader = false
             overTransport = false
             revealControls()
@@ -92,7 +58,6 @@ struct PlayerScreen: View {
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
             idle = true
         }
-        .onDisappear { model.playback.stop() }
     }
 
     private var videoSurface: some View {
@@ -109,11 +74,17 @@ struct PlayerScreen: View {
         .accessibilityHidden(true)
     }
 
-    private func relatedWidth(in width: CGFloat) -> CGFloat {
-        guard viewportHeight > 0 else { return 300 }
-        let spareWidth = width - viewportHeight * videoAspectRatio
-        let maximum = min(400, width / 3)
-        return min(maximum, max(300, spareWidth))
+    private var picture: some View {
+        ZStack {
+            videoSurface
+            Rectangle().fill(.clear).contentShape(Rectangle())
+                .gesture(TapGesture(count: 2).onEnded { window.toggle() }
+                    .exclusively(before: TapGesture().onEnded {
+                        if model.playback.duration > 0 { model.playback.togglePlayback() }
+                    }))
+                .accessibilityHidden(true)
+            PlayerStatus(controller: model.playback)
+        }
     }
 
     private func revealControls() {
@@ -121,33 +92,17 @@ struct PlayerScreen: View {
         lastActivity = .now
     }
 
-    private func related(to entry: CatalogEntry) -> some View {
-        RelatedVideosView(model: model, current: entry) { next in
-            showingRelated = false
-            model.playSuggested(next)
-        }
-        .padding(VSpace.group)
-    }
-
-    private func header(entry: CatalogEntry?, relatedButton: Bool) -> some View {
+    private var header: some View {
         HStack(spacing: VSpace.control) {
             Button {
                 window.leavePlayer()
-                model.endPlayback()
+                model.goBack()
             } label: { Label("Back", systemImage: "chevron.left") }
-            .keyboardShortcut(window.fullScreen ? nil : KeyboardShortcut(.escape, modifiers: []))
             .help("Return to the library")
-            Text(entry?.title ?? model.playback.title)
+            Text(model.playback.title)
                 .font(.headline).lineLimit(1).truncationMode(.tail)
-                .help(entry?.title ?? model.playback.title)
+                .help(model.playback.title)
             Spacer(minLength: VSpace.tight)
-            if relatedButton, let entry {
-                Button { showingRelated.toggle() } label: { Label("More to Watch", systemImage: "rectangle.stack") }
-                    .fixedSize()
-                    .popover(isPresented: $showingRelated, arrowEdge: .bottom) {
-                        ScrollView { related(to: entry) }.frame(width: 320, height: 360)
-                    }
-            }
             if model.pinEnabled {
                 Button(action: model.lock) { Label("Lock Vieweroo", systemImage: "lock").labelStyle(.iconOnly) }
                     .help("Lock Vieweroo (⇧⌘L)")
@@ -162,7 +117,7 @@ struct PlayerScreen: View {
 
     private var transport: some View {
         PlayerTransport(controller: model.playback, window: window, adjustingVolume: $adjustingVolume)
-            .padding(.horizontal, VSpace.group).padding(.vertical, VSpace.control)
+            .padding(.horizontal, window.fullScreen ? VSpace.group : VSpace.unit).padding(.vertical, VSpace.control)
             .onHover { overTransport = $0 }
     }
 }
@@ -246,6 +201,11 @@ private struct PlayerTransport: View {
                     .frame(width: 72)
                     .accessibilityLabel("Volume")
                     .help("Playback volume")
+            }
+            if !window.fullScreen {
+                AirPlayRoute(player: controller.player)
+                    .frame(width: 28, height: 24)
+                    .help("Choose an AirPlay video receiver")
             }
             Button(action: window.toggle) {
                 Label(window.fullScreen ? "Exit Full Screen" : "Enter Full Screen",
@@ -467,7 +427,7 @@ struct TimelineStill: View {
     }
 }
 
-private func clockLabel(_ seconds: Double, tenths: Bool = false) -> String {
+func clockLabel(_ seconds: Double, tenths: Bool = false) -> String {
     let bounded = min(max(0, seconds), Double(Int32.max))
     let value = Int(bounded)
     let time = value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)

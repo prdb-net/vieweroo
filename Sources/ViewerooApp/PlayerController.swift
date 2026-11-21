@@ -6,7 +6,6 @@ import ViewerooCore
 @MainActor
 final class PlayerController: ObservableObject {
     let player = AVPlayer()
-    @Published private(set) var entryID: Int64?
     @Published private(set) var title = ""
     @Published private(set) var volume: Float = 1
     @Published private(set) var muted = false
@@ -53,7 +52,6 @@ final class PlayerController: ObservableObject {
         }, append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
            resume: { try catalog.setResume(entryID: id, seconds: $0) })
         open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory, history: history)
-        entryID = entry.id
         reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
     }
 
@@ -362,7 +360,6 @@ final class PlayerController: ObservableObject {
         player.currentItem?.cancelPendingSeeks()
         player.replaceCurrentItem(with: nil)
         clearLoop()
-        entryID = nil
         title = ""
         ended = false
         waiting = false

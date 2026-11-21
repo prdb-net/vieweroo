@@ -27,7 +27,7 @@ struct ViewerooApp: App {
             RootView(model: model)
                 .frame(minWidth: 790, minHeight: 535)
                 .background {
-                    LibraryWindowConfiguration(browsing: model.phase == .ready && !model.playing)
+                    LibraryWindowConfiguration(browsing: model.phase == .ready)
                         .frame(width: 0, height: 0)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -43,7 +43,7 @@ struct ViewerooApp: App {
             CommandGroup(after: .sidebar) {
                 Button("Search Library") { librarySearch = true }
                     .keyboardShortcut("f")
-                    .disabled(model.phase != .ready || model.playing || model.libraryID == nil || librarySearch == nil)
+                    .disabled(model.phase != .ready || model.libraryID == nil || librarySearch == nil)
             }
             CommandGroup(after: .newItem) {
                 Button("Add Source Folder…") { model.pickSource() }

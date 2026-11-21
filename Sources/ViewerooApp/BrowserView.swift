@@ -124,6 +124,22 @@ struct BrowserView: View {
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             .accessibilityAddTraits(model.visit.selectedTile == .video(entry.id) ? .isSelected : [])
+                            .overlay(alignment: .topTrailing) {
+                                if entry.availability == .available {
+                                    let action = entry.resume > 0 ? "Resume" : "Play"
+                                    Button { model.play(entry) } label: {
+                                        Image(systemName: "play.fill")
+                                            .font(.body.weight(.bold))
+                                            .frame(width: 30, height: 30)
+                                            .foregroundStyle(.white)
+                                            .background(.black.opacity(0.76), in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(action) \(entry.title)")
+                                    .help("\(action) \(entry.title)")
+                                    .padding(VSpace.tight)
+                                }
+                            }
                             .contextMenu {
                                 Button("Play") { model.play(entry) }.disabled(entry.availability != .available)
                                 if let id = playlistID {
@@ -141,7 +157,7 @@ struct BrowserView: View {
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
     }
     private func poster(_ entry: CatalogEntry, tile: BrowseTile) -> some View {
-        Poster(model: model, entry: entry)
+        Poster(model: model, entry: entry, scrubbable: tile == .video(entry.id))
             .overlay {
                 if model.visit.selectedTile == tile {
                     RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous)
@@ -180,6 +196,7 @@ struct BrowserView: View {
 struct Poster: View {
     var model: LibraryModel
     var entry: CatalogEntry
+    var scrubbable = true
     @State private var local: NSImage?
     @State private var revision = 0
     @State private var loadedDirectory: URL?
@@ -193,7 +210,13 @@ struct Poster: View {
                     else if let local { Image(nsImage: local).resizable().scaledToFill() }
                     else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
                 }
-            }.clipped().clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
+            }.clipped()
+            .overlay {
+                if scrubbable {
+                    PosterScrubber(directory: directory, revision: revision)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
             .onReceive(model.posterPrepared) { ready in
                 if ready == directory { revision &+= 1 }
             }
@@ -203,7 +226,7 @@ struct Poster: View {
                 if local != nil { return }
                 let bytes = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
                 if !Task.isCancelled, let bytes { local = NSImage(data: bytes) }
-            }.allowsHitTesting(false).accessibilityHidden(true)
+            }.accessibilityHidden(true)
     }
     private struct ImageRequest: Equatable { var directory: URL; var revision: Int }
 }

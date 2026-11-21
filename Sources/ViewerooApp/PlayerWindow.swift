@@ -21,10 +21,14 @@ final class PlayerWindow: NSObject, ObservableObject {
         if let toolbarWasVisible { self.window?.toolbar?.isVisible = toolbarWasVisible }
         self.window = window
         toolbarWasVisible = window?.toolbar?.isVisible
-        window?.toolbar?.isVisible = false
         transitioning = false
-        guard let window else { return }
+        guard let window else {
+            fullScreen = false
+            enteredFromPlayer = false
+            return
+        }
         fullScreen = window.styleMask.contains(.fullScreen)
+        if fullScreen { window.toolbar?.isVisible = false }
         // The library and player share a window. Escape first leaves fullscreen even
         // when the transport is hidden and focus is still in the library view.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -45,6 +49,7 @@ final class PlayerWindow: NSObject, ObservableObject {
     @objc private func willEnter() {
         transitioning = true
         fullScreen = true
+        window?.toolbar?.isVisible = false
     }
 
     @objc private func willExit() {
@@ -55,6 +60,7 @@ final class PlayerWindow: NSObject, ObservableObject {
     @objc private func didChangeFullScreen() {
         transitioning = false
         fullScreen = window?.styleMask.contains(.fullScreen) == true
+        if !fullScreen, let toolbarWasVisible { window?.toolbar?.isVisible = toolbarWasVisible }
     }
 
     func toggle() {

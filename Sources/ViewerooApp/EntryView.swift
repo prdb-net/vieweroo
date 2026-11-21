@@ -4,6 +4,7 @@ import ViewerooCore
 struct EntryView: View {
     @Bindable var model: LibraryModel
     let entry: CatalogEntry
+    @ObservedObject var window: PlayerWindow
     @State private var tags = ""
     @State private var studio = ""
     @State private var stats: PlaybackStats?
@@ -14,33 +15,35 @@ struct EntryView: View {
     var body: some View {
         GeometryReader { layout in
             let sideBySide = layout.size.width >= 760 && model.hasAlternatives(to: entry)
-            ScrollView {
-                HStack(alignment: .top, spacing: VSpace.section) {
-                    VStack(alignment: .leading, spacing: VSpace.section) {
-                        overview
-                        performers
-                        if !sideBySide {
-                            RelatedVideosView(model: model, current: entry, style: .shelf, onSelect: model.playSuggested)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    HStack(alignment: .top, spacing: VSpace.section) {
+                        VStack(alignment: .leading, spacing: VSpace.section) {
+                            overview.id(entry.id)
+                            performers
+                            if !sideBySide {
+                                RelatedVideosView(model: model, current: entry, style: .shelf, onSelect: model.playSuggested)
+                            }
+                            historySection { scroll.scrollTo(entry.id, anchor: .top) }
+                            Divider()
+                            DisclosureGroup("Library Details", isExpanded: $model.detailsExpanded) {
+                                libraryDetails.padding(.top, VSpace.control)
+                            }
+                            if !available {
+                                Button("Remove Library Entry…", role: .destructive) { deleting = true }
+                            }
                         }
-                        historySection
-                        Divider()
-                        DisclosureGroup("Library Details", isExpanded: $model.detailsExpanded) {
-                            libraryDetails.padding(.top, VSpace.control)
-                        }
-                        if !available {
-                            Button("Remove Library Entry…", role: .destructive) { deleting = true }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if sideBySide {
+                            RelatedVideosView(model: model, current: entry, onSelect: model.playSuggested)
+                                .frame(width: min(304, layout.size.width * 0.31), alignment: .leading)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    if sideBySide {
-                        RelatedVideosView(model: model, current: entry, onSelect: model.playSuggested)
-                            .frame(width: min(304, layout.size.width * 0.31), alignment: .leading)
-                    }
+                    .padding(VSpace.section)
+                    .frame(maxWidth: sideBySide ? 1320 : 780, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .background(BrowseScrollAnchor(position: model.visit.scroll))
                 }
-                .padding(VSpace.section)
-                .frame(maxWidth: sideBySide ? 1320 : 780, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .background(BrowseScrollAnchor(position: model.visit.scroll))
             }
         }
         .onAppear { tags = entry.tags.joined(separator: ", "); studio = entry.manualStudio ?? "" }
@@ -56,7 +59,26 @@ struct EntryView: View {
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: VSpace.group) {
-            playPoster
+            VStack(alignment: .leading, spacing: VSpace.unit) {
+                Text(entry.title)
+                    .font(.title.bold()).textSelection(.enabled)
+                    .accessibilityAddTraits(.isHeader)
+                let studioName = entry.studio ?? "Unknown Studio"
+                Button { model.browse(.studio(studioName), from: .studio(studioName)) } label: {
+                    HStack(spacing: VSpace.unit) {
+                        Text(studioName)
+                        Image(systemName: "chevron.forward").font(.caption2)
+                    }
+                }
+                .buttonStyle(.link)
+                .help("Browse videos from \(studioName)")
+            }
+            if model.playing {
+                PlayerScreen(model: model, window: window)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                playPoster
+            }
             if !available || entry.playbackFailure != nil {
                 Label(entry.availability == .offline ? "Reconnect the source drive to play this video." :
                         entry.availability == .missing ? "This file is missing from its source folder." :
@@ -71,27 +93,10 @@ struct EntryView: View {
             Poster(model: model, entry: entry)
                 .contentShape(Rectangle())
                 .onTapGesture { if available { model.play(entry) } }
-            VStack(alignment: .leading, spacing: VSpace.control) {
-                VStack(alignment: .leading, spacing: VSpace.unit) {
-                    Text(entry.title)
-                        .font(.title.bold()).textSelection(.enabled)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(entry.studio ?? "Unknown Studio").font(.headline)
-                }
-                if available { playbackActions }
-            }
-            .foregroundStyle(.white)
-            .padding(VSpace.group)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.clear, .black.opacity(0.62)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 2 * VSpace.page)
-                    LinearGradient(colors: [.black.opacity(0.62), .black.opacity(0.86)],
-                                   startPoint: .top, endPoint: .bottom)
-                }
-                .padding(.top, -2 * VSpace.page)
-                .allowsHitTesting(false)
+            if available {
+                playbackActions
+                    .foregroundStyle(.white)
+                    .padding(VSpace.group)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -116,7 +121,7 @@ struct EntryView: View {
                     Label("Play from Beginning", systemImage: "backward.end.fill")
                         .labelStyle(.iconOnly)
                         .frame(width: VSpace.page, height: VSpace.page)
-                        .background(.white.opacity(0.2), in: Circle())
+                        .background(.black.opacity(0.76), in: Circle())
                 }
                 .help("Play from Beginning")
             }
@@ -205,7 +210,7 @@ struct EntryView: View {
         }
     }
 
-    private var historySection: some View {
+    private func historySection(revealVideo: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: VSpace.tight) {
             Text("Viewing History").font(.title3.bold()).accessibilityAddTraits(.isHeader)
             Text(entry.viewingSummary).foregroundStyle(.secondary)
@@ -214,6 +219,7 @@ struct EntryView: View {
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, item in
                         Button {
                             model.play(entry, at: item.start)
+                            revealVideo()
                         } label: {
                             Label("\(durationLabel(item.start)) – \(durationLabel(item.end))  ·  \(item.passes)×", systemImage: "play.circle")
                         }.disabled(!available)

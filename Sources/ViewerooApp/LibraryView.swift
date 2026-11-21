@@ -13,21 +13,26 @@ extension FocusedValues {
 
 struct LibraryView: View {
     @Bindable var model: LibraryModel
+    @StateObject private var playerWindow = PlayerWindow()
     @State private var sheet: EditSheet?
     @State private var columns = NavigationSplitViewVisibility.automatic
     @State private var searchPresented = false
 
     var body: some View {
         ZStack {
-            navigation
-                .opacity(model.playing ? 0 : 1)
-                .disabled(model.playing)
-                .allowsHitTesting(!model.playing)
-                .accessibilityHidden(model.playing)
-
+            if model.playing && playerWindow.fullScreen {
+                PlayerScreen(model: model, window: playerWindow)
+                    .ignoresSafeArea()
+            } else {
+                navigation
+            }
+        }
+        .background {
             if model.playing {
-                PlayerScreen(model: model)
-                    .background(.background)
+                PlayerWindowReader(presentation: playerWindow)
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .focusedSceneValue(\.showAppSettings, sheet == nil ? Binding(get: { false }, set: { show in
@@ -84,7 +89,7 @@ struct LibraryView: View {
 
                     Group {
                         if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
-                            EntryView(model: model, entry: entry)
+                            EntryView(model: model, entry: entry, window: playerWindow)
                         } else if model.shelf == .playlists && model.query.isEmpty {
                             PlaylistsView(model: model) { sheet = .playlist }
                         } else if model.shelf == .settings && model.query.isEmpty,

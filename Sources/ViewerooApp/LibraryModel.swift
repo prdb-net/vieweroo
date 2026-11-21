@@ -246,7 +246,8 @@ final class LibraryModel {
     }
 
     private func navigate(to next: BrowseVisit, from tile: BrowseTile? = nil) {
-        guard phase == .ready, libraryID != nil, !playing else { return }
+        guard phase == .ready, libraryID != nil else { return }
+        if playing { endPlayback() }
         visit.scroll.save()
         visit.castScroll.save()
         if let tile { visit.selectedTile = tile }
@@ -266,7 +267,7 @@ final class LibraryModel {
     }
 
     func search(_ term: String) {
-        guard query != term, phase == .ready, libraryID != nil, !playing else { return }
+        guard query != term, phase == .ready, libraryID != nil else { return }
         if detailID != nil || query.isEmpty {
             navigate(to: BrowseVisit(shelf: shelf, query: term))
         } else if term.isEmpty, let previous = backHistory.last, previous.shelf == shelf,
@@ -279,7 +280,8 @@ final class LibraryModel {
     }
 
     func goBack() {
-        guard phase == .ready, !playing, let previous = backHistory.popLast() else { return }
+        guard phase == .ready, let previous = backHistory.popLast() else { return }
+        if playing { endPlayback() }
         visit = previous
         loadPlaylist(recordOpening: true)
     }
@@ -317,7 +319,10 @@ final class LibraryModel {
                         return true
                     }
                     backHistory.removeAll { !valid($0) }
-                    if !valid(visit) { visit = backHistory.popLast() ?? BrowseVisit() }
+                    if !valid(visit) {
+                        if playing { endPlayback() }
+                        visit = backHistory.popLast() ?? BrowseVisit()
+                    }
                     loadPlaylist()
                 } catch {
                     guard session == stamp, !Task.isCancelled else { return }
@@ -536,8 +541,15 @@ final class LibraryModel {
                 notify("This video is no longer available to play.", kind: .error)
                 return
             }
+            if detailID == nil {
+                openDetail(entry.id)
+            } else if detailID != entry.id {
+                // Switching from More to Watch keeps Back anchored to the original collection.
+                visit = BrowseVisit(shelf: shelf, query: query, detailID: entry.id)
+            }
             playback.open(entry: entry, startAt: position ?? entry.resume, previewDirectory: previewDirectory(entry), catalog: catalog)
             playing = true
+            reload()
         } catch { message = error.localizedDescription }
     }
 

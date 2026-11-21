@@ -49,7 +49,6 @@ private struct RelatedVideoButton: View {
     let suggestion: RelatedVideo
     let style: RelatedVideosView.Style
     let select: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: select) {
@@ -70,7 +69,6 @@ private struct RelatedVideoButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
         .help("Play \(suggestion.entry.title)")
         .accessibilityLabel(Text("Play \(suggestion.entry.title)"))
         .accessibilityValue(Text(suggestion.subtitle ?? ""))
@@ -78,15 +76,6 @@ private struct RelatedVideoButton: View {
 
     private var poster: some View {
         Poster(model: model, entry: suggestion.entry)
-            .overlay {
-                if hovering {
-                    Image(systemName: "play.fill")
-                        .font(.body.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(8)
-                        .background(.black.opacity(0.75), in: Circle())
-                }
-            }
     }
 
     private var caption: some View {

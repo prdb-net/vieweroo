@@ -263,11 +263,13 @@ private final class WorkflowSecrets: SecretStore {
     try await until { model.entries.count == 2 && !model.scanBusy }
     let first = model.entries[0], second = model.entries[1]
     model.browse(.all)
-    model.openDetail(first.id)
+    let origin = model.visit.id
     model.play(first, at: 0)
+    #expect(model.detailID == first.id)
     try await until(timeout: .seconds(20)) { model.playback.position > 10.5 }
     model.playSuggested(second)
     try await until { model.playback.title == second.title && model.playback.position > 0.15 }
+    #expect(model.detailID == second.id)
     let saved = try #require(try model.catalog?.entry(first.id)?.resume)
     #expect(saved > 10.5)
     #expect(first.resume == 0)
@@ -276,8 +278,9 @@ private final class WorkflowSecrets: SecretStore {
     model.playSuggested(first)
     try await until { model.playback.playing && model.playback.title == first.title }
     #expect(model.playback.position >= saved - 0.05)
-    model.endPlayback()
-    #expect(model.shelf == .all && model.detailID == first.id)
+    model.goBack()
+    #expect(!model.playing && model.playback.player.currentItem == nil)
+    #expect(model.visit.id == origin && model.visit.selectedTile == .video(first.id))
     let watched = try #require(try model.catalog?.entry(first.id))
     #expect(watched.playCount == 1 && watched.duration == 20)
     #expect(abs(watched.weightedPlays - watched.watchTime / 20) < 0.001)
