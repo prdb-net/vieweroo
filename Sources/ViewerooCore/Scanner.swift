@@ -102,7 +102,7 @@ public struct CatalogScanner: Sendable {
             try db.execute(sql: """
                 INSERT INTO entry(libraryID,path,fileSize,modified) VALUES (?,?,?,?)
                 ON CONFLICT(libraryID,path) DO UPDATE SET
-                    fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL,
+                    fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL, duration = NULL,
                     matchData = CASE WHEN confirmed THEN matchData END, candidateData = NULL,
                     detectedStudio = NULL, needsLookup = NOT confirmed
                 WHERE entry.fileSize <> excluded.fileSize OR entry.modified <> excluded.modified

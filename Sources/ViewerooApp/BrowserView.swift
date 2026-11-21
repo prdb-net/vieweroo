@@ -44,7 +44,10 @@ struct BrowserView: View {
         switch model.shelf {
         case .favorites: return model.entries.filter(\.favorite)
         case .liked: return model.entries.filter { $0.rating > 0 }
-        case .frequent: return model.entries.filter { $0.playCount > 0 }.sorted { ($0.playCount, $0.watchTime) > ($1.playCount, $1.watchTime) }
+        case .frequent:
+            return model.entries.filter { $0.playCount > 0 }.sorted {
+                ($0.weightedPlays, $0.watchTime) > ($1.weightedPlays, $1.watchTime)
+            }
         case let .studio(name): return model.entries.filter { ($0.studio ?? "Unknown Studio") == name }
         case let .performer(person): return model.entries.filter { $0.match?.performers.contains { $0.id == person.id } == true }
         case .playlist:
@@ -109,7 +112,12 @@ struct BrowserView: View {
                                     poster(entry, tile: .video(entry.id))
                                     VStack(alignment: .leading, spacing: VSpace.unit) {
                                         Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                                        Text(subtitle(entry)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                        if model.shelf == .frequent, !searching {
+                                            Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
+                                        }
+                                        if let subtitle = subtitle(entry) {
+                                            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
@@ -140,11 +148,11 @@ struct BrowserView: View {
             }
     }
 
-    private func subtitle(_ entry: CatalogEntry) -> String {
+    private func subtitle(_ entry: CatalogEntry) -> String? {
         if entry.availability == .offline { return "Source offline" }
         if entry.availability == .missing { return "File missing" }
         if entry.playbackFailure != nil { return "Playback unavailable" }
-        if model.shelf == .frequent { return entry.playCount == 1 ? "1 play" : "\(entry.playCount) plays" }
+        if model.shelf == .frequent, !searching { return nil }
         return entry.studio ?? "Unknown Studio"
     }
     private func move(_ entry: CatalogEntry, by delta: Int, playlist id: Int64) {

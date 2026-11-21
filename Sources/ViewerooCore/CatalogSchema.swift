@@ -95,6 +95,13 @@ extension Catalog {
                     OR (resume > 0 AND NOT EXISTS (SELECT 1 FROM session s WHERE s.entryID = entry.id));
                 """)
         }
+        migrator.registerMigration("weighted-plays-v5") { db in
+            try db.execute(sql: """
+                ALTER TABLE entry ADD COLUMN duration REAL CHECK (duration > 0);
+                CREATE INDEX interval_by_session_range ON interval(sessionID, start, end);
+                DROP INDEX interval_by_session;
+                """)
+        }
         return migrator
     }
 }

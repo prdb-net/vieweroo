@@ -20,6 +20,26 @@ extension Catalog {
          FROM session s WHERE watchTime >= \(PlaybackHistory.minimumWatchTime))
         """
 
+    // In start order, only the portion beyond all previous ends adds new coverage.
+    // Total watch time includes every pass, even through a fully covered interval.
+    static let weightedPlaysQuery = """
+        (SELECT ROUND(TOTAL(
+            COALESCE(0.8 * MIN(1.0, coverage / e.duration), 0.0)
+            + 0.2 * MIN(1.0, watched / MIN(COALESCE(e.duration, 1800.0), 1800.0))
+        ), 12) FROM (
+            SELECT sessionID, TOTAL(end - start) AS watched,
+                TOTAL(MAX(0.0, MIN(end, COALESCE(e.duration, end)) - MAX(start, COALESCE(previousEnd, 0.0)))) AS coverage
+            FROM (
+                SELECT i.*, MAX(i.end) OVER (
+                    PARTITION BY s.id ORDER BY i.start, i.end, i.rowid
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                ) AS previousEnd
+                FROM session s JOIN interval i ON i.sessionID = s.id WHERE s.entryID = e.id
+            )
+            GROUP BY sessionID HAVING watched >= \(PlaybackHistory.minimumWatchTime)
+        ))
+        """
+
     public func beginSession(entryID: Int64) throws -> Int64 {
         try database.write { db in
             try db.execute(sql: "INSERT INTO session(entryID) VALUES (?)", arguments: [entryID])

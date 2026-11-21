@@ -208,7 +208,7 @@ struct EntryView: View {
     private var historySection: some View {
         VStack(alignment: .leading, spacing: VSpace.tight) {
             Text("Viewing History").font(.title3.bold()).accessibilityAddTraits(.isHeader)
-            Text("\(entry.playCount) \(entry.playCount == 1 ? "play" : "plays") · \(durationLabel(entry.watchTime)) watched").foregroundStyle(.secondary)
+            Text(entry.viewingSummary).foregroundStyle(.secondary)
             if let segments = stats?.segments.prefix(5), !segments.isEmpty {
                 VStack(alignment: .leading) {
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, item in
@@ -233,6 +233,15 @@ struct EntryView: View {
                 try $0.setRating(entryID: entry.id, value: updated)
             }
         }
+    }
+}
+
+extension CatalogEntry {
+    var viewingSummary: String {
+        let time = Duration.seconds(watchTime.rounded(.down)).formatted(.units(
+            width: .narrow, maximumUnitCount: 2
+        ))
+        return "\(playCount) \(playCount == 1 ? "play" : "plays") · \(time) watched"
     }
 }
 

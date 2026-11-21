@@ -252,12 +252,15 @@ final class CatalogTests: XCTestCase {
         try f.catalog.setHash(entryID: old.id, hash: "sample", fileSize: old.fileSize, modified: old.modified)
         try f.scan()
         XCTAssertEqual(try f.catalog.entry(old.id)?.hash, "sample")
+        try f.catalog.setDuration(60, for: old)
         try f.add("Workshop.mp4", data: Data(repeating: 2, count: 8))
         try f.scan()
         try f.catalog.applyMatch(entryID: old.id, result: .init(autoTitle: .init(id: "stale", title: "Stale")),
                                  fileSize: old.fileSize, modified: old.modified)
         try f.catalog.setPlaybackFailure(entryID: old.id, message: "Stale failure", fileSize: old.fileSize, modified: old.modified)
+        try f.catalog.setDuration(120, for: old)
         let new = try XCTUnwrap(f.catalog.entry(old.id))
+        XCTAssertNil(new.duration)
         XCTAssertNil(new.hash)
         XCTAssertNil(new.match)
         XCTAssertNil(new.playbackFailure)
@@ -278,6 +281,41 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(stats.playCount, 1)
         XCTAssertEqual(stats.watchTime, 180)
         XCTAssertEqual(stats.segments, [.init(start: 600, end: 660, passes: 2), .init(start: 0, end: 60, passes: 1)])
+    }
+
+    func testWeightedPlaysAccumulateCoverageAndWatchTimeWithinEachQualifyingSession() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        try f.add("Example.mp4")
+        try f.scan()
+        let entry = try XCTUnwrap(f.catalog.entries(libraryID: f.library.id).first)
+        func watch(_ intervals: [(Double, Double)]) throws {
+            let session = try f.catalog.beginSession(entryID: entry.id)
+            for (start, end) in intervals {
+                try f.catalog.recordInterval(sessionID: session, start: start, end: end)
+            }
+        }
+        func score() throws -> Double { try XCTUnwrap(f.catalog.entry(entry.id)).weightedPlays }
+        for _ in 0..<10 { try watch([(100, 110)]) }
+        try watch([(0, 9.99)])
+        XCTAssertEqual(try score(), 0.2 * 100 / 1800, accuracy: 1e-10)
+        try f.catalog.setDuration(1800, for: entry)
+        XCTAssertEqual(try score(), 100.0 / 1800, accuracy: 1e-10)
+
+        try f.catalog.setDuration(3600, for: entry)
+        let glances = try score()
+        for _ in 0..<10 { try watch([(0, 1800)]) }
+        XCTAssertEqual(try score() - glances, 6, accuracy: 1e-10)
+
+        // Reordered, nested and duplicate intervals cover 600 seconds and play for 1200.
+        let previous = try score()
+        try watch([(1000, 1200), (0, 400), (50, 250), (0, 400)])
+        XCTAssertEqual(try score() - previous, 0.8 * 600 / 3600 + 0.2 * 1200 / 1800, accuracy: 1e-10)
+
+        try f.catalog.setDuration(600, for: entry)
+        let beforeFullPlay = try score()
+        try watch([(0, 600), (0, 600)])
+        XCTAssertEqual(try score() - beforeFullPlay, 1, accuracy: 1e-10)
     }
 
     func testShortSessionsStayOutOfHistoryAndPreserveResume() throws {

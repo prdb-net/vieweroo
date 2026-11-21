@@ -20,6 +20,8 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let resume: Double
     public let playCount: Int
     public let watchTime: Double
+    public let duration: Double?
+    public let weightedPlays: Double
     public let availability: CatalogAvailability
     public let playbackFailure: String?
 
@@ -44,6 +46,8 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         needsLookup = row["needsLookup"]
         playCount = row["playCount"]
         watchTime = row["watchTime"]
+        duration = row["duration"]
+        weightedPlays = row["weightedPlays"]
         availability = CatalogAvailability(rawValue: row["availability"]) ?? .missing
         playbackFailure = row["playbackFailure"]
         let decoder = JSONDecoder()
@@ -71,6 +75,7 @@ extension Catalog {
             (SELECT COUNT(*) FROM \(visibleSessions) s WHERE s.entryID = e.id) AS playCount,
             (SELECT COALESCE(SUM(s.watchTime),0) FROM \(visibleSessions) s
                 WHERE s.entryID = e.id) AS watchTime,
+            \(weightedPlaysQuery) AS weightedPlays,
             CASE WHEN EXISTS(SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
                 WHERE m.entryID = e.id AND m.present AND s.online) THEN 'available'
             WHEN EXISTS(SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
@@ -104,6 +109,15 @@ extension Catalog {
                                 sources: libraryID.map { try Self.fetchSources(db, libraryID: $0) } ?? [],
                                 entries: libraryID.map { try Self.fetchEntries(db, libraryID: $0) } ?? [],
                                 playlists: libraryID.map { try Self.fetchPlaylists(db, libraryID: $0) } ?? [])
+        }
+    }
+
+    public func setDuration(_ duration: Double, for entry: CatalogEntry) throws {
+        guard duration.isFinite, duration > 0 else { throw CatalogError.invalidValue }
+        try database.write { db in
+            try db.execute(sql: """
+                UPDATE entry SET duration = ? WHERE id = ? AND fileSize = ? AND modified = ?
+                """, arguments: [duration, entry.id, entry.fileSize, entry.modified])
         }
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import Observation
@@ -388,6 +389,22 @@ final class LibraryModel {
         previewToken = token
         let pending = entries.filter { $0.availability == .available }
         previewTask = Task(priority: .utility) {
+            // Older catalogs may already have preview images but lack movie durations.
+            var backfilled = false
+            for entry in pending where entry.playCount > 0 && entry.duration == nil {
+                guard previewToken == token else { return }
+                if let duration = try? await AVURLAsset(url: entry.url).load(.duration).seconds,
+                   duration.isFinite, duration > 0 {
+                    guard previewToken == token else { return }
+                    do {
+                        try catalog.setDuration(duration, for: entry)
+                        backfilled = true
+                    } catch { /* Retry when the library is next opened or refreshed. */ }
+                }
+            }
+            guard previewToken == token else { return }
+            if backfilled { reload() }
+
             var failuresChanged = false
             for entry in pending {
                 guard !Task.isCancelled else { return }

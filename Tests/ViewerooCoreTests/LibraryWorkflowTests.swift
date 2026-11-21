@@ -181,7 +181,9 @@ private final class WorkflowSecrets: SecretStore {
     #expect(model.playback.position >= saved - 0.05)
     model.endPlayback()
     #expect(model.shelf == .all && model.detailID == first.id)
-    #expect(try model.catalog?.entry(first.id)?.playCount == 1)
+    let watched = try #require(try model.catalog?.entry(first.id))
+    #expect(watched.playCount == 1 && watched.duration == 20)
+    #expect(abs(watched.weightedPlays - watched.watchTime / 20) < 0.001)
     #expect(try model.catalog?.entry(second.id)?.playCount == 0)
     try model.access.setPIN(current: nil, new: "0000")
     model.pinEnabled = true

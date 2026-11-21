@@ -62,6 +62,10 @@ Record a session once actual playback begins. Only sessions with at least ten se
 
 Store the portions of the video timeline actually played in each session. Pausing closes the current interval. Seeking closes it at the departure time, and the next interval starts where playback resumes. Replaying a section, including through a loop, records another pass. Preserve repeated passes so both viewing duration and frequently replayed sections can be derived.
 
+Rank Frequently Watched by the sum of weighted plays. For each qualifying session, count 80% of the fraction of the movie timeline covered and 20% of watch time divided by the shorter of the movie duration and 30 minutes. Cap each fraction at one. Merge overlapping intervals within a session for coverage and include repeated passes in watch time. Break ties by total watch time. Show the raw play count and watch time on the tile.
+
+Persist the local movie duration when playback begins. Backfill available movies with qualifying history from older catalogs in the background. Until the duration is known, count only the time component using the 30-minute threshold.
+
 ### 7. Limit PIN protection to the app interface and playback
 
 When PIN protection is enabled, require the PIN on launch and after manual locking. Locking stops local and AirPlay playback and conceals library content and previews. The PIN is an app access control. The catalog, viewing history, and image cache use ordinary local storage without app-level encryption.

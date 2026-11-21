@@ -45,10 +45,14 @@ final class PlayerController: ObservableObject {
 
     func open(entry: CatalogEntry, startAt: Double, previewDirectory: URL, catalog: Catalog) {
         let id = entry.id
-        open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory,
-             history: PlaybackHistory(begin: { try catalog.beginSession(entryID: id) },
-                                      append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
-                                      resume: { try catalog.setResume(entryID: id, seconds: $0) }))
+        let history = PlaybackHistory(begin: { [weak self] in
+            if entry.duration == nil, let duration = self?.duration, duration > 0 {
+                try catalog.setDuration(duration, for: entry)
+            }
+            return try catalog.beginSession(entryID: id)
+        }, append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
+           resume: { try catalog.setResume(entryID: id, seconds: $0) })
+        open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory, history: history)
         entryID = entry.id
         reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
     }
