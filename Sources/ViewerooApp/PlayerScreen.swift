@@ -235,7 +235,8 @@ private struct PlayerTransport: View {
                 }
                 .keyboardShortcut("m", modifiers: [])
                 .help(controller.muted ? "Unmute (M)" : "Mute (M)")
-                Slider(value: Binding(get: { controller.muted ? 0 : controller.volume }, set: controller.setVolume),
+                Slider(value: Binding(get: { controller.muted ? 0 : Double(controller.volume) },
+                                      set: { controller.setVolume(Float($0)) }),
                        in: 0...1, onEditingChanged: { adjustingVolume = $0 })
                     .frame(width: 72)
                     .accessibilityLabel("Volume")
