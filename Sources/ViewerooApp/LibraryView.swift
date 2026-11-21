@@ -99,7 +99,8 @@ struct LibraryView: View {
             }
         }
         .overlay(alignment: .top) { Divider().allowsHitTesting(false).accessibilityHidden(true) }
-        .searchable(text: Binding(get: { model.query }, set: model.search), isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
+        .searchable(text: Binding(get: { model.query }, set: { model.search($0) }),
+                    isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
         .focusedSceneValue(\.librarySearch, Binding(get: { searchPresented }, set: { present in
             if present { columns = .all }
             searchPresented = present
