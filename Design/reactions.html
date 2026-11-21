@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vieweroo · Reaction preview</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: var(--foreground, light-dark(#202124, #f4f4f5));
+    --quiet: var(--muted-foreground, light-dark(#585a62, #b8b9c2));
+    --surface: var(--card, light-dark(#f5f5f7, #262629));
+    --control: var(--secondary, light-dark(#fff, #363639));
+    --edge: var(--border, light-dark(#d3d3d9, #525257));
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; color: var(--ink); }
+  figure { margin: 0; padding: 16px; border-radius: var(--radius, 12px); background: var(--surface); }
+  figcaption { display: flex; flex-direction: column; gap: 1px; }
+  strong { font-size: 22px; letter-spacing: -.025em; }
+  small, .motion-option { font-size: 13px; color: var(--quiet); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 24px 0 20px; }
+  button {
+    display: inline-flex; gap: 7px; align-items: center; justify-content: center;
+    position: relative; min-height: 34px; padding: 4px 12px; border: 1px solid var(--edge);
+    border-radius: 7px; background: var(--control); color: var(--ink);
+    font: inherit; font-weight: 550; cursor: pointer; touch-action: manipulation;
+  }
+  button:hover { border-color: color-mix(in srgb, var(--ink) 40%, var(--edge)); }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--ring, #568bf2); outline-offset: 3px; }
+  button[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--tint) 60%, var(--edge));
+    background: color-mix(in srgb, var(--tint) 12%, var(--control));
+  }
+  #favorite { --tint: light-dark(#b02560, #ff83b0); }
+  #like { --tint: light-dark(#007663, #66d9b3); }
+  #dislike { --tint: light-dark(#6746b1, #c4a2ff); }
+  .anchor { position: relative; display: grid; place-items: center; width: 17px; height: 17px; pointer-events: none; }
+  .glyph { width: 17px; height: 17px; overflow: visible; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+  [aria-pressed="true"] .glyph { fill: var(--tint); stroke: var(--tint); }
+  .effect { position: absolute; top: 50%; left: 50%; width: 0; height: 0; color: var(--tint); pointer-events: none; }
+  .heart, .ray, .impact { position: absolute; opacity: 0; }
+  .heart { left: -5px; top: -5px; width: 10px; height: 10px; fill: currentColor; }
+  .heart:nth-child(1) { --x: -15px; --y: -26px; --turn: -24deg; --size: .78; }
+  .heart:nth-child(2) { --x: 0px; --y: -33px; --turn: 9deg; --size: 1; }
+  .heart:nth-child(3) { --x: 14px; --y: -22px; --turn: 27deg; --size: .62; }
+  .ray { left: -1px; top: -3px; width: 2px; height: 6px; border-radius: 2px; background: currentColor; }
+  .impact { left: -5px; top: 14px; width: 10px; height: 2px; border-radius: 2px; background: currentColor; }
+  .motion-option { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  input { margin: 0; accent-color: var(--primary, #5775aa); }
+  .symbols { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    #favorite.reacting .glyph { animation: beat 420ms ease-out; }
+    #favorite.reacting .heart { animation: rise 560ms cubic-bezier(.18,.7,.25,1) both; }
+    #like.reacting .glyph { animation: lift 360ms ease-out; transform-origin: 35% 80%; }
+    #like.reacting .ray { animation: flash 390ms 35ms ease-out both; }
+    #dislike.reacting .glyph { animation: tap 310ms ease-out; }
+    #dislike.reacting .impact { animation: land 240ms 85ms ease-out both; }
+  }
+  @keyframes beat {
+    0% { transform: scale(.88); } 30% { transform: scale(1.27); } 65% { transform: scale(.98); } to { transform: scale(1); }
+  }
+  @keyframes rise {
+    0% { opacity: 0; transform: translateY(-4px) scale(.3); }
+    18% { opacity: 1; } 65% { opacity: .95; }
+    to { opacity: 0; transform: translate(var(--x), var(--y)) rotate(var(--turn)) scale(var(--size)); }
+  }
+  @keyframes lift {
+    0% { transform: scale(.92) rotate(5deg); } 35% { transform: translateY(-3px) scale(1.23) rotate(-14deg); }
+    72% { transform: rotate(3deg); } to { transform: none; }
+  }
+  @keyframes flash {
+    from { opacity: 0; transform: rotate(var(--angle)) translateY(-6px) scaleY(.25); }
+    32% { opacity: 1; } to { opacity: 0; transform: rotate(var(--angle)) translateY(-22px) scaleY(.6); }
+  }
+  @keyframes tap {
+    0% { transform: translateY(-2px); } 34% { transform: translateY(4px) scale(1.09,.92); }
+    70% { transform: translateY(-1px); } to { transform: none; }
+  }
+  @keyframes land {
+    from { transform: scaleX(.3); } 22% { opacity: .9; } to { opacity: 0; transform: scaleX(1.9); }
+  }
+</style>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <path id="heart" d="M12 20.6 3.8 12.8C-2 6.7 6.1.2 11 5.7l1 1.1 1-1.1c4.9-5.5 13 1 7.2 7.1Z"/>
+      <path id="thumb" d="M3 10h3v11H3z M9 10c2.2-2.7 4-5.2 4.1-7.4 0-1 1.2-1.3 2-.6 1.6 1.5 1.1 4.4.4 6.5h4.3c1.4 0 2.2 1.1 1.9 2.4l-1.8 8.3c-.2 1.1-1 1.8-2.2 1.8H9z"/>
+    </defs>
+  </svg>
+  <figure aria-label="Video detail reaction preview">
+    <figcaption><strong>Night Receiver</strong><small>Aster Relay</small></figcaption>
+    <div class="controls" role="group" aria-label="Video reactions">
+      <button id="favorite" type="button" aria-pressed="false">
+        <span class="anchor" aria-hidden="true">
+          <svg class="glyph" viewBox="0 0 24 24"><use href="#heart"/></svg>
+          <span class="effect">
+            <svg class="heart" viewBox="0 0 24 24"><use href="#heart"/></svg>
+            <svg class="heart" viewBox="0 0 24 24"><use href="#heart"/></svg>
+            <svg class="heart" viewBox="0 0 24 24"><use href="#heart"/></svg>
+          </span>
+        </span>Favorite
+      </button>
+      <button id="like" type="button" aria-pressed="false">
+        <span class="anchor" aria-hidden="true">
+          <svg class="glyph" viewBox="0 0 24 24"><use href="#thumb"/></svg>
+          <span class="effect">
+            <i class="ray" style="--angle:-75deg"></i><i class="ray" style="--angle:-35deg"></i>
+            <i class="ray" style="--angle:8deg"></i><i class="ray" style="--angle:52deg"></i>
+          </span>
+        </span>Like
+      </button>
+      <button id="dislike" type="button" aria-pressed="false">
+        <span class="anchor" aria-hidden="true">
+          <svg class="glyph" viewBox="0 0 24 24"><use href="#thumb" transform="rotate(180 12 12)"/></svg>
+          <span class="effect"><i class="impact"></i></span>
+        </span>Dislike
+      </button>
+    </div>
+    <label class="motion-option"><input type="checkbox" id="reduced"> Preview reduced motion</label>
+  </figure>
+  <script>
+    const controls = document.querySelector('.controls');
+    const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const reduced = document.getElementById('reduced');
+    function stopEffects() {
+      controls.querySelectorAll('.reacting').forEach(button => button.classList.remove('reacting'));
+    }
+    controls.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const selected = button.getAttribute('aria-pressed') === 'true';
+      if (button.id === 'like' || button.id === 'dislike') {
+        const opposite = document.getElementById(button.id === 'like' ? 'dislike' : 'like');
+        opposite.classList.remove('reacting');
+        opposite.setAttribute('aria-pressed', 'false');
+      }
+      button.setAttribute('aria-pressed', String(!selected));
+      button.classList.toggle('reacting', !selected && !motionPreference.matches && !reduced.checked);
+    });
+    reduced.addEventListener('change', stopEffects);
+    motionPreference.addEventListener('change', stopEffects);
+  </script>
+</body>
+</html>

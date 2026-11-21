@@ -49,6 +49,10 @@ Offer full screen in the current window with a visible button, F and a double-cl
 
 Inset notices 24 pt from the window edges and raise them above the player controls. Pair a short ease-out entrance with a small icon response and a thin countdown line. A newly saved favorite gets a pink heart and a brief sparkle. Use a warning symbol for errors. A notice passes clicks through, preserves focus and announces its text to assistive technology. Reduce Motion removes travel, sparkle and countdown movement. Reduce Transparency uses a solid system surface. Locking or changing libraries clears the current notice.
 
+The [interactive reaction proposal](Design/reactions.html) explores feedback on the detail buttons. Try switching between Like and Dislike, saving a Favorite independently and turning on reduced motion. The proposed effects play once when a selection is saved. Clearing a selection returns its symbol to an outline.
+
+Two other candidates are playlist saves and A–B loops. A checkmark on **Add to Playlist** could confirm insertion while the notice names the chosen playlist. On the timeline, setting A could place a start marker. Setting B could briefly brighten the selected range and leave it visible while the loop is active.
+
 ## Review on a Mac
 
 Exercise the 790 × 535 pt minimum and the 1080 × 720 pt default, plus native full screen. Check a long title, a library with one playable item, unavailable media and a repeated save while a notice is visible. Use synthetic videos to verify that selecting another title, leaving full screen and returning to the library preserve the intended playback and browsing state. Use keyboard-only navigation and check both system appearances before changing the visual hierarchy.
