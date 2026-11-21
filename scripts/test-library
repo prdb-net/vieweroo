@@ -25,9 +25,8 @@ def launch(repo):
 
 
 def build_app(repo, app):
-    build = ["swift", "build", "--configuration", "debug", "--arch", "arm64"]
-    subprocess.run(build + ["--product", "Vieweroo"], cwd=repo, check=True)
-    binaries = Path(subprocess.check_output(build + ["--show-bin-path"], cwd=repo, text=True).strip())
+    build = [repo / "scripts/build-product", "--configuration", "debug"]
+    binaries = Path(subprocess.check_output(build, cwd=repo, text=True).strip())
     with tempfile.TemporaryDirectory(dir=app.parent) as stage:
         bundle = Path(stage) / app.name
         contents = bundle / "Contents"

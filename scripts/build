@@ -2,9 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Normalize embedded file identifiers in Swift runtime diagnostics.
-args=(--configuration release --arch arm64 -Xswiftc -file-prefix-map -Xswiftc "$PWD=." -debug-info-format none)
-swift build "${args[@]}" --product Vieweroo
-bin="$(swift build "${args[@]}" --show-bin-path)"
+bin="$(./scripts/build-product --configuration release -Xswiftc -file-prefix-map -Xswiftc "$PWD=." -debug-info-format none)"
 mkdir -p dist
 stage="$(mktemp -d "$PWD/dist/.build.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT

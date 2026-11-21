@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# AppKit selects its window appearance from the SDK recorded in the executable.
+# Some SwiftPM versions otherwise record the deployment target as the SDK.
+sdk="$(xcrun --sdk macosx --show-sdk-version)"
+minimum="$(plutil -extract LSMinimumSystemVersion raw Packaging/Info.plist)"
+args=(--arch arm64 --sdk "$(xcrun --sdk macosx --show-sdk-path)"
+      -Xlinker -platform_version -Xlinker macos -Xlinker "$minimum" -Xlinker "$sdk" "$@")
+swift build "${args[@]}" --product Vieweroo >&2
+bin="$(swift build "${args[@]}" --show-bin-path)"
+
+linked_sdk="$(xcrun vtool -show-build "$bin/Vieweroo" | awk '$1 == "sdk" { print $2 }')"
+# Ignore optional trailing zero components in the version output from Xcode.
+normalize_version() { sed -E 's/(\.0)+$//' <<< "$1"; }
+if [[ "$(normalize_version "$linked_sdk")" != "$(normalize_version "$sdk")" ]]; then
+    echo "Expected macOS SDK $sdk in Vieweroo, found '$linked_sdk'." >&2
+    exit 1
+fi
+echo "$bin"
