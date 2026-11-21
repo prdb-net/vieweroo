@@ -84,7 +84,7 @@ Open the last-used library in its studio overview. Include an **Unknown Studio**
 
 ### 10. Generate timeline previews automatically after the initial scan
 
-Use an available PRDB preview image for a video tile, with a locally extracted still as the fallback. Source performer portraits from PRDB. As soon as the initial file scan completes, start generating timestamped thumbnail series for the discovered playable videos in the background. This work runs independently of PRDB lookups and of whether anyone has opened the videos. Cache the series locally for the player's timeline and keep browsing and playback available while generation runs.
+Use an available PRDB preview image for a video tile, with a locally extracted still as the fallback. Source performer portraits from PRDB. As soon as the initial file scan completes, start generating timestamped thumbnail series for the discovered playable videos in the background. This work runs independently of PRDB lookups and of whether anyone has opened the videos. Cache the series locally for the player's timeline and keep browsing and playback available while generation runs. After opening the catalog, clean up old preview directories that no library references and abandoned builds. Keep previews for offline sources and protect active generators.
 
 ### 11. Keep playback and discovery in the library window
 

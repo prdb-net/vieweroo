@@ -104,6 +104,11 @@ final class LibraryModel {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let database = try catalog ?? Catalog(path: directory.appending(path: "Catalog.sqlite").path)
         try prepareCatalog?(database)
+        if catalog == nil {
+            Task.detached(priority: .background) { [cache] in
+                try? await cache.removeOrphans(in: database)
+            }
+        }
         catalog = database
         libraries = try database.libraries()
         phase = .ready

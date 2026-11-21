@@ -1,6 +1,8 @@
 import AVFoundation
 import CryptoKit
+import Darwin
 import Foundation
+import GRDB
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -40,6 +42,56 @@ public struct PreviewCache: Sendable {
         return root.appendingPathComponent(digest, isDirectory: true)
     }
 
+    /// Consider only our own directories older than a day. Snapshot the cache before the
+    /// catalog so newly published generations cannot become deletion candidates mid-run.
+    package func removeOrphans(in catalog: Catalog) async throws {
+        let files = FileManager.default
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        let children: [URL]
+        do { children = try files.contentsOfDirectory(at: root, includingPropertiesForKeys: Array(keys)) }
+        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return }
+
+        let cutoff = Date.now.addingTimeInterval(-86_400)
+        var generations: [URL] = []
+        for child in children {
+            try Task.checkCancellation()
+            guard let info = try? child.resourceValues(forKeys: keys), info.isDirectory == true,
+                  info.isSymbolicLink == false, let modified = info.contentModificationDate, modified < cutoff else { continue }
+            let name = child.lastPathComponent
+            if name.hasPrefix(".building-"), UUID(uuidString: String(name.dropFirst(".building-".count))) != nil {
+                // A generation can take longer than a day on a stalled network drive.
+                let descriptor = open(child.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_EXLOCK | O_NONBLOCK)
+                guard descriptor >= 0 else { continue }
+                defer { close(descriptor) }
+                try files.removeItem(at: child)
+            } else if name.utf8.count == 64, name.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) {
+                generations.append(child)
+            }
+        }
+        guard !generations.isEmpty else { return }
+
+        struct MediaSignature: FetchableRecord, Decodable, Sendable {
+            let path: String
+            let fileSize: Int64
+            let modified: Double
+        }
+        let signatures = try await catalog.database.read { db in
+            try MediaSignature.fetchAll(db, sql: "SELECT DISTINCT path, fileSize, modified FROM entry")
+        }
+        var unused = Set(generations.map(\.lastPathComponent))
+        for signature in signatures {
+            try Task.checkCancellation()
+            let referenced = directory(for: URL(fileURLWithPath: signature.path, isDirectory: false),
+                                       size: signature.fileSize, modificationDate: Date(timeIntervalSince1970: signature.modified))
+            unused.remove(referenced.lastPathComponent)
+        }
+        for child in generations where unused.contains(child.lastPathComponent) {
+            try Task.checkCancellation()
+            do { try files.removeItem(at: child) }
+            catch let error as CocoaError where error.code == .fileNoSuchFile { continue }
+        }
+    }
+
     public static func posterURL(in directory: URL) -> URL {
         directory.appendingPathComponent("1.jpg")
     }
@@ -75,6 +127,9 @@ public struct PreviewCache: Sendable {
         let staging = root.appendingPathComponent(".building-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
+        let lock = open(staging.path, O_RDONLY | O_DIRECTORY | O_EXLOCK | O_NONBLOCK)
+        guard lock >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(lock) }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 480, height: 270)
