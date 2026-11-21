@@ -24,7 +24,6 @@ final class LibraryModel {
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private var validated = false
     @ObservationIgnored private var directoryUpdated: Date?
-    @ObservationIgnored private var retryAfter: Date?
     @ObservationIgnored private(set) var catalog: Catalog?
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var availabilityTask: Task<Void, Never>?
@@ -56,7 +55,11 @@ final class LibraryModel {
     var playing = false
     var scanBusy = false
     var activity: String?
-    var networkStatus: String?
+    private(set) var subscriptionRequired = false
+    private var lookupStatus: String?
+    var networkStatus: String? {
+        subscriptionRequired ? PRDBError.subscriptionRequired.localizedDescription : lookupStatus
+    }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var snapshotRequested = false
@@ -93,8 +96,39 @@ final class LibraryModel {
         try await access.validateAndStore(key: key.trimmingCharacters(in: .whitespacesAndNewlines), client: client)
         validated = true
         setupReason = nil
-        retryAfter = nil
+        subscriptionRequired = false
         try enter()
+    }
+
+    func replacePRDBKey(_ input: String) async throws {
+        guard phase == .ready else { throw CancellationError() }
+        let stamp = session
+        let key = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if try access.apiKey() == key {
+            do { try await client.validate(key: key) }
+            catch {
+                guard session == stamp, !Task.isCancelled else { throw CancellationError() }
+                handleNetwork(error, key: key)
+                throw error
+            }
+        } else {
+            try await access.validateAndStore(key: key, client: client, while: { self.session == stamp })
+        }
+        try Task.checkCancellation()
+        guard phase == .ready, session == stamp else { throw CancellationError() }
+        validated = true
+        subscriptionRequired = false
+        lookupStatus = nil
+        startLookups()
+        notify("PRDB key verified")
+    }
+
+    func retrySubscription() {
+        guard phase == .ready, subscriptionRequired else { return }
+        validated = false
+        subscriptionRequired = false
+        lookupStatus = nil
+        startLookups()
     }
     func unlock(pin: String) throws { try access.unlock(pin: pin); try enter() }
     func recover(pin: String) async throws { try await access.recoverPIN(new: pin); try enter() }
@@ -126,7 +160,7 @@ final class LibraryModel {
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         playback.stop(); playing = false
         panel?.cancel(nil); panel = nil
-        scanBusy = false; activity = nil; networkStatus = nil
+        scanBusy = false; activity = nil; lookupStatus = nil
     }
 
     private func conceal(_ gate: Gate) {
@@ -147,12 +181,21 @@ final class LibraryModel {
         guard phase == .ready, (try? access.apiKey()) == key else { return }
         if case PRDBError.invalidKey = error {
             validated = false
+            subscriptionRequired = false
             setupReason = "PRDB rejected the saved key. Enter a valid replacement to reopen your libraries."
             conceal(pinEnabled ? .locked : .setup)
             do { try access.reject(key: key) }
             catch { failure = error.localizedDescription; phase = .failed }
         } else if !Task.isCancelled {
-            networkStatus = "PRDB unavailable. Pending lookups will retry."
+            switch error {
+            case PRDBError.subscriptionRequired:
+                subscriptionRequired = true
+                worker?.cancel()
+            case PRDBError.rateLimited:
+                lookupStatus = "PRDB’s request limit was reached. Pending lookups will retry."
+            default:
+                lookupStatus = "PRDB unavailable. Pending lookups will retry."
+            }
         }
     }
 
@@ -465,11 +508,8 @@ final class LibraryModel {
                 try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
                 if session == stamp { reload() }
             }
-            while !Task.isCancelled {
+            while !Task.isCancelled && !subscriptionRequired {
                 do {
-                    while let retryAfter, retryAfter.timeIntervalSinceNow > 0 {
-                        try await Task.sleep(for: .seconds(min(86_400, retryAfter.timeIntervalSinceNow)))
-                    }
                     if !validated {
                         try await client.validate(key: key)
                         try Task.checkCancellation()
@@ -481,20 +521,20 @@ final class LibraryModel {
                             try Task.checkCancellation()
                             try catalog.saveStudios(directory)
                             directoryUpdated = Date()
+                            try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
+                            try Task.checkCancellation()
+                            reload()
                         }
                         try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client) {
                             await MainActor.run { if self.session == stamp { _ = self.reload() } }
                         }
                     }
                     guard session == stamp, !Task.isCancelled else { return }
-                    networkStatus = nil
+                    lookupStatus = nil
                 } catch {
                     guard session == stamp, !Task.isCancelled else { return }
-                    if case let PRDBError.rateLimited(delay) = error {
-                        retryAfter = Date().addingTimeInterval(max(60, delay ?? 60))
-                    }
                     handleNetwork(error, key: key)
-                    if phase != .ready { return }
+                    if phase != .ready || subscriptionRequired { return }
                 }
                 try? await Task.sleep(for: .seconds(60))
             }

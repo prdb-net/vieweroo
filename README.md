@@ -51,6 +51,8 @@ To update, quit Vieweroo and replace the app in Applications with the new copy. 
 
 PRDB receives the filename, file size, and available OSHash for identification. Folder names are evaluated on your Mac. PRDB also supplies candidate titles, artwork, studios, and cast. Ratings, tags, playlists, match corrections, and viewing history stay local.
 
+If your subscription no longer includes API access, you can still browse and play your local library. After restoring the subscription, choose **Retry PRDB** in the sidebar. To use a different subscription, choose **Change API Key…** and verify its key.
+
 Enable a PIN under **Privacy** and press ⇧⌘L to lock the app and stop playback. **Forgot PIN?** uses macOS account authentication. PIN protection controls the interface and playback. The SQLite catalog and image cache use ordinary local storage.
 
 The [product vision](VISION.md), [architecture decisions](ARCHITECTURE.md) and [interface guide](DESIGN.md) describe MVP behavior, hardware acceptance checks and the macOS design conventions.

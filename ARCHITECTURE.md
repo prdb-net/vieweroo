@@ -74,7 +74,7 @@ Require the current PIN to change it. To reset a forgotten PIN, require successf
 
 ### 8. Require a personal PRDB API key and use read-only lookups in the MVP
 
-Validate the user's personal PRDB API key online during setup before enabling library or playback features. Store one key for the app in the macOS Keychain and use it across all libraries. After successful setup, keep the library and player available during network or service outages, including on relaunch. Resume pending lookups when PRDB is reachable. An explicit invalid-key response requires a valid replacement before library use can continue. A timeout or rate limit leaves the previous validation intact.
+Validate the user's personal PRDB API key online during setup before enabling library or playback features. Store one key for the app in the macOS Keychain and use it across all libraries. After successful setup, keep the library and player available during network or service outages, including on relaunch. Resume pending lookups when PRDB is reachable. An explicit invalid-key response requires a valid replacement before library use can continue. A timeout or rate limit leaves the previous validation intact. Manual and background lookups share the server’s retry deadline for the same key. If a subscription no longer includes API access, explain how to restore access and keep local browsing and playback available.
 
 For file identification, send the OSHash, file size, and filename without its directory path. Evaluate folder names locally for studio detection. MVP requests look up matches and retrieve metadata. User confirmations and corrections stay local. Submitting confirmed hash-to-title associations to PRDB is planned for after the MVP.
 

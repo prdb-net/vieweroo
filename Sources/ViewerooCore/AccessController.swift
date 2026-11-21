@@ -101,7 +101,8 @@ public final class AccessController {
         return key
     }
 
-    public func validateAndStore(key: String, client: PRDBClient) async throws {
+    public func validateAndStore(key: String, client: PRDBClient,
+                                 while isCurrent: () -> Bool = { true }) async throws {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty, !key.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
         else { throw AccessError.invalidKey }
@@ -110,11 +111,12 @@ public final class AccessController {
         do {
             try await client.validate(key: key)
         } catch PRDBError.invalidKey {
-            if validationAttempt == attempt { try reject(key: key) }
+            try Task.checkCancellation()
+            if validationAttempt == attempt, isCurrent() { try reject(key: key) }
             throw PRDBError.invalidKey
         }
         try Task.checkCancellation()
-        guard validationAttempt == attempt else { throw CancellationError() }
+        guard validationAttempt == attempt, isCurrent() else { throw CancellationError() }
         try store.write(Data(key.utf8), account: keyAccount)
     }
 

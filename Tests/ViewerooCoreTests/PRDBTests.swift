@@ -21,6 +21,40 @@ struct PRDBTests {
         }
     }
 
+    @Test func manualAndBackgroundRequestsHonorTheSameKeySpecificRetryDeadline() async throws {
+        actor Server {
+            var paths: [String] = []
+            func respond(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
+                let url = try #require(request.url)
+                paths.append(url.path)
+                if url.path == "/user-identity" {
+                    return (Data(#"{"userHash":"valid"}"#.utf8),
+                            HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                }
+                let delay = url.path == "/videos/identify" ? "Sun, 06 Nov 2095 08:49:37 GMT" : "120"
+                return (Data(), HTTPURLResponse(url: url, statusCode: 429, httpVersion: nil,
+                                                headerFields: ["Retry-After": delay])!)
+            }
+        }
+        let server = Server()
+        let background = PRDBClient { try await server.respond($0) }
+        let manual = background
+        let files = [PRDBFile(ref: "1", filename: "video.mp4", filesize: 5, osHash: nil)]
+        await #expect(throws: PRDBError.rateLimited(retryAfter: 120)) {
+            try await manual.search("Morning", key: "first")
+        }
+        await #expect(throws: PRDBError.self) { try await background.identify(files, key: "first") }
+        do {
+            _ = try await background.identify(files, key: "second")
+            Issue.record("Expected the identification service to return a rate limit")
+        } catch let PRDBError.rateLimited(delay) {
+            #expect((delay ?? 0) > 120)
+        }
+        await #expect(throws: PRDBError.self) { try await manual.search("Morning", key: "second") }
+        try await manual.validate(key: "replacement")
+        #expect(await server.paths == ["/videos", "/videos/identify", "/user-identity"])
+    }
+
     @Test func identifyMapsResultsByRefAndOnlyAutoLinksUniqueHashes() async throws {
         let film = #"{"id":"one","title":"River","site":{"id":"s","title":"Birch"},"actors":[{"id":"p","name":"Alex","images":[{"imageType":3,"url":"https://img.example/p.jpg"}]}],"images":[{"url":"https://img.example/v.jpg"}]}"#
         let other = #"{"id":"two","title":"Ridge","actors":[],"images":[]}"#

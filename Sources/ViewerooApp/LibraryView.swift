@@ -2,7 +2,7 @@ import SwiftUI
 import ViewerooCore
 
 private enum EditSheet: String, Identifiable {
-    case library, playlist, privacy
+    case library, playlist, privacy, prdbKey
     var id: Self { self }
 }
 
@@ -34,6 +34,7 @@ struct LibraryView: View {
         .sheet(item: $sheet) { kind in
             switch kind {
             case .privacy: PrivacyView(model: model)
+            case .prdbKey: PRDBKeyForm(model: model)
             case .library, .playlist:
                 NameForm(isLibrary: kind == .library) { name, onFailure in
                     if kind == .library { return model.createLibrary(name, onFailure: onFailure) }
@@ -160,7 +161,15 @@ struct LibraryView: View {
             if let activity = model.activity {
                 HStack { ProgressView().controlSize(.small); Text(activity).font(.caption); Spacer() }.padding(VSpace.control)
             }
-            if let notice = model.networkStatus { Text(notice).font(.caption).foregroundStyle(.secondary).padding(VSpace.control) }
+            if let notice = model.networkStatus {
+                VStack(alignment: .leading, spacing: VSpace.tight) {
+                    Text(notice).font(.caption).foregroundStyle(.secondary)
+                    if model.subscriptionRequired {
+                        Button("Retry PRDB", action: model.retrySubscription)
+                        Button("Change API Key…") { sheet = .prdbKey }
+                    }
+                }.padding(VSpace.control)
+            }
             Divider()
             HStack {
                 Button { sheet = .privacy } label: { Label("Privacy", systemImage: "lock.shield") }.buttonStyle(.plain)
@@ -172,6 +181,37 @@ struct LibraryView: View {
                 Button { model.refresh() } label: { Label("Refresh Library", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
                     .buttonStyle(.plain).disabled(model.libraryID == nil || model.scanBusy).help("Refresh Library")
             }.padding(VSpace.group)
+        }
+    }
+}
+
+private struct PRDBKeyForm: View {
+    @Environment(\.dismiss) private var dismiss
+    let model: LibraryModel
+    @State private var key = ""
+    @State private var verifying = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: VSpace.group) {
+            Text("Change PRDB API Key").font(.title2.bold())
+            SecureField("New PRDB API key", text: $key).disabled(verifying)
+            if let error { Text(error).foregroundStyle(.red) }
+            HStack {
+                if verifying { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Verify and Save") { error = nil; verifying = true }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(verifying || key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(VSpace.section).frame(width: 380)
+        .task(id: verifying) {
+            guard verifying else { return }
+            defer { verifying = false }
+            do { try await model.replacePRDBKey(key); dismiss() }
+            catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
 }

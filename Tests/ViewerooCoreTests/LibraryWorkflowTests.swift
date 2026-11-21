@@ -5,20 +5,23 @@ import Testing
 @testable import ViewerooCore
 
 private actor WorkflowServer {
-    enum Mode { case online, offline, rejected }
+    enum Mode { case online, offline, rejected, subscriptionRequired }
     var mode = Mode.online
     func setMode(_ value: Mode) { mode = value }
 
     func respond(to request: URLRequest) throws -> (Data, HTTPURLResponse) {
         let url = try #require(request.url)
         if mode == .offline { throw URLError(.notConnectedToInternet) }
-        let status = mode == .rejected ? 401 : 200
+        let restricted = mode == .subscriptionRequired && url.path == "/videos/identify"
+            && request.value(forHTTPHeaderField: "X-Api-Key") == "expired-subscription"
+        let status = mode == .rejected ? 401 : restricted ? 403 : 200
         let body: Any
         switch url.path {
         case "/user-identity":
             body = ["userHash": "fixture"]
         case "/sites":
-            body = ["items": [], "totalCount": 0] as [String: Any]
+            let sites = mode == .subscriptionRequired ? [["id": "studio", "title": "Sky Studio"]] : []
+            body = ["items": sites, "totalCount": sites.count] as [String: Any]
         case "/videos/identify":
             let bytes = try #require(request.httpBody)
             let json = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
@@ -42,6 +45,100 @@ private final class WorkflowSecrets: SecretStore {
     var items: [String: Data] = [:]
     func read(_ account: String) throws -> Data? { items[account] }
     func write(_ data: Data?, account: String) throws { items[account] = data }
+}
+
+@MainActor
+@Test func firstImportRecognizesLocalStudiosAndRecoversFromASubscriptionError() async throws {
+    let temporary = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    let folder = temporary.appending(path: "Sky Studio")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try await writeColorMovie(to: folder.appending(path: "Morning.mp4"))
+    let suite = "vieweroo.subscription." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    await server.setMode(.subscriptionRequired)
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: temporary.appending(path: "Support"),
+                             cache: PreviewCache(root: temporary.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "expired-subscription")
+    model.createLibrary("Movies")
+    model.addSources([folder])
+    try await until { model.subscriptionRequired && model.entries.first?.studio == "Sky Studio" }
+    let entry = try #require(model.entries.first)
+    #expect(model.phase == .ready && entry.needsLookup && entry.availability == .available)
+    #expect(model.networkStatus == PRDBError.subscriptionRequired.localizedDescription)
+    model.openDetail(entry.id)
+    #expect(model.change { try $0.setFavorite(entryID: entry.id, value: true) })
+
+    model.retrySubscription()
+    try await until { model.subscriptionRequired }
+    await server.setMode(.online)
+    model.retrySubscription()
+    try await until { model.entries.first?.needsLookup == false }
+    #expect(try model.access.apiKey() == "expired-subscription")
+
+    await server.setMode(.subscriptionRequired)
+    try FileManager.default.copyItem(at: entry.url, to: folder.appending(path: "Evening.mp4"))
+    model.refresh()
+    try await until { model.subscriptionRequired && model.entries.count == 2 }
+    await server.setMode(.offline)
+    await #expect(throws: URLError.self) { try await model.replacePRDBKey("new-subscription") }
+    #expect(try model.access.apiKey() == "expired-subscription")
+    await server.setMode(.subscriptionRequired)
+    try await model.replacePRDBKey("new-subscription")
+    try await until { !model.entries.contains(where: \.needsLookup) }
+    model.handleNetwork(PRDBError.subscriptionRequired, key: "expired-subscription")
+    model.handleNetwork(PRDBError.invalidKey, key: "expired-subscription")
+    #expect(model.phase == .ready)
+    #expect(try model.access.apiKey() == "new-subscription")
+    #expect(!model.subscriptionRequired && model.networkStatus == nil)
+    #expect(model.detailID == entry.id && model.entries.contains { $0.id == entry.id && $0.favorite })
+}
+
+@MainActor
+@Test func changingLibrariesOrLockingDiscardsAKeyVerificationInFlight() async throws {
+    _ = NSApplication.shared
+    let temporary = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    let suite = "vieweroo.key-verification." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let (requests, started) = AsyncStream<Void>.makeStream()
+    let (responses, complete) = AsyncStream<Void>.makeStream()
+    let client = PRDBClient { request in
+        if request.value(forHTTPHeaderField: "X-Api-Key") == "delayed-key" {
+            started.yield()
+            for await _ in responses { break }
+        }
+        return try await server.respond(to: request)
+    }
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: client, preferences: preferences, directory: temporary,
+                             cache: PreviewCache(root: temporary.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "saved-key")
+    model.createLibrary("Original")
+    let catalog = try #require(model.catalog)
+    let other = try catalog.createLibrary(name: "Other")
+    try model.access.setPIN(current: nil, new: "1234")
+    model.pinEnabled = true
+    var signals = requests.makeAsyncIterator()
+    for lock in [false, true] {
+        let verification = Task { try await model.replacePRDBKey("delayed-key") }
+        _ = await signals.next()
+        if lock { model.lock() } else { model.selectLibrary(other.id) }
+        complete.yield()
+        await #expect(throws: CancellationError.self) { try await verification.value }
+        #expect(try model.access.apiKey() == "saved-key")
+        #expect(model.phase == (lock ? .locked : .ready))
+    }
+    complete.finish()
+    started.finish()
 }
 
 @MainActor

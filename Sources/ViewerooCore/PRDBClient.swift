@@ -27,9 +27,26 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
+private actor PRDBRateLimits {
+    private var deadlines: [String: Date] = [:]
+
+    func check(key: String) throws {
+        guard let deadline = deadlines[key] else { return }
+        let remaining = deadline.timeIntervalSinceNow
+        if remaining > 0 { throw PRDBError.rateLimited(retryAfter: remaining) }
+        deadlines.removeValue(forKey: key)
+    }
+
+    func record(key: String, delay: TimeInterval?) {
+        let deadline = Date().addingTimeInterval(delay ?? 60)
+        deadlines[key] = max(deadline, deadlines[key] ?? deadline)
+    }
+}
+
 public struct PRDBClient: Sendable {
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let transport: Transport
+    private let rateLimits = PRDBRateLimits()
     private static let endpoint = URL(string: "https://api.prdb.net")!
 
     public init() {
@@ -138,16 +155,31 @@ public struct PRDBClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
         }
+        try await rateLimits.check(key: key)
+        try Task.checkCancellation()
         let (data, response) = try await transport(request)
         switch response.statusCode {
         case 200: return try JSONDecoder().decode(T.self, from: data)
         case 401: throw PRDBError.invalidKey
         case 403: throw PRDBError.subscriptionRequired
         case 429:
-            let delay = response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
-            throw PRDBError.rateLimited(retryAfter: delay.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil })
+            let delay = Self.retryDelay(response.value(forHTTPHeaderField: "Retry-After"))
+            await rateLimits.record(key: key, delay: delay)
+            throw PRDBError.rateLimited(retryAfter: delay)
         default: throw PRDBError.service(response.statusCode)
         }
+    }
+
+    private static func retryDelay(_ header: String?) -> TimeInterval? {
+        guard let header else { return nil }
+        if let seconds = TimeInterval(header) {
+            return seconds.isFinite && seconds >= 0 ? seconds : nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter.date(from: header).map { max(0, $0.timeIntervalSinceNow) }
     }
 }
 
