@@ -4,9 +4,9 @@ Vieweroo is a native, open-source macOS app written in Swift. It brings an adult
 
 ## A library across folders and drives
 
-To use Vieweroo, validate your personal PRDB API key during setup. One key covers all your libraries. Once set up, you can browse and play available videos while PRDB is unreachable. Pending lookups resume when the connection returns. If PRDB reports that the key is invalid, Vieweroo asks for a valid replacement.
+To use Vieweroo, validate your personal PRDB API key during setup. One key covers all your libraries. Vieweroo saves it in a separate local settings database so routine launches and updates can open your collection without a Keychain prompt. Once set up, you can browse and play available videos while PRDB is unreachable. Pending lookups resume when the connection returns. If PRDB reports that the key is invalid, Vieweroo asks for a valid replacement.
 
-You can create multiple libraries, each with its own set of folders on local disks or mounted network drives. Adding a folder scans it and its subfolders and catalogs each video's file path and metadata in a local database. The files stay where they are. Opening a library checks which folders are available. Choose **Refresh Library** to pick up changes. When a network drive is temporarily disconnected, its titles, your ratings, and your playback positions stay in the library.
+You can create multiple libraries, each with its own set of folders on local disks or mounted network drives. Use the title bar to switch libraries or create one. The active library’s **Library Settings** in the sidebar brings together its name, source folders, and deletion. Adding a folder scans it and its subfolders and catalogs each video's file path and metadata in a local database. The files stay where they are. Opening a library checks which folders are available. Choose **Refresh Library** to pick up changes. When a network drive is temporarily disconnected, its titles, your ratings, and your playback positions stay in the library.
 
 Each library keeps its own tags, playlists, favorites, ratings, and viewing history. If the same video appears in two libraries, you can rate it differently in each and resume from the point where you last watched it in that library. If a file goes missing from a reachable folder, its entry is marked as missing. You keep its history and its place in your playlists until you choose to remove it.
 
@@ -16,11 +16,11 @@ Vieweroo automatically links a video to its PRDB title when its file hash produc
 
 ## Exploring by studio and performer
 
-Vieweroo opens the last-used library in its studio overview. Open a studio to see its videos from across the library's folders, or choose **Unknown Studio** for videos still awaiting identification of their studio. Search the active library by title, filename, studio, performer, or tag. The sidebar gives you direct access to favorites, playlists, and frequently watched videos.
+Vieweroo opens the last-used library in its studio overview. Open a studio to see its videos from across the library's folders, or choose **Unknown Studio** for videos still awaiting identification of their studio. Search the active library by title, filename, studio, performer, or tag. The sidebar gives you direct access to favorites, frequently watched videos, and a playlist overview. It also remembers the five most recently opened playlists in each library.
 
 For each matched video, the detail view shows the PRDB title, studio, and cast, with performer portraits where PRDB provides them. Select a portrait to see other videos in your library featuring that performer. Use Back to retrace your steps through videos, performers, studios and search results. Returning to a collection restores your place and highlights the tile you opened.
 
-Even a video with no PRDB title match can appear under its studio. Vieweroo looks for a recognizable studio name in the folder names and filename, so a collection already organized by studio is ready to browse as it is scanned.
+Even a video with no PRDB title match can appear under its studio. Vieweroo recognizes studio folders inside a selected source, including the source folder itself. In a filename it looks for a distinctive studio name at the beginning, followed by a separator. Common words such as “Black” and mentions in the middle of a title provide too little evidence for an automatic assignment.
 
 You can correct the studio directly on the video. Vieweroo keeps your choice across scans until you select **Use Automatic Studio**.
 
@@ -28,7 +28,7 @@ The interface should feel familiar on a Mac and invite you to browse. Large thum
 
 A video’s detail page and windowed player offer other playable videos from the active library. Related titles come first, followed by more of the collection. Choose one to switch immediately and resume it at its saved position. Returning from the player takes you back to where you started browsing.
 
-Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated.
+Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated. The sidebar shows how many are ready. Click the status to see what is being prepared, waiting or unavailable.
 
 ## A player for repeat viewing
 
@@ -54,7 +54,7 @@ How you find something again depends on what you remember. A title you saved is 
 
 Your viewing history, ratings, favorites, playlists, and tags stay in the local database. Vieweroo uses the public PRDB API to match titles and retrieve metadata.
 
-With optional PIN protection enabled, the first thing you see when you open Vieweroo is the PIN prompt. You can also lock the library while using it. Locking stops playback and hides titles, thumbnails, the current video frame, and personal lists in every window. macOS window previews should also keep the collection out of view while the app is locked.
+Open **Vieweroo → Settings…** for PIN protection and PRDB access across libraries. With optional PIN protection enabled, the first thing you see when you open Vieweroo is the PIN prompt. You can also lock the library while using it. Locking stops playback and hides titles, thumbnails, the current video frame, and personal lists in every window. macOS window previews should also keep the collection out of view while the app is locked.
 
 Use your current PIN to change it. If you forget it, authenticate with your macOS user account to set a new PIN and keep your library.
 

@@ -37,6 +37,83 @@ private struct LibraryFixture {
 }
 
 final class CatalogTests: XCTestCase {
+    func testSiteOnlySuggestionsNeedPathEvidenceAtImport() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        for filename in ["Black.24.03.01.Dawn.mp4", "Title.Silver.Lake.Dawn.mp4", "SilverLake.Dawn.mp4"] {
+            try fixture.add(filename)
+        }
+        try fixture.scan()
+        let client = PRDBClient { request in
+            let url = try XCTUnwrap(request.url)
+            let body: [String: Any]
+            if url.path == "/videos/identify" {
+                let json = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any]
+                let files = try XCTUnwrap(json?["files"] as? [[String: Any]])
+                body = ["results": try files.map { file -> [String: Any] in
+                    let filename = try XCTUnwrap(file["filename"] as? String)
+                    let name = filename.hasPrefix("Black") ? "Black" : "Silver Lake"
+                    return ["ref": try XCTUnwrap(file["ref"]), "confidence": 1, "matchedBy": 4,
+                            "candidates": [], "site": ["id": name, "title": name]]
+                }]
+            } else {
+                XCTAssertEqual(url.path, "/videos")
+                body = ["items": []]
+            }
+            return (try JSONSerialization.data(withJSONObject: body),
+                    try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        }
+        try await LibraryJobs.identify(libraryID: fixture.library.id, catalog: fixture.catalog, key: "fixture",
+                                       client: client, updated: {})
+        let entries = try fixture.catalog.entries(libraryID: fixture.library.id)
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries.filter { $0.studio == "Silver Lake" }.map(\.filename), ["SilverLake.Dawn.mp4"])
+        XCTAssertEqual(entries.filter { $0.studio == nil }.count, 2)
+        XCTAssertFalse(entries.contains(where: \.needsLookup))
+    }
+
+    func testUpgradeRechecksCachedStudiosWithoutRepeatingTitleLookups() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let path = base.appendingPathComponent("library.sqlite").path
+        let title = PRDBTitle(id: "matched", title: "Dawn", studio: .init(id: "b", name: "Black"))
+        let data = try JSONEncoder().encode(title)
+        do {
+            let old = try DatabaseQueue(path: path)
+            try Catalog.migrator.migrate(old, upTo: "recent-playlists-v7")
+            try old.write { db in
+                try db.execute(sql: """
+                    INSERT INTO library(id,name) VALUES (1,'Fixture');
+                    INSERT INTO source(id,libraryID,path) VALUES (1,1,'/Library');
+                    INSERT INTO studio(id,name) VALUES ('sl','Silver Lake');
+                    INSERT INTO entry(id,libraryID,path,fileSize,modified,detectedStudio,needsLookup) VALUES
+                      (1,1,'/Library/Dawn.Black.mp4',12,0,'Black',0),
+                      (2,1,'/Library/Silver Lake/Dawn.Black.mp4',12,0,'Black',0),
+                      (3,1,'/Library/Night.SilverLake.mp4',12,0,'Silver Lake',0),
+                      (4,1,'/Library/Confirmed.Black.mp4',12,0,'Black',0),
+                      (5,1,'/Library/CedarGrove.River.mp4',12,0,'Cedar Grove',0);
+                    INSERT INTO membership(libraryID,sourceID,entryID) SELECT libraryID,1,id FROM entry;
+                    UPDATE entry SET manualStudio = 'Chosen', favorite = 1 WHERE id = 3;
+                    """)
+                try db.execute(sql: "UPDATE entry SET confirmed = 1, matchData = ? WHERE id = 4", arguments: [data])
+            }
+        }
+        let upgraded = try Catalog(path: path)
+        XCTAssertNil(try XCTUnwrap(upgraded.entry(1)).studio)
+        XCTAssertEqual(try upgraded.entry(2)?.studio, "Silver Lake")
+        let manual = try XCTUnwrap(upgraded.entry(3))
+        XCTAssertEqual(manual.studio, "Chosen")
+        XCTAssertTrue(manual.favorite)
+        XCTAssertNil(manual.detectedStudio)
+        let confirmed = try XCTUnwrap(upgraded.entry(4))
+        XCTAssertEqual(confirmed.match, title)
+        XCTAssertEqual(confirmed.studio, "Black")
+        XCTAssertTrue(confirmed.confirmed)
+        XCTAssertEqual(try upgraded.entry(5)?.studio, "Cedar Grove")
+        XCTAssertFalse(try upgraded.entries(libraryID: 1).contains(where: \.needsLookup))
+    }
+
     func testSymlinkedSourceKeepsItsSelectedPathAcrossScans() throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }
@@ -75,6 +152,7 @@ final class CatalogTests: XCTestCase {
         let playlist = try c.createPlaylist(libraryID: fixture.library.id, name: "Queue")
         XCTAssertTrue(try c.addToPlaylist(playlist.id, entryID: first.id))
         XCTAssertFalse(try c.addToPlaylist(playlist.id, entryID: first.id))
+        XCTAssertEqual(try c.playlists(libraryID: fixture.library.id).first?.videoCount, 1)
         XCTAssertThrowsError(try c.addToPlaylist(-1, entryID: first.id))
         XCTAssertThrowsError(try c.addToPlaylist(playlist.id, entryID: other.id))
         let auto = PRDBTitle(id: "automatic", title: "First match")
@@ -84,7 +162,11 @@ final class CatalogTests: XCTestCase {
         try c.applyMatch(entryID: first.id, result: .init(autoTitle: auto), fileSize: first.fileSize, modified: first.modified)
         try fixture.scan()
 
+        try c.renameLibrary(fixture.library.id, to: "  Workshop  ")
+        XCTAssertThrowsError(try c.renameLibrary(fixture.library.id, to: " \n"))
         let reopened = try Catalog(path: fixture.databasePath)
+        XCTAssertEqual(try reopened.libraries().map(\.name), ["Home", "Workshop"])
+        XCTAssertEqual(try reopened.libraries().last?.id, fixture.library.id)
         let entry = try XCTUnwrap(reopened.entry(first.id))
         XCTAssertEqual(entry.match, corrected)
         XCTAssertEqual(entry.rating, 1)

@@ -33,6 +33,8 @@ public struct CatalogPlaylist: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let libraryID: Int64
     public let name: String
+    public let videoCount: Int
+    public let lastOpenedOrder: Int64
 }
 
 public enum CatalogAvailability: String, Sendable {
@@ -75,6 +77,15 @@ public final class Catalog: Sendable {
         return try database.write { db in
             try db.execute(sql: "INSERT INTO library(name) VALUES (?)", arguments: [clean])
             return CatalogLibrary(id: db.lastInsertedRowID, name: clean)
+        }
+    }
+
+    public func renameLibrary(_ id: Int64, to name: String) throws {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { throw CatalogError.invalidValue }
+        try database.write { db in
+            try db.execute(sql: "UPDATE library SET name = ? WHERE id = ?", arguments: [clean, id])
+            guard db.changesCount == 1 else { throw CatalogError.invalidValue }
         }
     }
 

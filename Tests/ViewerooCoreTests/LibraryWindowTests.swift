@@ -86,3 +86,34 @@ import Testing
     #expect(withScroller.height > scroll.contentView.bounds.height)
     #expect(abs(withScroller.height - withoutScroller.height) <= 1)
 }
+
+@MainActor
+@Test func timelineStillDisplaysTheCachedImageOnFirstAppearance() async throws {
+    _ = NSApplication.shared
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let fixture = NSImage(size: NSSize(width: 16, height: 9), flipped: false) { rect in
+        NSColor.red.setFill()
+        rect.fill()
+        return true
+    }
+    let tiff = try #require(fixture.tiffRepresentation)
+    let jpeg = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [:]))
+    try jpeg.write(to: url)
+
+    let host = NSHostingView(rootView: TimelineStill(url: url))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 96, height: 54),
+                          styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = host
+    window.orderBack(nil)
+    defer { window.orderOut(nil) }
+    let deadline = ContinuousClock.now + .seconds(3)
+    repeat {
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        if let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB),
+           color.redComponent > 0.8, color.greenComponent < 0.2, color.blueComponent < 0.2 { return }
+        try await Task.sleep(for: .milliseconds(30))
+    } while ContinuousClock.now < deadline
+    Issue.record("The timeline preview did not display the cached red frame.")
+}

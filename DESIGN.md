@@ -15,13 +15,15 @@ Use the shared `VSpace` values in points. Choose the distance by the relationshi
 | 24 | `section` | Content margins, independent sections, video and recommendation columns |
 | 32 | `page` | Outer breathing room around a standalone access form |
 
-In the library window, carry the native sidebar divider to the top of the title bar. Run one separator beneath the toolbar across both columns. Align the window title to the collection heading’s 24 pt inset while the sidebar is visible.
+In the library window, carry the native sidebar divider to the top of the title bar. Run one separator beneath the toolbar across both columns. Place the active library’s name and a menu indicator at the leading edge of the content toolbar. Keep the menu compact and truncate long names. Offer library switching and creation in this menu.
 
-Keep the area from the library title to the trailing window edge available for native window gestures. Use the system title bar background so clicks reach the window, including above scrollable content. Put search in the sidebar, folder import in Source Folders and the PIN lock next to Privacy.
+Keep the area from the end of the library menu to the trailing window edge available for native window gestures. Use the system title bar background so clicks reach the window, including above scrollable content. Keep search in the sidebar. Place activity, the PIN lock and refresh at its foot. Click the activity label to inspect scans, PRDB matching and preview progress. Show **Ready** when idle and surface conditions that need attention. Use **Vieweroo → Settings…** (⌘,) for PIN and PRDB access. End the Library section with **Library Settings**, where users can rename the active library, open **Manage Folders**, or confirm deletion of the library.
 
 Align the poster, title, actions and section headings to the same leading edge. Set collection titles in the system large title, the selected video in title bold and section headings in title 3. Use body or headline weight for a title in a list. Use secondary system text for metadata and monospaced digits for a moving clock. A compact row may truncate a title at two lines. The detail view gives the full title room to wrap.
 
 Follow the system appearance and accent. Use SF Symbols with a short action label or tooltip and an accessible name. Use a filled heart for a saved favorite and a filled thumb for an active rating. Preserve native focus rings and keyboard activation. Keep artwork in a 16∶9 frame with an 8 pt continuous corner. In the windowed player, fit the playback surface to the video's presentation aspect ratio and center it on the window background. In full screen, fit the complete picture against black.
+
+Place **Playlists** immediately above **Library Settings**. Its overview lists every playlist in the active library alphabetically with its video count and a **New Playlist…** button. Show up to five recently opened playlists in a separate sidebar section, newest first. Hide the section until a playlist has been opened.
 
 ## Choosing a video
 
@@ -35,7 +37,7 @@ Adapt to the width available to each surface. At 760 pt of detail space the list
 
 ## Watching
 
-Keep the timeline above one row of transport controls. Group the ten-second skips around play/pause, followed by the elapsed and total time. Put loop, sound and full screen on the other end. Keep AirPlay in the header. Playback errors stay on the video, and the viewer can still go back or choose another title.
+Keep the timeline above one row of transport controls. Float the seek time just above the slider and any loop markers, aligned with the pointer or dragged knob. Size the label to its text until a cached still is available, then show a 96 × 54 pt preview above the time. Group the ten-second skips around play/pause, followed by the elapsed and total time. Put loop, sound and full screen on the other end. Keep AirPlay in the header. Playback errors stay on the video, and the viewer can still go back or choose another title.
 
 Offer full screen in the current window with a visible button, F and a double-click on the video. Escape first leaves full screen with playback continuing. Escape in the windowed player returns to the original browsing context. In full screen, fade the controls after three idle seconds during playback. Reveal them on pointer movement and keep them visible when paused, while adjusting controls or when VoiceOver is active.
 

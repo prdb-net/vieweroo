@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum BrowseTile: Hashable {
-    case studio(String), video(Int64), performer(String)
+    case studio(String), video(Int64), performer(String), playlist(Int64)
 }
 
 @MainActor

@@ -173,9 +173,17 @@ extension Catalog {
     }
 
     public func studios() throws -> [PRDBStudio] {
-        try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT id,name FROM studio ORDER BY name COLLATE NOCASE")
-                .map { PRDBStudio(id: $0["id"], name: $0["name"]) }
-        }
+        try database.read(Self.fetchStudios)
+    }
+
+    // Include folders covered by any source membership, up to the outermost selected root.
+    static let studioSourcePathSQL = """
+        (SELECT s.path FROM membership m JOIN source s ON s.id = m.sourceID
+         WHERE m.entryID = e.id ORDER BY length(s.path) LIMIT 1)
+        """
+
+    static func fetchStudios(_ db: Database) throws -> [PRDBStudio] {
+        try Row.fetchAll(db, sql: "SELECT id,name FROM studio ORDER BY name COLLATE NOCASE")
+            .map { PRDBStudio(id: $0["id"], name: $0["name"]) }
     }
 }

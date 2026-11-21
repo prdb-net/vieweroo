@@ -7,9 +7,24 @@ extension Catalog {
     }
 
     static func fetchPlaylists(_ db: Database, libraryID: Int64) throws -> [CatalogPlaylist] {
-        try Row.fetchAll(db, sql: "SELECT * FROM playlist WHERE libraryID = ? ORDER BY name COLLATE NOCASE, id",
-                         arguments: [libraryID])
-            .map { CatalogPlaylist(id: $0["id"], libraryID: $0["libraryID"], name: $0["name"]) }
+        try Row.fetchAll(db, sql: """
+            SELECT p.*, (SELECT COUNT(*) FROM playlistItem WHERE playlistID = p.id) AS videoCount
+            FROM playlist p WHERE p.libraryID = ? ORDER BY p.name COLLATE swiftLocalizedStandardCompare, p.id
+            """, arguments: [libraryID]).map { row in
+                CatalogPlaylist(id: row["id"], libraryID: row["libraryID"], name: row["name"],
+                                videoCount: row["videoCount"], lastOpenedOrder: row["lastOpenedOrder"])
+            }
+    }
+
+    public func recordPlaylistOpen(_ id: Int64, libraryID: Int64) throws -> [CatalogPlaylist] {
+        try database.write { db in
+            try db.execute(sql: """
+                UPDATE playlist SET lastOpenedOrder = (
+                    SELECT MAX(lastOpenedOrder) + 1 FROM playlist WHERE libraryID = ?
+                ) WHERE libraryID = ? AND id = ?
+                """, arguments: [libraryID, libraryID, id])
+            return try Self.fetchPlaylists(db, libraryID: libraryID)
+        }
     }
 
     public func playlistEntryIDs(_ id: Int64) throws -> [Int64] {
@@ -24,7 +39,7 @@ extension Catalog {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return try database.write { db in
             try db.execute(sql: "INSERT INTO playlist(libraryID, name) VALUES (?, ?)", arguments: [libraryID, clean])
-            return CatalogPlaylist(id: db.lastInsertedRowID, libraryID: libraryID, name: clean)
+            return CatalogPlaylist(id: db.lastInsertedRowID, libraryID: libraryID, name: clean, videoCount: 0, lastOpenedOrder: 0)
         }
     }
 

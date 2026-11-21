@@ -149,6 +149,37 @@ struct PRDBTests {
         #expect(try await client.studios(key: "key").map(\.name) == ["Sky", "Hill"])
     }
 
+    @Test func releaseStudioMustStartAtTheFirstCharacterAndEndAtASeparator() {
+        let compound = PRDBStudio(id: "c", name: "CedarGrove")
+        let plain = PRDBStudio(id: "a", name: "Arcadia")
+        let black = PRDBStudio(id: "b", name: "Black")
+        let longer = PRDBStudio(id: "l", name: "Black Lantern")
+        let videos = PRDBStudio(id: "v", name: "HomeVideo")
+        let recognition = StudioRecognition(studios: [compound, plain, black, longer, videos])
+        func find(_ filename: String) -> PRDBStudio? {
+            recognition.match(url: URL(fileURLWithPath: "/Library/" + filename), sourcePath: "/Library")
+        }
+        for separator in [".", "-", "_", " "] {
+            #expect(find("cedargrove" + separator + "River.mp4") == compound)
+        }
+        #expect(find("Cédar.Grove.24.03.01.River.XXX.1080p.MP4-GRP.mp4") == compound)
+        #expect(find("BlackLantern-River.mp4") == longer)
+        #expect(find("Arcadia_2024-02-29_River.mp4") == plain)
+        #expect(find("Arcadia.24.12.31.River.mp4") == plain)
+        for filename in ["River.CedarGrove.24.03.01.mp4", "CedarGrovehouse.River.mp4",
+                         "-CedarGrove.River.mp4", "[CedarGrove].River.mp4", "CedarGrove+River.mp4",
+                         "Arcadia.River.mp4", "Arcadia.23.02.29.River.mp4", "Black.River.mp4",
+                         "Black.24.03.01.River.mp4", "River.Black.24.03.01.mp4",
+                         "Black/River.mp4", "HomeVideo.24.03.01.River.mp4", "My CedarGrove Collection/River.mp4"] {
+            #expect(find(filename) == nil)
+        }
+        #expect(find("Arcadia/River.mp4") == plain)
+        #expect(recognition.match(url: URL(fileURLWithPath: "/Arcadia/Library/River.mp4"),
+                                  sourcePath: "/Arcadia/Library") == nil)
+        let collision = StudioRecognition(studios: [compound, PRDBStudio(id: "other", name: "Cedar Grove")])
+        #expect(collision.match(url: URL(fileURLWithPath: "/library/CedarGrove-River.mp4")) == nil)
+    }
+
     @Test func studioRecognitionLeavesConflictingNamesUnresolved() {
         let grove = PRDBStudio(id: "1", name: "Cedar Grove")
         let lake = PRDBStudio(id: "2", name: "Silver Lake")

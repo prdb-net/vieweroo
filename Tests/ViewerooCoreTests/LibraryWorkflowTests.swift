@@ -380,3 +380,86 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     await unlockedLoad?.value
     #expect(model.phase == .locked && model.entries.isEmpty && model.sources.isEmpty && model.libraries.isEmpty)
 }
+
+@MainActor
+@Test func recentPlaylistsFollowNavigationAcrossLibrariesAndLaunches() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.recent-playlists." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let access = AccessController(store: WorkflowSecrets(), authenticate: { false })
+    let server = WorkflowServer()
+    func launch() -> LibraryModel {
+        let model = LibraryModel(access: access, client: PRDBClient { try await server.respond(to: $0) },
+                                 preferences: preferences, directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+        model.start()
+        return model
+    }
+    let model = launch()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Archive")
+    let catalog = try #require(model.catalog)
+    let library = try #require(model.libraryID)
+    let lists = try (1...20).map { try catalog.createPlaylist(libraryID: library, name: String(format: "List %02d", $0)) }
+    await model.reload()?.value
+    #expect(model.playlists == lists && model.recentPlaylists.isEmpty)
+    for list in lists.prefix(7) {
+        model.browse(.playlists)
+        model.browse(.playlist(list.id), from: .playlist(list.id))
+    }
+    model.goBack()
+    #expect(model.shelf == .playlists && model.visit.selectedTile == .playlist(lists[6].id))
+    #expect(model.recentPlaylists.map(\.id) == lists[2...6].reversed().map(\.id))
+    model.browse(.playlist(lists[3].id))
+    #expect(model.recentPlaylists.map(\.id) == [3, 6, 5, 4, 2].map { lists[$0].id })
+    try catalog.deletePlaylist(lists[3].id)
+    await model.reload()?.value
+    let remaining = [6, 5, 4, 2, 1].map { lists[$0].id }
+    #expect(model.recentPlaylists.map(\.id) == remaining)
+    model.createLibrary("Second")
+    await model.reload()?.value
+    #expect(model.playlists.isEmpty && model.recentPlaylists.isEmpty)
+    let reopened = launch()
+    reopened.selectLibrary(library)
+    await reopened.reload()?.value
+    #expect(reopened.playlists.count == 19 && reopened.recentPlaylists.map(\.id) == remaining)
+}
+
+@MainActor
+@Test func previewActivityCountsCachedSetsSeparatelyFromFailuresAndRetries() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let media = root.appending(path: "Media")
+    try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+    let good = media.appending(path: "Colors.mp4"), bad = media.appending(path: "Incomplete.mov")
+    try await writeColorMovie(to: good)
+    try Data("Incomplete".utf8).write(to: bad)
+    let suite = "vieweroo.activity." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "fixture")
+    model.createLibrary("Archive")
+    model.addSources([media])
+    try await until { model.previews.total == 2 && model.previews.phase == .idle }
+    #expect(model.previews.ready == 1 && model.previews.failures.first?.entry.url == bad)
+    #expect(model.previews.remaining.isEmpty)
+    let library = try #require(model.libraryID)
+    model.createLibrary("Empty")
+    #expect(model.previews.total == 0 && model.previews.failures.isEmpty)
+    try FileManager.default.removeItem(at: bad)
+    try FileManager.default.copyItem(at: good, to: bad)
+    model.selectLibrary(library)
+    model.refresh()
+    try await until { !model.scanBusy && model.previews.ready == 2 && model.previews.phase == .idle }
+    #expect(model.previews.failures.isEmpty)
+    try model.access.setPIN(current: nil, new: "1234")
+    model.pinEnabled = true
+    model.lock()
+    #expect(model.previews.total == 0 && model.previews.remaining.isEmpty && model.lookupActivity == nil)
+}

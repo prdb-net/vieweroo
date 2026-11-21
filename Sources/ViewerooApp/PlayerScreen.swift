@@ -360,22 +360,28 @@ private struct PlayerTimeline: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
-            .overlay(alignment: .leading) {
-                if let hover {
-                    let time = editing ? draft : Double(hover) * controller.duration
-                    let previewGap: CGFloat = controller.loopStart == nil ? 12 : 22
-                    VStack(spacing: 3) {
+            .overlay(alignment: .topLeading) {
+                let fraction = editing ? CGFloat(draft / max(0.001, controller.duration)) : hover
+                if let fraction, controller.duration > 0 {
+                    let time = editing ? draft : Double(fraction) * controller.duration
+                    let anchor = trackInset + trackWidth * fraction
+                    let gap: CGFloat = controller.loopStart == nil ? 4 : 14
+                    VStack(spacing: 2) {
                         if let frame = frames.min(by: { abs($0.time - time) < abs($1.time - time) }) {
                             TimelineStill(url: frame.url)
                         }
-                        Text(clockLabel(time)).font(.caption.monospacedDigit())
+                        Text(clockLabel(time)).font(.caption2.monospacedDigit())
                     }
-                    .frame(width: 148).padding(4)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.horizontal, 5).padding(.vertical, 3)
                     .fixedSize()
-                    .alignmentGuide(VerticalAlignment.center) { $0[.bottom] + previewGap }
-                    .offset(x: min(max(0, trackInset + trackWidth * hover - 78), max(0, width - 156)))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    .visualEffect { content, geometry in
+                        let size = geometry.size
+                        return content.offset(x: min(max(0, anchor - size.width / 2), max(0, width - size.width)),
+                                              y: -size.height - gap)
+                    }
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
             }
         }
@@ -448,15 +454,15 @@ private struct LoopTimelineMarks: View {
     }
 }
 
-private struct TimelineStill: View {
+struct TimelineStill: View {
     let url: URL
     @State private var image: NSImage?
 
     var body: some View {
-        Group {
+        ZStack {
             if let image { Image(nsImage: image).resizable().scaledToFit() }
         }
-        .frame(width: 144, height: 81)
+        .frame(width: 96, height: 54)
         .task(id: url) { image = NSImage(contentsOf: url) }
     }
 }

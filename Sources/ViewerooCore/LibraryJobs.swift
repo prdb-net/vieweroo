@@ -9,6 +9,7 @@ public enum LibraryJobs {
         let modified: Double
         let hash: String?
         let detectedStudio: String?
+        let sourcePath: String?
         var url: URL { URL(fileURLWithPath: path, isDirectory: false) }
     }
 
@@ -25,7 +26,8 @@ public enum LibraryJobs {
             let after = lastID
             let batch = try await catalog.database.read { db in
                 try LookupEntry.fetchAll(db, sql: """
-                    SELECT id, path, fileSize, modified, hash, detectedStudio FROM entry e
+                    SELECT id, path, fileSize, modified, hash, detectedStudio, \(Catalog.studioSourcePathSQL) AS sourcePath
+                    FROM entry e
                     WHERE libraryID = ? AND needsLookup AND id > ?
                     \(availability)
                     ORDER BY id LIMIT 200
@@ -45,8 +47,9 @@ public enum LibraryJobs {
         try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: false) { batch in
             for entry in batch {
                 try Task.checkCancellation()
-                if let studio = recognition.match(url: entry.url), studio.name != entry.detectedStudio {
-                    try catalog.setDetectedStudio(entryID: entry.id, name: studio.name, fileSize: entry.fileSize, modified: entry.modified)
+                let name = recognition.match(url: entry.url, sourcePath: entry.sourcePath)?.name
+                if name != entry.detectedStudio {
+                    try catalog.setDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
                 }
             }
         }
@@ -72,10 +75,10 @@ public enum LibraryJobs {
             for entry in batch {
                 try Task.checkCancellation()
                 guard let result = results[String(entry.id)] else { continue }
-                let studio = result.studio ?? recognition.match(url: entry.url)
+                let studio = recognition.match(url: entry.url, sourcePath: entry.sourcePath, siteHint: result.studio)
                 if result.autoTitle == nil && result.candidates.isEmpty {
-                    if let studio {
-                        try catalog.setDetectedStudio(entryID: entry.id, name: studio.name, fileSize: entry.fileSize, modified: entry.modified)
+                    if studio?.name != entry.detectedStudio {
+                        try catalog.setDetectedStudio(entryID: entry.id, name: studio?.name, fileSize: entry.fileSize, modified: entry.modified)
                     }
                     fallback.append((entry, studio))
                 } else {

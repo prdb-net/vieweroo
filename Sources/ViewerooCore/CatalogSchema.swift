@@ -1,3 +1,4 @@
+import Foundation
 import GRDB
 
 extension Catalog {
@@ -111,6 +112,39 @@ extension Catalog {
                          OR instr(other.path, rtrim(source.path, '/') || '/') = 1)
                 )
                 """)
+        }
+        migrator.registerMigration("recent-playlists-v7") { db in
+            try db.execute(sql: "ALTER TABLE playlist ADD COLUMN lastOpenedOrder INTEGER NOT NULL DEFAULT 0")
+        }
+        migrator.registerMigration("studio-release-prefix-v8") { db in
+            var recognition = StudioRecognition(studios: try fetchStudios(db))
+            // Old site-only responses stored the studio name even if the directory lacked it.
+            let extraNames = try String.fetchAll(db, sql: """
+                SELECT DISTINCT detectedStudio FROM entry WHERE detectedStudio IS NOT NULL
+                EXCEPT SELECT name FROM studio
+                """)
+            for name in extraNames {
+                recognition.add(PRDBStudio(id: "legacy-name:" + name, name: name))
+            }
+
+            var after: Int64 = 0
+            while true {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT id,path,detectedStudio, \(studioSourcePathSQL) AS sourcePath FROM entry e
+                    WHERE id > ? AND detectedStudio IS NOT NULL ORDER BY id LIMIT 200
+                    """, arguments: [after])
+                guard let last = rows.last else { break }
+                for row in rows {
+                    let path: String = row["path"]
+                    let url = URL(fileURLWithPath: path, isDirectory: false)
+                    let name = recognition.match(url: url, sourcePath: row["sourcePath"])?.name
+                    if name != row["detectedStudio"] as String? {
+                        try db.execute(sql: "UPDATE entry SET detectedStudio = ? WHERE id = ?",
+                                       arguments: [name, row["id"] as Int64])
+                    }
+                }
+                after = last["id"]
+            }
         }
         return migrator
     }

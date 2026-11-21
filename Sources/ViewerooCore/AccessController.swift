@@ -31,7 +31,13 @@ protocol SecretStore {
 }
 
 @MainActor
-private struct KeychainStore: SecretStore {
+protocol LegacyCredentials {
+    func read(_ account: String) throws -> Data?
+    func remove(_ account: String) throws
+}
+
+@MainActor
+struct LegacyKeychain: LegacyCredentials {
     private func query(_ account: String) -> [String: Any] {
         // Keep these identifiers stable across releases. The login keychain associates
         // access with the executable and can prompt for authorization after an update.
@@ -52,21 +58,9 @@ private struct KeychainStore: SecretStore {
         return data
     }
 
-    func write(_ data: Data?, account: String) throws {
-        var query = query(account)
-        guard let data else {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw AccessError.keychain(status) }
-            return
-        }
-        let update = [kSecValueData as String: data] as CFDictionary
-        var status = SecItemUpdate(query as CFDictionary, update)
-        if status == errSecItemNotFound {
-            query[kSecValueData as String] = data
-            query[kSecAttrLabel as String] = "Vieweroo \(account)"
-            status = SecItemAdd(query as CFDictionary, nil)
-        }
-        guard status == errSecSuccess else { throw AccessError.keychain(status) }
+    func remove(_ account: String) throws {
+        let status = SecItemDelete(query(account) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw AccessError.keychain(status) }
     }
 }
 
@@ -74,12 +68,12 @@ private struct KeychainStore: SecretStore {
 public final class AccessController {
     private let store: any SecretStore
     private let authenticate: @MainActor () async throws -> Bool
-    private let keyAccount = "PRDB API key"
-    private let pinAccount = "PIN verifier"
+    static let keyAccount = "PRDB API key"
+    static let pinAccount = "PIN verifier"
     private var validationAttempt: UUID?
 
-    public convenience init() {
-        self.init(store: KeychainStore())
+    public convenience init(directory: URL = URL.applicationSupportDirectory.appending(path: "net.prdb.vieweroo")) {
+        self.init(store: SettingsStore(directory: directory, legacy: LegacyKeychain()))
     }
 
     convenience init(store: any SecretStore) {
@@ -94,9 +88,9 @@ public final class AccessController {
         self.authenticate = authenticate
     }
 
-    /// Only successfully validated keys are persisted. An inaccessible Keychain throws.
+    /// Only successfully validated keys are persisted. Storage and migration failures propagate to the access gate.
     public func apiKey() throws -> String? {
-        guard let data = try store.read(keyAccount) else { return nil }
+        guard let data = try store.read(Self.keyAccount) else { return nil }
         guard let key = String(data: data, encoding: .utf8), !key.isEmpty else { throw AccessError.unavailable }
         return key
     }
@@ -117,35 +111,35 @@ public final class AccessController {
         }
         try Task.checkCancellation()
         guard validationAttempt == attempt, isCurrent() else { throw CancellationError() }
-        try store.write(Data(key.utf8), account: keyAccount)
+        try store.write(Data(key.utf8), account: Self.keyAccount)
     }
 
     public func reject(key: String) throws {
-        if try apiKey() == key { try store.write(nil, account: keyAccount) }
+        if try apiKey() == key { try store.write(nil, account: Self.keyAccount) }
     }
 
-    public var hasPIN: Bool { get throws { try store.read(pinAccount) != nil } }
+    public var hasPIN: Bool { get throws { try store.read(Self.pinAccount) != nil } }
 
     public func unlock(pin: String) throws {
-        guard let saved = try store.read(pinAccount) else { return }
+        guard let saved = try store.read(Self.pinAccount) else { return }
         try verify(pin: pin, saved: saved)
     }
 
     public func setPIN(current: String?, new: String?) throws {
-        if let saved = try store.read(pinAccount) {
+        if let saved = try store.read(Self.pinAccount) {
             guard let current else { throw AccessError.incorrectPIN }
             try verify(pin: current, saved: saved)
         }
-        try store.write(try new.map(makeVerifier), account: pinAccount)
+        try store.write(try new.map(makeVerifier), account: Self.pinAccount)
     }
 
     public func recoverPIN(new: String) async throws {
         try validatePIN(new)
-        guard let saved = try store.read(pinAccount) else { throw AccessError.recoveryFailed }
+        guard let saved = try store.read(Self.pinAccount) else { throw AccessError.recoveryFailed }
         guard (try? await authenticate()) == true else { throw AccessError.recoveryFailed }
         try Task.checkCancellation()
-        guard try store.read(pinAccount) == saved else { throw AccessError.recoveryFailed }
-        try store.write(try makeVerifier(new), account: pinAccount)
+        guard try store.read(Self.pinAccount) == saved else { throw AccessError.recoveryFailed }
+        try store.write(try makeVerifier(new), account: Self.pinAccount)
     }
 
     private func validatePIN(_ pin: String) throws {
@@ -158,7 +152,7 @@ public final class AccessController {
         try validatePIN(pin)
         var salt = [UInt8](repeating: 0, count: 16)
         let status = SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt)
-        guard status == errSecSuccess else { throw AccessError.keychain(status) }
+        guard status == errSecSuccess else { throw AccessError.unavailable }
         return Data([1] + salt + (try derive(pin, salt: salt)))
     }
 

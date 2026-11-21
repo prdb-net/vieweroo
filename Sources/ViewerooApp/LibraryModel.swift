@@ -8,7 +8,7 @@ import ViewerooCore
 enum Gate { case starting, setup, locked, ready, failed }
 
 enum Shelf: Hashable {
-    case studios, all, favorites, liked, frequent, sources
+    case studios, all, favorites, liked, frequent, playlists, settings, sources
     case studio(String), performer(PRDBPerformer), playlist(Int64)
 }
 
@@ -42,6 +42,9 @@ final class LibraryModel {
     var sources: [CatalogSource] = []
     var entries: [CatalogEntry] = []
     var playlists: [CatalogPlaylist] = []
+    var recentPlaylists: [CatalogPlaylist] {
+        Array(playlists.filter { $0.lastOpenedOrder > 0 }.sorted { $0.lastOpenedOrder > $1.lastOpenedOrder }.prefix(5))
+    }
     var orderedIDs: [Int64] = []
     private(set) var loadingLibrary = false
     var libraryID: Int64?
@@ -57,7 +60,9 @@ final class LibraryModel {
     var canGoBack: Bool { !backHistory.isEmpty }
     var playing = false
     var scanBusy = false
-    var activity: String?
+    private(set) var scanningFolder: String?
+    private(set) var lookupActivity: String?
+    private(set) var previews = PreviewProgress()
     private(set) var subscriptionRequired = false
     private var lookupStatus: String?
     var networkStatus: String? {
@@ -73,12 +78,12 @@ final class LibraryModel {
     var failure: String?
     private let lastLibrary = "lastLibraryID"
 
-    init(access: AccessController = AccessController(), client: PRDBClient = PRDBClient(),
+    init(access: AccessController? = nil, client: PRDBClient = PRDBClient(),
          preferences: UserDefaults = .standard,
          directory: URL = URL.applicationSupportDirectory.appending(path: "net.prdb.vieweroo"),
          cache: PreviewCache = PreviewCache(root: URL.cachesDirectory.appending(path: "net.prdb.vieweroo/Previews")),
          artworkURL: @escaping (URL?) -> URL? = { $0 }, prepareCatalog: ((Catalog) throws -> Void)? = nil) {
-        self.access = access
+        self.access = access ?? AccessController(directory: directory)
         self.client = client
         self.preferences = preferences
         self.directory = directory
@@ -166,7 +171,9 @@ final class LibraryModel {
         scanQueue.removeAll()
         scanningSourceID = nil
         refreshRequested = false
-        scanBusy = false; activity = nil; lookupStatus = nil
+        scanBusy = false; scanningFolder = nil; lookupStatus = nil
+        previews = PreviewProgress(); lookupActivity = nil
+        previewTask = nil
     }
 
     private func conceal(_ gate: Gate) {
@@ -196,6 +203,7 @@ final class LibraryModel {
             switch error {
             case PRDBError.subscriptionRequired:
                 subscriptionRequired = true
+                lookupActivity = nil
                 worker?.cancel()
             case PRDBError.rateLimited:
                 lookupStatus = "PRDB’s request limit was reached. Pending lookups will retry."
@@ -244,7 +252,7 @@ final class LibraryModel {
         if let tile { visit.selectedTile = tile }
         backHistory.append(visit)
         visit = next
-        loadPlaylist()
+        loadPlaylist(recordOpening: true)
     }
 
     func browse(_ destination: Shelf, from tile: BrowseTile? = nil) {
@@ -273,7 +281,7 @@ final class LibraryModel {
     func goBack() {
         guard phase == .ready, !playing, let previous = backHistory.popLast() else { return }
         visit = previous
-        loadPlaylist()
+        loadPlaylist(recordOpening: true)
     }
 
     /// Collapse overlapping scan and PRDB notifications into one follow-up read.
@@ -295,7 +303,11 @@ final class LibraryModel {
                     loadingLibrary = false
                     libraries = snapshot.libraries
                     sources = snapshot.sources
+                    let availabilityChanged = previewTask != nil && !scanBusy &&
+                        entries.lazy.filter { $0.availability == .available }.count !=
+                        snapshot.entries.lazy.filter { $0.availability == .available }.count
                     entries = snapshot.entries
+                    if availabilityChanged { generatePreviews() }
                     playlists = snapshot.playlists
                     let entryIDs = Set(snapshot.entries.map(\.id))
                     let playlistIDs = Set(snapshot.playlists.map(\.id))
@@ -318,11 +330,22 @@ final class LibraryModel {
         snapshotTask = task
         return task
     }
-    func loadPlaylist() {
-        if case let .playlist(id) = shelf {
-            do { orderedIDs = try catalog?.playlistEntryIDs(id) ?? [] }
-            catch { message = error.localizedDescription }
-        } else { orderedIDs = [] }
+    private func loadPlaylist(recordOpening: Bool = false) {
+        guard case let .playlist(id) = shelf, let catalog, let libraryID else {
+            orderedIDs = []
+            return
+        }
+        do {
+            orderedIDs = try catalog.playlistEntryIDs(id)
+            if recordOpening, detailID == nil, query.isEmpty, recentPlaylists.first?.id != id {
+                playlists = try catalog.recordPlaylistOpen(id, libraryID: libraryID)
+                // An older in-flight snapshot could otherwise restore the previous order.
+                if snapshotTask != nil {
+                    editRevision &+= 1
+                    reload()
+                }
+            }
+        } catch { message = error.localizedDescription }
     }
     func notify(_ text: String, kind: ActionNotice.Kind = .success) {
         guard phase == .ready else { return }
@@ -408,7 +431,7 @@ final class LibraryModel {
         }
         guard !scanBusy else { return }
         let token = UUID()
-        scanToken = token; scanBusy = true; activity = "Scanning folders…"
+        scanToken = token; scanBusy = true
         scanTask = Task {
             var errors: [String] = []
             while true {
@@ -420,6 +443,7 @@ final class LibraryModel {
                 }
                 let source = scanQueue.removeFirst()
                 scanningSourceID = source.id
+                scanningFolder = source.url.lastPathComponent
                 let task = Task.detached(priority: .utility) {
                     // Scanner invokes this callback serially on its worker.
                     let throttle = DiscoveryUpdates()
@@ -434,7 +458,7 @@ final class LibraryModel {
                 guard scanToken == token else { return }
                 scanningSourceID = nil
             }
-            scanBusy = false; activity = nil
+            scanBusy = false; scanningFolder = nil
             if !errors.isEmpty {
                 message = "Some folders could not be scanned: " + errors.joined(separator: ", ")
             } else if refreshRequested {
@@ -447,7 +471,7 @@ final class LibraryModel {
     }
 
     func previewDirectory(_ entry: CatalogEntry) -> URL {
-        cache.directory(for: entry.url, size: entry.fileSize, modificationDate: Date(timeIntervalSince1970: entry.modified))
+        cache.directory(for: entry)
     }
 
     private func generatePreviews() {
@@ -456,11 +480,13 @@ final class LibraryModel {
         let token = UUID()
         previewToken = token
         let pending = entries.filter { $0.availability == .available }
+        previews = PreviewProgress(phase: .checking)
         previewTask = Task(priority: .utility) {
             // Older catalogs may already have preview images but lack movie durations.
             var backfilled = false
             for entry in pending where entry.playCount > 0 && entry.duration == nil {
                 guard previewToken == token else { return }
+                previews.phase = .readingDurations
                 if let duration = try? await AVURLAsset(url: entry.url).load(.duration).seconds,
                    duration.isFinite, duration > 0 {
                     guard previewToken == token else { return }
@@ -471,24 +497,32 @@ final class LibraryModel {
                 }
             }
             guard previewToken == token else { return }
-            if backfilled { reload() }
-
+            previews.phase = .checking
+            guard let missing = try? await PreviewProgress.missing(in: pending, cache: cache),
+                  previewToken == token else { return }
+            previews = PreviewProgress(phase: .preparing, total: pending.count, remaining: missing[...])
             var failuresChanged = false
-            for entry in pending {
+            for entry in missing {
                 guard !Task.isCancelled else { return }
                 let directory = previewDirectory(entry)
                 do {
-                    let generated = try await cache.prepare(media: entry.url, directory: directory)
+                    _ = try await cache.prepare(media: entry.url, directory: directory)
                     guard previewToken == token else { return }
-                    if generated { posterPrepared.send(directory) }
-                } catch PreviewError.unsupportedVideo {
-                    guard previewToken == token, entry.playbackFailure != PreviewError.unsupportedVideo.localizedDescription else { continue }
-                    failuresChanged = true
-                    try? catalog.setPlaybackFailure(entryID: entry.id, message: PreviewError.unsupportedVideo.localizedDescription,
-                                                    fileSize: entry.fileSize, modified: entry.modified)
-                } catch { /* Playback reports decoder errors independently of preview generation. */ }
+                    posterPrepared.send(directory)
+                } catch {
+                    guard previewToken == token, !Task.isCancelled else { return }
+                    previews.failures.append(.init(entry: entry, reason: error.localizedDescription))
+                    if case PreviewError.unsupportedVideo = error, entry.playbackFailure != error.localizedDescription {
+                        failuresChanged = true
+                        try? catalog.setPlaybackFailure(entryID: entry.id, message: error.localizedDescription,
+                                                        fileSize: entry.fileSize, modified: entry.modified)
+                    }
+                }
+                previews.remaining.removeFirst()
             }
-            if failuresChanged, previewToken == token { reload() }
+            previews.phase = .idle
+            previews.remaining = []
+            if backfilled || failuresChanged { reload() }
         }
     }
 
@@ -520,22 +554,28 @@ final class LibraryModel {
     private func startLookups() {
         guard let catalog, let key = try? access.apiKey() else { return }
         worker?.cancel()
+        lookupActivity = nil
         let id = libraryID, stamp = session, client = client
         worker = Task(priority: .utility) {
             await snapshotTask?.value
             guard session == stamp, !Task.isCancelled else { return }
             if let id, entries.contains(where: \.needsLookup) {
+                lookupActivity = "Recognizing studios…"
                 try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
-                if session == stamp { reload() }
+                guard session == stamp, !Task.isCancelled else { return }
+                lookupActivity = nil
+                reload()
             }
             while !Task.isCancelled && !subscriptionRequired {
                 do {
                     if !validated {
+                        lookupActivity = "Checking access…"
                         try await client.validate(key: key)
                         try Task.checkCancellation()
                         validated = true
                     }
                     if let id, entries.contains(where: { $0.needsLookup && $0.availability == .available }) {
+                        lookupActivity = "Matching videos…"
                         if directoryUpdated.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true {
                             let directory = try await client.studios(key: key)
                             try Task.checkCancellation()
@@ -553,9 +593,11 @@ final class LibraryModel {
                     lookupStatus = nil
                 } catch {
                     guard session == stamp, !Task.isCancelled else { return }
+                    lookupActivity = nil
                     handleNetwork(error, key: key)
                     if phase != .ready || subscriptionRequired { return }
                 }
+                lookupActivity = nil
                 try? await Task.sleep(for: .seconds(60))
             }
         }

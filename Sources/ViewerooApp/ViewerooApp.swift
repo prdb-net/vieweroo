@@ -5,6 +5,7 @@ import ViewerooCore
 @main
 struct ViewerooApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @FocusedBinding(\.showAppSettings) private var showAppSettings
     @FocusedBinding(\.librarySearch) private var librarySearch
     @State private var model: LibraryModel
     private let title: String
@@ -23,7 +24,7 @@ struct ViewerooApp: App {
 
     var body: some Scene {
         Window(Text(verbatim: title), id: "library") {
-            RootView(model: model, windowTitle: title)
+            RootView(model: model)
                 .frame(minWidth: 790, minHeight: 535)
                 .background {
                     LibraryWindowConfiguration(browsing: model.phase == .ready && !model.playing)
@@ -34,6 +35,11 @@ struct ViewerooApp: App {
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { showAppSettings = true }
+                    .keyboardShortcut(",")
+                    .disabled(model.phase != .ready || showAppSettings == nil)
+            }
             CommandGroup(after: .sidebar) {
                 Button("Search Library") { librarySearch = true }
                     .keyboardShortcut("f")
@@ -68,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // Keep AppKit's title bar background so empty areas receive native window gestures.
-// While browsing, the toolbar supplies the aligned title.
+// The library menu occupies a single leading toolbar item while browsing.
 struct LibraryWindowConfiguration: NSViewRepresentable {
     let browsing: Bool
 
@@ -107,7 +113,6 @@ struct LibraryWindowConfiguration: NSViewRepresentable {
 
 struct RootView: View {
     @Bindable var model: LibraryModel
-    let windowTitle: String
 
     var body: some View {
         Group {
@@ -115,7 +120,7 @@ struct RootView: View {
             case .starting: ProgressView()
             case .locked, .setup: AccessView(model: model)
             case .ready:
-                LibraryView(model: model, windowTitle: windowTitle)
+                LibraryView(model: model)
                     .overlay(alignment: .bottomTrailing) {
                         if let notice = model.notice {
                             ActionNoticeView(notice: notice) {

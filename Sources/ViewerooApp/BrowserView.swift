@@ -30,6 +30,8 @@ struct BrowserView: View {
         case let .studio(name): return name
         case let .performer(person): return person.name
         case let .playlist(id): return model.playlists.first { $0.id == id }?.name ?? "Playlist"
+        case .playlists: return "Playlists"
+        case .settings: return "Library Settings"
         case .sources: return "Source Folders"
         }
     }
