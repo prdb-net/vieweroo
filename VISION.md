@@ -96,3 +96,7 @@ These ideas are planned for after the minimum viable product (MVP). During devel
 ### Playback compatibility
 
 17. **Additional video formats.** Test AVPlayer with more container and codec combinations and expand the set of formats Vieweroo imports based on the results.
+
+### Watching on two displays
+
+18. **Independent player windows.** Open a second video while the first keeps playing. Each video can play full screen on its own display, with independent playback controls, sound, and resume position. Locking Vieweroo stops both videos and hides their windows’ contents.
