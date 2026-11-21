@@ -17,6 +17,8 @@ Use the shared `VSpace` values in points. Choose the distance by the relationshi
 
 In the library window, carry the native sidebar divider to the top of the title bar. Run one separator beneath the toolbar across both columns. Align the window title to the collection heading’s 24 pt inset while the sidebar is visible.
 
+Let the window handle mouse events over its title so dragging and double-clicking the text behave like the empty title bar.
+
 Align the poster, title, actions and section headings to the same leading edge. Set collection titles in the system large title, the selected video in title bold and section headings in title 3. Use body or headline weight for a title in a list. Use secondary system text for metadata and monospaced digits for a moving clock. A compact row may truncate a title at two lines. The detail view gives the full title room to wrap.
 
 Follow the system appearance and accent. Use SF Symbols with a short action label or tooltip and an accessible name. Use a filled heart for a saved favorite and a filled thumb for an active rating. Preserve native focus rings and keyboard activation. Keep artwork in a 16∶9 frame with an 8 pt continuous corner. The video surface itself fits the source aspect ratio against black.

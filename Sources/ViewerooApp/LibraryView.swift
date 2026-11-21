@@ -93,6 +93,7 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var libraryTitle: some ToolbarContent {
         let title = Text(windowTitle).font(.headline).lineLimit(1).padding(.trailing, VSpace.tight)
+            .allowsHitTesting(false)
         #if compiler(>=6.2)
         if #available(macOS 26, *) {
             // Ungrouped toolbar items already have a 4 pt leading margin.
