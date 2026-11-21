@@ -6,7 +6,12 @@ import ViewerooCore
 @MainActor
 final class PlayerController: ObservableObject {
     let player = AVPlayer()
+    @Published private(set) var entryID: Int64?
     @Published private(set) var title = ""
+    @Published private(set) var volume: Float = 1
+    @Published private(set) var muted = false
+    @Published private(set) var waiting = false
+    @Published private(set) var ended = false
     @Published private(set) var position = 0.0
     @Published private(set) var duration = 0.0
     @Published private(set) var playing = false
@@ -21,8 +26,9 @@ final class PlayerController: ObservableObject {
     private var periodicObserver: Any?
     private var generation = UUID()
     private var seekID: UUID?
-    private var wantsPlayback = false
+    @Published private(set) var wantsPlayback = false
     private var ready = false
+    private var audibleVolume: Float = 1
 
     init() { player.actionAtItemEnd = .pause }
 
@@ -32,6 +38,7 @@ final class PlayerController: ObservableObject {
              history: PlaybackHistory(begin: { try catalog.beginSession(entryID: id) },
                                       append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
                                       resume: { try catalog.setResume(entryID: id, seconds: $0) }))
+        entryID = entry.id
         reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
     }
 
@@ -41,6 +48,7 @@ final class PlayerController: ObservableObject {
         self.history = history
         self.previewDirectory = previewDirectory
         wantsPlayback = true
+        waiting = true
         let token = generation
         let item = AVPlayerItem(url: url)
         player.allowsExternalPlayback = true
@@ -52,6 +60,7 @@ final class PlayerController: ObservableObject {
                 if item.status == .failed { self.fail(item.error) }
                 if item.status == .readyToPlay, !self.ready {
                     self.ready = true
+                    self.waiting = false
                     self.duration = max(0, item.duration.seconds.isFinite ? item.duration.seconds : 0)
                     let initial = startAt.isFinite && startAt < self.duration - 0.05 ? startAt : 0
                     self.seek(to: initial, resume: self.wantsPlayback)
@@ -61,6 +70,7 @@ final class PlayerController: ObservableObject {
         observations.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in
                 guard let self, self.generation == token else { return }
+                if self.ready { self.waiting = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate }
                 self.sample()
             }
         })
@@ -74,7 +84,10 @@ final class PlayerController: ObservableObject {
             controller.sample(playing: false)
             if let start = controller.loopStart, controller.loopEnd != nil, controller.wantsPlayback {
                 controller.seek(to: start, resume: true)
-            } else { controller.wantsPlayback = false }
+            } else {
+                controller.wantsPlayback = false
+                controller.ended = true
+            }
         }
         listen(for: .AVPlayerItemTimeJumped, item: item) { controller, _ in
             guard controller.seekID == nil else { return }
@@ -98,6 +111,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func fail(_ underlying: Error?) {
+        waiting = false
         wantsPlayback = false
         sample(playing: false)
         player.pause()
@@ -129,6 +143,21 @@ final class PlayerController: ObservableObject {
         } catch { self.error = "The playback position could not be saved. \(error.localizedDescription)" }
     }
 
+    func setVolume(_ level: Float) {
+        guard level.isFinite else { return }
+        volume = max(0, min(1, level))
+        if volume > 0 { audibleVolume = volume }
+        player.volume = volume
+        muted = volume == 0
+        player.isMuted = muted
+    }
+
+    func toggleMute() {
+        if muted && volume == 0 { setVolume(audibleVolume); return }
+        muted.toggle()
+        player.isMuted = muted
+    }
+
     func togglePlayback() {
         if wantsPlayback {
             sample(playing: false)
@@ -136,7 +165,7 @@ final class PlayerController: ObservableObject {
             player.pause()
         } else {
             wantsPlayback = true
-            if ready, duration > 0, position >= (loopEnd ?? duration) - 0.05 {
+            if ready, duration > 0, ended || position >= (loopEnd ?? duration) - 0.05 {
                 seek(to: loopStart ?? 0, resume: true)
             } else if ready { player.play() }
         }
@@ -145,6 +174,7 @@ final class PlayerController: ObservableObject {
     func seek(to seconds: Double, resume: Bool? = nil) {
         guard ready, seconds.isFinite else { return }
         sample(playing: false)
+        ended = false
         let target = max(0, min(seconds, duration))
         if let loopStart, let loopEnd, target < loopStart || target >= loopEnd { clearLoop() }
         wantsPlayback = resume ?? wantsPlayback
@@ -198,7 +228,10 @@ final class PlayerController: ObservableObject {
         clearLoop()
         ready = false
         playing = false
+        entryID = nil
         title = ""
+        ended = false
+        waiting = false
         error = nil
         history = nil
         reportUnsupported = nil

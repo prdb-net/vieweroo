@@ -80,6 +80,12 @@ Open the last-used library in its studio overview. Include an **Unknown Studio**
 
 Use an available PRDB preview image for a video tile, with a locally extracted still as the fallback. Source performer portraits from PRDB. As soon as the initial file scan completes, start generating timestamped thumbnail series for the discovered playable videos in the background. This work runs independently of PRDB lookups and of whether anyone has opened the videos. Cache the series locally for the player's timeline and keep browsing and playback available while generation runs.
 
+### 11. Keep playback and discovery in the library window
+
+Use native window full screen so AVPlayer, its active item and the privacy boundary stay together. Switching videos closes the previous playback session and reads the selected entry’s current saved position. Preserve the originating shelf, detail and search while the player is visible. Compute alternatives using the active catalog entries on the Mac. Window width determines where the list is presented.
+
+The [interface guide](DESIGN.md) defines layout, spacing and feedback. Use one transient action notice in the unlocked window. Clear it on a library or access change. Keep form errors, persistent status and destructive confirmations at their point of use.
+
 ## MVP acceptance checks
 
 - **Identification.** Use the PRDB SDK's OpenAPI contract for `POST /videos/identify`. A batch contains at most 200 files. Associate each result with its input using the client-supplied `ref`. Test four distinct responses: a unique `OsHash` match links the title, a filename match offers a candidate for confirmation, a site-only result supplies a studio, and an ambiguous result leaves the title unresolved. Verify OSHash against the SDK’s [published OSHash tests](https://github.com/prdb-net/prdb-sdk/blob/bf647a6e2164b3cfcdb74bb37d54d9568f939aee/csharp/tests/Prdb.Hashing.Tests/OsHashTests.cs). The SDK’s `docs/video-hashing-vectors.json` covers perceptual hashing.

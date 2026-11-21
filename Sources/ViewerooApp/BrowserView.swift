@@ -4,7 +4,7 @@ import ViewerooCore
 struct BrowserView: View {
     @Bindable var model: LibraryModel
     @State private var deletingPlaylist = false
-    private let columns = [GridItem(.adaptive(minimum: 175, maximum: 310), spacing: 18)]
+    private let columns = [GridItem(.adaptive(minimum: 176, maximum: 320), spacing: VSpace.group, alignment: .topLeading)]
     private var searching: Bool { !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var studioIndex: Bool { !searching && (model.shelf ?? .studios) == .studios }
     private var playlistID: Int64? {
@@ -49,9 +49,9 @@ struct BrowserView: View {
     var body: some View {
         let records = filtered
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: VSpace.section) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.largeTitle.bold()).textSelection(.enabled)
+                    Text(title).font(.largeTitle.bold()).textSelection(.enabled).accessibilityAddTraits(.isHeader)
                     Spacer()
                     if !records.isEmpty {
                         Text("\(records.count) \(records.count == 1 ? "video" : "videos")")
@@ -64,28 +64,32 @@ struct BrowserView: View {
                 if records.isEmpty { empty }
                 else if studioIndex {
                     let groups = Dictionary(grouping: records) { $0.studio ?? "Unknown Studio" }
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(groups.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }), id: \.self) { studio in
                             if let group = groups[studio], let cover = group.first {
                                 Button { model.shelf = .studio(studio) } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
+                                    VStack(alignment: .leading, spacing: VSpace.tight) {
                                         Poster(model: model, entry: cover)
-                                        Text(studio).font(.headline).lineLimit(1)
-                                        Text(group.count == 1 ? "1 video" : "\(group.count) videos")
-                                            .font(.caption).foregroundStyle(.secondary)
+                                        VStack(alignment: .leading, spacing: VSpace.unit) {
+                                            Text(studio).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                                            Text(group.count == 1 ? "1 video" : "\(group.count) videos")
+                                                .font(.subheadline).foregroundStyle(.secondary)
+                                        }
                                     }.contentShape(Rectangle())
                                 }.buttonStyle(.plain)
                             }
                         }
                     }
                 } else {
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(records) { entry in
                             Button { model.detailID = entry.id } label: {
-                                VStack(alignment: .leading, spacing: 7) {
+                                VStack(alignment: .leading, spacing: VSpace.tight) {
                                     Poster(model: model, entry: entry)
-                                    Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                                    Text(subtitle(entry)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    VStack(alignment: .leading, spacing: VSpace.unit) {
+                                        Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                                        Text(subtitle(entry)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                    }
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             .contextMenu {
@@ -93,18 +97,18 @@ struct BrowserView: View {
                                 if let id = playlistID {
                                     Button("Move Earlier") { move(entry, by: -1, playlist: id) }.disabled(model.orderedIDs.first == entry.id)
                                     Button("Move Later") { move(entry, by: 1, playlist: id) }.disabled(model.orderedIDs.last == entry.id)
-                                    Button("Remove from Playlist") { model.change { try $0.removeFromPlaylist(id, entryID: entry.id) } }
+                                    Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
                                 }
                             }
                         }
                     }
                 }
-            }.padding(26).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(VSpace.section).frame(maxWidth: .infinity, alignment: .leading)
         }
         .alert("Delete this playlist?", isPresented: $deletingPlaylist) {
             Button("Cancel", role: .cancel) {}
             Button("Delete Playlist", role: .destructive) {
-                if let id = playlistID { model.change { try $0.deletePlaylist(id); model.shelf = .studios } }
+                if let id = playlistID { model.change("Playlist deleted") { try $0.deletePlaylist(id); model.shelf = .studios } }
             }
         } message: { Text("All videos will remain in the library.") }
     }
@@ -118,7 +122,7 @@ struct BrowserView: View {
     private func move(_ entry: CatalogEntry, by delta: Int, playlist id: Int64) {
         var ids = model.orderedIDs
         guard let i = ids.firstIndex(of: entry.id), ids.indices.contains(i + delta) else { return }
-        ids.swapAt(i, i + delta); model.change { try $0.reorderPlaylist(id, entryIDs: ids) }
+        ids.swapAt(i, i + delta); model.change("Playlist order saved") { try $0.reorderPlaylist(id, entryIDs: ids) }
     }
     @ViewBuilder private var empty: some View {
         if searching { ContentUnavailableView.search(text: model.query) }
@@ -149,7 +153,7 @@ struct Poster: View {
                     else if let local { Image(nsImage: local).resizable().scaledToFill() }
                     else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
                 }
-            }.clipped().clipShape(RoundedRectangle(cornerRadius: 7))
+            }.clipped().clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
             .task(id: ImageRequest(directory: model.previewDirectory(entry), revision: model.previewRevision)) {
                 let directory = model.previewDirectory(entry)
                 if loadedDirectory != directory { local = nil; loadedDirectory = directory }

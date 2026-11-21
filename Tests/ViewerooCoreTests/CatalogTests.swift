@@ -82,6 +82,48 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: media.path))
     }
 
+    func testSuggestionsRankPlayableNeighborsFromTheSameLibrary() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        for name in ["Current","Studio","Cast","Tag","Unavailable","Removed","A","B","C","D","E","F"] {
+            try f.add(name + ".mp4")
+        }
+        try f.scan()
+        let catalog = f.catalog
+        let second = try catalog.createLibrary(name: "Other")
+        let source = try catalog.addSource(libraryID: second.id, url: f.media)
+        try CatalogScanner(catalog: catalog).scan(source: source)
+        let all = try catalog.entries(libraryID: f.library.id)
+        func named(_ name: String) throws -> CatalogEntry { try XCTUnwrap(all.first { $0.title == name }) }
+
+        let current = try named("Current"), sharedCast = try named("Cast")
+        let person = PRDBPerformer(id: "one", name: "Alex")
+        for entry in [current, sharedCast] {
+            try catalog.confirmMatch(entryID: entry.id, title: .init(id: entry.title, title: entry.title, performers: [person]))
+        }
+        for name in ["Current","Studio","Removed"] {
+            try catalog.setManualStudio(entryID: named(name).id, name: "Harbor")
+        }
+        let unavailable = try named("Unavailable")
+        try catalog.setPlaybackFailure(entryID: unavailable.id, message: "Decoder unavailable",
+                                       fileSize: unavailable.fileSize, modified: unavailable.modified)
+        try FileManager.default.removeItem(at: named("Removed").url)
+        try f.scan()
+        try catalog.setTags(entryID: current.id, tags: ["Blue"])
+        try catalog.setTags(entryID: named("Tag").id, tags: ["blue"])
+        let refreshed = try XCTUnwrap(catalog.entry(current.id))
+        let library = try catalog.entries(libraryID: f.library.id)
+        let mixed = try catalog.entries(libraryID: second.id) + library
+        let choices = RelatedVideo.suggestions(for: refreshed, in: mixed)
+        XCTAssertEqual(choices.count, 8)
+        XCTAssertEqual(choices.prefix(3).map(\.entry.title), ["Studio", "Cast", "Tag"])
+        XCTAssertEqual(choices.prefix(3).map(\.subtitle), ["Harbor", "With Alex", "Tagged blue"])
+        XCTAssertEqual(choices[3].entry.title, "D")
+        XCTAssertTrue(choices.allSatisfy { $0.entry.libraryID == current.libraryID })
+        XCTAssertTrue(Set(choices.map(\.entry.title)).isDisjoint(with: ["Current","Removed","Unavailable"]))
+        XCTAssertTrue(RelatedVideo.suggestions(for: refreshed, in: [refreshed]).isEmpty)
+    }
+
     func testOfflineAndMissingRemainDistinctAndKeepPersonalData() throws {
         let f = try LibraryFixture()
         defer { f.clean() }

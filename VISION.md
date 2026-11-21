@@ -26,11 +26,15 @@ You can correct the studio directly on the video. Vieweroo keeps your choice acr
 
 The interface should feel familiar on a Mac and invite you to browse. Large thumbnails and legible titles help you choose what to watch. After playback, you return to your previous place in the studio view, search results, or playlist.
 
+A video’s detail page and windowed player offer other playable videos from the active library. Related titles come first, followed by more of the collection. Choose one to switch immediately and resume it at its saved position. Returning from the player takes you back to where you started browsing.
+
 Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated.
 
 ## A player for repeat viewing
 
 Sometimes you want to watch an entire video. Other times you have a particular scene in mind. You can start from the beginning or resume where you left off. Keyboard controls, short skips, and thumbnail previews on the timeline help you find a scene. To watch a segment on repeat, set the start and end of a loop.
+
+Enter full screen from the player to give the video the whole window. The controls recede during uninterrupted playback and return on pointer movement. Leave full screen to browse other titles while watching.
 
 AirPlay is part of the MVP. You can choose an Apple TV or another compatible AirPlay receiver from the player and watch the video on that screen while controlling playback from your Mac.
 
@@ -39,6 +43,8 @@ Vieweroo records locally how often you play each video, how long you spend watch
 Watching the same minute five times in a loop counts as one session, five minutes of viewing time at normal speed, and five passes through that segment. Pausing or switching to AirPlay keeps the session going.
 
 ## Organizing your collection
+
+Short confirmations appear at the lower right when you save changes. Playback problems and library availability stay visible where you can address them.
 
 Alongside your viewing history, you can make your own selections. Save a video to Favorites for quick access. Independently, give it a thumbs up or thumbs down to record whether you liked it. Custom tags let you search the collection using your own vocabulary. Playlists let you arrange videos from different studios in the order you want to watch them.
 

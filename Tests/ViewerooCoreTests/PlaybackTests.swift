@@ -36,6 +36,21 @@ import ViewerooCore
 }
 
 @MainActor
+@Test func unmutingRestoresTheLastAudibleVolume() {
+    let controller = PlayerController()
+    controller.setVolume(0.25)
+    controller.toggleMute()
+    #expect(controller.player.isMuted)
+    controller.toggleMute()
+    #expect(!controller.player.isMuted)
+    #expect(controller.player.volume == 0.25)
+    controller.setVolume(0)
+    #expect(controller.muted)
+    controller.toggleMute()
+    #expect(!controller.player.isMuted && controller.player.volume == 0.25)
+}
+
+@MainActor
 @Test func syntheticMovieGetsCachedFramesPlaysLoopsAndStops() async throws {
     let fm = FileManager.default
     let temporary = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)

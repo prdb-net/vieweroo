@@ -47,6 +47,7 @@ final class LibraryModel {
     var networkStatus: String?
     var previewRevision = 0
     var setupReason: String?
+    var notice: ActionNotice?
     var message: String?
     var failure: String?
     private let lastLibrary = "lastLibraryID"
@@ -92,6 +93,7 @@ final class LibraryModel {
     }
 
     private func stopWork() {
+        notice = nil
         session = UUID()
         scanToken = UUID()
         previewToken = UUID()
@@ -166,17 +168,34 @@ final class LibraryModel {
             catch { message = error.localizedDescription }
         } else { orderedIDs = [] }
     }
-    func change(_ operation: (Catalog) throws -> Void) {
-        guard phase == .ready, let catalog else { return }
-        do { try operation(catalog); reload() }
-        catch { message = error.localizedDescription }
+    func notify(_ text: String, kind: ActionNotice.Kind = .success) {
+        guard phase == .ready else { return }
+        notice = ActionNotice(text: text, kind: kind)
     }
-    func createLibrary(_ name: String) {
-        change { db in selectLibrary(try db.createLibrary(name: name).id) }
+
+    @discardableResult
+    func change(_ confirmation: String? = nil, kind: ActionNotice.Kind = .success,
+                onFailure: ((String) -> Void)? = nil, _ operation: (Catalog) throws -> Void) -> Bool {
+        guard phase == .ready, let catalog else { return false }
+        do {
+            try operation(catalog)
+            reload()
+            if let confirmation { notify(confirmation, kind: kind) }
+            return true
+        } catch {
+            let description = (error as? CatalogError)?.localizedDescription ?? "Couldn’t save the change. Try again."
+            if let onFailure { onFailure(description) }
+            else { notify(description, kind: .error) }
+            return false
+        }
+    }
+    @discardableResult
+    func createLibrary(_ name: String, onFailure: ((String) -> Void)? = nil) -> Bool {
+        change("Library created", onFailure: onFailure) { db in selectLibrary(try db.createLibrary(name: name).id) }
     }
     func deleteLibrary() {
         guard let libraryID else { return }
-        change { db in
+        change("Library deleted") { db in
             stopWork()
             try db.deleteLibrary(libraryID)
             selectLibrary(try db.libraries().first?.id)
@@ -199,19 +218,23 @@ final class LibraryModel {
 
     func addSources(_ urls: [URL]) {
         guard phase == .ready, let libraryID else { return }
-        change { db in
+        guard !urls.isEmpty else { return }
+        let saved = change(urls.count == 1 ? "Source folder saved" : "Source folders saved") { db in
             for url in urls { _ = try db.addSource(libraryID: libraryID, url: url) }
         }
-        refresh()
+        // A multi-folder selection may have saved earlier folders before a later one failed.
+        if !saved { reload() }
+        availabilityTask?.cancel()
+        scan(sources)
     }
 
     func refresh() {
         guard phase == .ready, libraryID != nil else { return }
         availabilityTask?.cancel()
-        scan(sources)
+        scan(sources, requested: true)
     }
 
-    private func scan(_ list: [CatalogSource]) {
+    private func scan(_ list: [CatalogSource], requested: Bool = false) {
         guard let catalog else { return }
         scanTask?.cancel()
         let token = UUID()
@@ -234,7 +257,11 @@ final class LibraryModel {
             }
             guard scanToken == token, !Task.isCancelled else { return }
             scanBusy = false; activity = nil; reload()
-            if !errors.isEmpty { message = "Some folders could not be scanned: " + errors.joined(separator: ", ") }
+            if !errors.isEmpty {
+                message = "Some folders could not be scanned: " + errors.joined(separator: ", ")
+            } else if requested {
+                notify("Library refreshed")
+            }
             generatePreviews()
             startLookups()
         }
@@ -271,6 +298,24 @@ final class LibraryModel {
         guard phase == .ready, entry.libraryID == libraryID, let catalog else { return }
         playback.open(entry: entry, startAt: position, previewDirectory: previewDirectory(entry), catalog: catalog)
         playing = true
+    }
+
+    func hasAlternatives(to current: CatalogEntry) -> Bool {
+        phase == .ready && current.libraryID == libraryID && entries.contains { RelatedVideo.canOffer($0, for: current) }
+    }
+
+    func playSuggested(_ suggestion: CatalogEntry) {
+        guard phase == .ready, suggestion.libraryID == libraryID, let catalog else { return }
+        do {
+            // Switching back can happen before the browser has reloaded the previous playback session.
+            guard let entry = try catalog.entry(suggestion.id), entry.libraryID == libraryID,
+                  entry.availability == .available, entry.playbackFailure == nil else {
+                reload()
+                notify("This video is no longer available to play.", kind: .error)
+                return
+            }
+            play(entry, at: entry.resume)
+        } catch { message = error.localizedDescription }
     }
 
     func endPlayback() { playback.stop(); playing = false; reload() }

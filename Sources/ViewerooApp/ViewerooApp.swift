@@ -65,7 +65,18 @@ struct RootView: View {
             switch model.phase {
             case .starting: ProgressView()
             case .locked, .setup: AccessView(model: model)
-            case .ready: LibraryView(model: model)
+            case .ready:
+                LibraryView(model: model)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let notice = model.notice {
+                            ActionNoticeView(notice: notice) {
+                                if model.notice?.id == notice.id { model.notice = nil }
+                            }
+                            .id(notice.id)
+                            .padding(.trailing, VSpace.section)
+                            .padding(.bottom, model.playing ? 88 : VSpace.section)
+                        }
+                    }
             case .failed:
                 ContentUnavailableView {
                     Label("Vieweroo could not open", systemImage: "exclamationmark.triangle")
@@ -94,7 +105,7 @@ struct AccessView: View {
 
     private var setup: Bool { model.phase == .setup }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: VSpace.group) {
             Image(systemName: setup ? "rectangle.stack.badge.play" : "lock.fill")
                 .font(.system(size: 44, weight: .light)).foregroundStyle(.tint)
                 .accessibilityHidden(true)
@@ -119,7 +130,7 @@ struct AccessView: View {
                 }
             }
         }
-        .frame(width: 355).padding(32)
+        .frame(width: 355).padding(VSpace.page)
         .onAppear { focused = true }
         .id(model.phase)
     }

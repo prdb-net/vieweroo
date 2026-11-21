@@ -73,6 +73,7 @@ private final class WorkflowSecrets: SecretStore {
     try await first.configure(key: "fixture-access")
     #expect(first.phase == .ready)
     first.createLibrary("Synthetic Collection")
+    #expect(first.notice?.text == "Library created")
     let libraryID = try #require(first.libraryID)
     first.addSources([source])
     try await until {
@@ -82,10 +83,21 @@ private final class WorkflowSecrets: SecretStore {
     let entry = try #require(first.entries.first)
     #expect(entry.filename == "Colors.MP4")
     #expect(first.playback.player.currentItem == nil)
-    first.change { catalog in
+    first.change("Added to Favorites", kind: .favorite) { catalog in
         try catalog.setFavorite(entryID: entry.id, value: true)
         try catalog.setRating(entryID: entry.id, value: 1)
     }
+    #expect(first.notice?.kind == .favorite)
+    let confirmationID = first.notice?.id
+    let reordered = first.change("Playlist order saved") { _ in throw CatalogError.invalidPlaylistOrder }
+    #expect(!reordered && first.notice?.kind == .error && first.notice?.id != confirmationID)
+    var formError: String?
+    let previousNoticeID = first.notice?.id
+    let formSaved = first.change("Title match saved", onFailure: { formError = $0 }) { _ in
+        throw CatalogError.invalidValue
+    }
+    #expect(!formSaved && formError == CatalogError.invalidValue.localizedDescription)
+    #expect(first.notice?.id == previousNoticeID)
     first.shelf = .favorites
     first.detailID = entry.id
     first.play(entry, at: 0)
@@ -99,6 +111,7 @@ private final class WorkflowSecrets: SecretStore {
     try await until { first.playback.position > 0.3 }
     first.lock()
     #expect(first.phase == .locked && first.entries.isEmpty && first.playlists.isEmpty)
+    #expect(first.notice == nil)
     #expect(first.libraryID == nil && first.detailID == nil)
     #expect(first.playback.player.currentItem == nil && !first.playback.player.allowsExternalPlayback)
 
@@ -125,6 +138,57 @@ private final class WorkflowSecrets: SecretStore {
     #expect(reopened.entries.isEmpty && reopened.sources.isEmpty && reopened.libraries.isEmpty)
     try reopened.unlock(pin: "0000")
     #expect(reopened.phase == .setup && reopened.entries.isEmpty)
+}
+
+@MainActor
+@Test func switchingSuggestionsResumesTheLatestPositionAndKeepsTheBrowsingContext() async throws {
+    _ = NSApplication.shared
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let folder = root.appendingPathComponent("Clips")
+    try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+    let firstURL = folder.appendingPathComponent("First.mp4")
+    try await writeColorMovie(to: firstURL)
+    try fm.copyItem(at: firstURL, to: folder.appendingPathComponent("Second.mp4"))
+    let suite = "vieweroo.suggestions.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root.appendingPathComponent("Support"),
+                             cache: PreviewCache(root: root.appendingPathComponent("Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Clips")
+    model.addSources([folder])
+    try await until { model.entries.count == 2 && !model.scanBusy }
+    let first = model.entries[0], second = model.entries[1]
+    model.shelf = .all
+    model.detailID = first.id
+    model.play(first, at: 0)
+    try await until { model.playback.position > 0.65 }
+    model.playSuggested(second)
+    try await until { model.playback.title == second.title && model.playback.position > 0.15 }
+    let saved = try #require(try model.catalog?.entry(first.id)?.resume)
+    #expect(saved > 0.65)
+    #expect(first.resume == 0)
+
+    // The same old tile may still be visible when selected again.
+    model.playSuggested(first)
+    try await until { model.playback.playing && model.playback.title == first.title }
+    #expect(model.playback.position >= saved - 0.05)
+    model.endPlayback()
+    #expect(model.shelf == .all && model.detailID == first.id)
+    #expect(try model.catalog?.entry(first.id)?.playCount == 2)
+    #expect(try model.catalog?.entry(second.id)?.playCount == 1)
+    try model.access.setPIN(current: nil, new: "0000")
+    model.pinEnabled = true
+    model.lock()
+    model.playSuggested(second)
+    #expect(!model.hasAlternatives(to: first))
+    #expect(model.playback.player.currentItem == nil)
 }
 
 @MainActor

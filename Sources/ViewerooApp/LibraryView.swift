@@ -14,13 +14,13 @@ struct LibraryView: View {
     var body: some View {
         ZStack {
             navigation
-            .opacity(model.playing ? 0 : 1)
-            .disabled(model.playing)
-            .allowsHitTesting(!model.playing)
-            .accessibilityHidden(model.playing)
+                .opacity(model.playing ? 0 : 1)
+                .disabled(model.playing)
+                .allowsHitTesting(!model.playing)
+                .accessibilityHidden(model.playing)
 
             if model.playing {
-                PlayerScreen(controller: model.playback, onClose: model.endPlayback, onLock: model.pinEnabled ? { model.lock() } : nil)
+                PlayerScreen(model: model)
                     .background(.background)
             }
         }
@@ -28,12 +28,11 @@ struct LibraryView: View {
             switch kind {
             case .privacy: PrivacyView(model: model)
             case .library, .playlist:
-                NameForm(isLibrary: kind == .library) { name in
-                    if kind == .library { model.createLibrary(name) }
-                    else if let id = model.libraryID {
-                        model.change { db in
-                            model.shelf = .playlist(try db.createPlaylist(libraryID: id, name: name).id)
-                        }
+                NameForm(isLibrary: kind == .library) { name, onFailure in
+                    if kind == .library { return model.createLibrary(name, onFailure: onFailure) }
+                    guard let id = model.libraryID else { return false }
+                    return model.change("Playlist created", onFailure: onFailure) { db in
+                        model.shelf = .playlist(try db.createPlaylist(libraryID: id, name: name).id)
                     }
                 }
             }
@@ -102,7 +101,7 @@ struct LibraryView: View {
             } label: {
                 Label(model.libraries.first { $0.id == model.libraryID }?.name ?? "Libraries", systemImage: "rectangle.stack")
                     .lineLimit(1).font(.headline)
-            }.menuStyle(.borderlessButton).padding()
+            }.menuStyle(.borderlessButton).padding(VSpace.group)
             List(selection: $model.shelf) {
                 Section("Library") {
                     Label("Studios", systemImage: "square.grid.2x2").tag(Shelf.studios)
@@ -118,16 +117,16 @@ struct LibraryView: View {
                 } header: { Text("Playlists") }
             }.listStyle(.sidebar).disabled(model.libraryID == nil)
             if let activity = model.activity {
-                HStack { ProgressView().controlSize(.small); Text(activity).font(.caption); Spacer() }.padding(12)
+                HStack { ProgressView().controlSize(.small); Text(activity).font(.caption); Spacer() }.padding(VSpace.control)
             }
-            if let notice = model.networkStatus { Text(notice).font(.caption).foregroundStyle(.secondary).padding(10) }
+            if let notice = model.networkStatus { Text(notice).font(.caption).foregroundStyle(.secondary).padding(VSpace.control) }
             Divider()
             HStack {
                 Button { sheet = .privacy } label: { Label("Privacy", systemImage: "lock.shield") }.buttonStyle(.plain)
                 Spacer()
                 Button { model.refresh() } label: { Label("Refresh Library", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
                     .buttonStyle(.plain).disabled(model.libraryID == nil || model.scanBusy).help("Refresh Library")
-            }.padding(14)
+            }.padding(VSpace.group)
         }
     }
 }
@@ -135,19 +134,24 @@ struct LibraryView: View {
 struct NameForm: View {
     @Environment(\.dismiss) var dismiss
     let isLibrary: Bool
-    let save: (String) -> Void
+    let save: (String, @escaping (String) -> Void) -> Bool
     @State private var name = ""
+    @State private var error: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: VSpace.group) {
             Text(isLibrary ? "New Library" : "New Playlist").font(.title2.bold())
             TextField("Name", text: $name)
+            if let error { Text(error).foregroundStyle(.red) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Create") { dismiss(); save(name.trimmingCharacters(in: .whitespacesAndNewlines)) }
-                    .keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Create") {
+                    let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if save(clean, { error = $0 }) { dismiss() }
+                }
+                .keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(24).frame(width: 340)
+        }.padding(VSpace.section).frame(width: 340)
     }
 }
 
@@ -159,7 +163,7 @@ struct PrivacyView: View {
     @State private var removing = false
     @State private var error: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: VSpace.group) {
             Text("PIN Protection").font(.title2.bold())
             Text("Require a PIN at launch and use Shift–Command–L to lock during playback.")
                 .foregroundStyle(.secondary)
@@ -174,10 +178,12 @@ struct PrivacyView: View {
                 Button("Save") {
                     do {
                         try model.access.setPIN(current: model.pinEnabled ? current : nil, new: removing ? nil : next)
-                        model.pinEnabled = try model.access.hasPIN; dismiss()
+                        model.pinEnabled = try model.access.hasPIN
+                        model.notify(removing ? "PIN protection turned off" : "PIN saved")
+                        dismiss()
                     } catch { self.error = error.localizedDescription }
                 }.keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 380)
+        }.padding(VSpace.section).frame(width: 380)
     }
 }

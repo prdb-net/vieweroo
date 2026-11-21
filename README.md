@@ -27,9 +27,10 @@ To update, quit Vieweroo and replace the app in Applications with the new copy. 
 
 ## Browse and play
 
-- Open a studio or use the toolbar search to find a title, filename, studio, performer, or tag in the active library. Select a video to see its cast, save a favorite, rate it, edit tags, or confirm a suggested PRDB title. **Set Studio** keeps your choice across scans.
+- Open a studio or use the toolbar search to find a title, filename, studio, performer, or tag in the active library. Select a video to see its cast, save a favorite, rate it, or open **Library Details** to edit tags or confirm a suggested PRDB title. **Set Studio** keeps your choice across scans.
 - Create a playlist in the sidebar. Use **Add to Playlist** on a video. In a playlist, Control-click a tile to move it earlier or later or remove it.
-- Choose **Play**, **Resume**, **From Beginning**, or a segment under **Viewing History**. Press Space to pause, use the arrow keys to skip ten seconds, and use the bracket keys to mark the start and end of a loop. Use the AirPlay picker to select a video receiver. Escape returns to the library.
+- Choose **Play**, **Resume**, **From Beginning**, or a segment under **Viewing History**. Use the arrow keys to skip ten seconds, and the bracket keys to mark the start and end of a loop. Click the video or press Space to toggle playback. Use the volume slider or press M to mute. Click the full-screen button, double-click the video, or press F to enter or leave full screen. Escape leaves full screen first, then returns to the library. Use the AirPlay picker to select a video receiver.
+- Select a title under **More to Watch** to play it at its saved position. A narrower player has a **More to Watch** button in its header. Closing the player returns to the original browsing location.
 - Choose **Refresh Library** (⌘R) after adding or moving files. Disconnected sources and missing files retain their entries and personal data. **Source Folders** lets you see the effect of removing a source before you confirm.
 
 ## Privacy and access
@@ -38,4 +39,4 @@ PRDB receives the filename, file size, and available OSHash for identification. 
 
 Enable a PIN under **Privacy** and press ⇧⌘L to lock the app and stop playback. **Forgot PIN?** uses macOS account authentication. PIN protection controls the interface and playback. The SQLite catalog and image cache use ordinary local storage.
 
-The [product vision](VISION.md) and [architecture decisions](ARCHITECTURE.md) describe MVP behavior and the hardware acceptance checks.
+The [product vision](VISION.md), [architecture decisions](ARCHITECTURE.md) and [interface guide](DESIGN.md) describe MVP behavior, hardware acceptance checks and the macOS design conventions.
