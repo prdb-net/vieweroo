@@ -11,9 +11,8 @@ struct ViewerooApp: App {
 
     init() {
         #if DEBUG
-        if Bundle.main.bundleIdentifier == "net.prdb.vieweroo.test-library" {
+        if let root = TestLibraryProfile.root(for: .main) {
             title = "Vieweroo Test Library"
-            let root = Bundle.main.bundleURL.deletingLastPathComponent()
             _model = State(initialValue: TestLibraryProfile.model(at: root))
             return
         }

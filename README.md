@@ -18,13 +18,15 @@ The build produces `dist/Vieweroo.app`. The test suite uses temporary catalogs, 
 
 ## Run the synthetic test library
 
-Run `./scripts/test-library` on a supported Mac. The first run uses Python 3 and FFmpeg with libx264 (`brew install ffmpeg`) to generate 40 short H.264 movies with audio. It opens **Vieweroo Test Library** in the **Motion Archive** studio overview. Allow the initial scan and thumbnail generation to finish.
+Run `./scripts/test-library --install` once on a supported Mac to install **Vieweroo Test Library** in your personal Applications folder (`~/Applications`). Setup uses Python 3 and FFmpeg with libx264 (`brew install ffmpeg`) to generate 40 short H.264 movies with audio. The app opens **Motion Archive** in its studio overview. Allow the initial scan and thumbnail generation to finish.
+
+After setup, double-click the app in Finder or open it from Spotlight. The simulated PRDB runs inside the app and works offline. Everyday launches need only the installed app and its data in `~/Library/Application Support/net.prdb.vieweroo.test-library.installed/`. Favorites, playback positions and settings persist after quitting or restarting your Mac. To update to a newer checkout build, quit the test app and run the install command again.
 
 Explore eight fictional studios with five titles each and a recurring cast of 16 performers with illustrated portraits. Search for **Lanterns at Dusk**, open its cast, or play another title from **More to Watch**. The clips run for 24–48 seconds so you can try seeking, resuming, muting and A–B loops.
 
-The debug app runs an in-process PRDB simulator with a synthetic key. Its scanner reads the files, computes OSHashes and identifies videos by hash and byte size. Studio lookup, title search and match correction use the same Swift client as the regular app. Test credentials and preferences use a dedicated defaults suite. Generated media, portraits, the API manifest, SQLite catalog, previews and test app live in `.local/test-library/`.
+The simulator supplies its own test key. The scanner reads each file, computes its OSHash and identifies it by hash and byte size. Studio lookup, title search and match correction use the same Swift client as the regular app. Test credentials and preferences use a dedicated defaults suite.
 
-Run the same command to return to an open test app. After quitting, the command rebuilds it and reuses the media and catalog, including your favorites and playback positions. Once prepared, you can also open **Vieweroo Test Library.app** directly from that folder.
+For an independent development library, run `./scripts/test-library` without arguments. This builds and opens a checkout-local copy with its own media and catalog in `.local/test-library/`.
 
 ## Install and update
 

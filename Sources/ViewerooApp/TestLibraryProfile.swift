@@ -3,8 +3,21 @@ import CryptoKit
 import Foundation
 import ViewerooCore
 
+private let installedBundleID = "net.prdb.vieweroo.test-library.installed"
+
 @MainActor
 enum TestLibraryProfile {
+    static func root(for bundle: Bundle) -> URL? {
+        switch bundle.bundleIdentifier {
+        case "net.prdb.vieweroo.test-library":
+            return bundle.bundleURL.deletingLastPathComponent()
+        case installedBundleID:
+            return URL.applicationSupportDirectory.appending(path: installedBundleID, directoryHint: .isDirectory)
+        default:
+            return nil
+        }
+    }
+
     static func model(at root: URL, preferences testPreferences: UserDefaults? = nil) -> LibraryModel {
         let manifest = root.appending(path: "prdb.json")
         let media = root.appending(path: "Media", directoryHint: .isDirectory)
@@ -37,6 +50,10 @@ enum TestLibraryProfile {
 
 private enum TestLibraryError: LocalizedError {
     case missingFixtures
-    var errorDescription: String? { "Run ./scripts/test-library in the checkout to prepare the test videos and PRDB fixture." }
+    var errorDescription: String? {
+        let installed = Bundle.main.bundleIdentifier == installedBundleID
+        let command = installed ? "./scripts/test-library --install" : "./scripts/test-library"
+        return "Quit and run \(command) in the checkout to restore the test videos and PRDB fixture."
+    }
 }
 #endif

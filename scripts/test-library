@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Prepare and launch a persistent, checkout-local Vieweroo test app."""
+"""Prepare and launch the checkout-local or installed Vieweroo test library."""
+import argparse
 import fcntl
 import plistlib
 import shutil
@@ -12,19 +13,31 @@ sys.dont_write_bytecode = True
 from fixtures.generate import generate
 
 
-def launch(repo):
-    profile = repo / ".local" / "test-library"
+def launch(repo, install):
+    bundle_id = "net.prdb.vieweroo.test-library"
+    if install:
+        bundle_id += ".installed"
+        profile = Path.home() / "Library/Application Support" / bundle_id
+        applications = Path.home() / "Applications"
+    else:
+        profile = repo / ".local" / "test-library"
+        applications = profile
     profile.mkdir(parents=True, exist_ok=True)
-    app = profile / "Vieweroo Test Library.app"
+    applications.mkdir(parents=True, exist_ok=True)
+    app = applications / "Vieweroo Test Library.app"
     with (profile / ".launch.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if app.exists():
+            info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            if info.get("CFBundleIdentifier") != bundle_id:
+                sys.exit(f"Another app already occupies {app}.")
         if not subprocess.check_output(["lsappinfo", "find", f"bundlepath={app}"]).strip():
             generate(profile)
-            build_app(repo, app)
+            build_app(repo, app, bundle_id)
         subprocess.run(["open", str(app)], check=True)
 
 
-def build_app(repo, app):
+def build_app(repo, app, bundle_id):
     build = [repo / "scripts/build-product", "--configuration", "debug"]
     binaries = Path(subprocess.check_output(build, cwd=repo, text=True).strip())
     with tempfile.TemporaryDirectory(dir=app.parent) as stage:
@@ -38,7 +51,7 @@ def build_app(repo, app):
         for resource in binaries.glob("*.bundle"):
             shutil.copytree(resource, resources / resource.name)
         info = plistlib.loads((repo / "Packaging/Info.plist").read_bytes())
-        info.update(CFBundleIdentifier="net.prdb.vieweroo.test-library", CFBundleName="Vieweroo Test Library")
+        info.update(CFBundleIdentifier=bundle_id, CFBundleName="Vieweroo Test Library")
         (contents / "Info.plist").write_bytes(plistlib.dumps(info))
         subprocess.run(["codesign", "--force", "--sign", "-", str(bundle)], check=True)
         subprocess.run(["codesign", "--verify", "--strict", str(bundle)], check=True)
@@ -54,4 +67,6 @@ def build_app(repo, app):
 
 
 if __name__ == "__main__":
-    launch(Path(__file__).resolve().parents[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--install", action="store_true", help="install or update the test app in ~/Applications")
+    launch(Path(__file__).resolve().parents[1], parser.parse_args().install)
