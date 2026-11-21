@@ -169,6 +169,8 @@ func writeColorMovie(to url: URL) async throws {
         }
     }
     input.markAsFinished()
-    await writer.finishWriting()
+    await withCheckedContinuation { completion in
+        writer.finishWriting { completion.resume() }
+    }
     try #require(writer.status == .completed)
 }
