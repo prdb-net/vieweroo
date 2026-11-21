@@ -30,7 +30,12 @@ public struct CatalogScanner: Sendable {
 
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         var traversalError: Error?
-        guard let files = FileManager.default.enumerator(at: source.url, includingPropertiesForKeys: Array(keys),
+        // FileManager will open a symlinked root but cannot enumerate it as a directory.
+        // Traverse the target and retain the user-selected path as the catalog identity.
+        let linkedRoot = try source.url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true
+        let root = linkedRoot ? source.url.resolvingSymlinksInPath() : source.url
+        let rootDepth = root.standardizedFileURL.pathComponents.count
+        guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys),
                                                          options: [], errorHandler: { _, error in
             traversalError = error
             return false
@@ -43,7 +48,14 @@ public struct CatalogScanner: Sendable {
                 let info = try file.resourceValues(forKeys: keys)
                 guard info.isRegularFile == true, info.isSymbolicLink != true,
                       let size = info.fileSize, let modified = info.contentModificationDate else { continue }
-                let entry = try discover(file: file, size: Int64(size), modified: modified.timeIntervalSince1970,
+                let selectedFile: URL
+                if linkedRoot {
+                    let relative = file.standardizedFileURL.pathComponents.dropFirst(rootDepth).joined(separator: "/")
+                    selectedFile = source.url.appendingPathComponent(relative, isDirectory: false)
+                } else {
+                    selectedFile = file
+                }
+                let entry = try discover(file: selectedFile, size: Int64(size), modified: modified.timeIntervalSince1970,
                                          source: source, generation: generation)
                 onDiscovery(entry)
             }

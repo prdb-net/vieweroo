@@ -1,24 +1,62 @@
 import Foundation
+import GRDB
 
 public enum LibraryJobs {
+    private struct LookupEntry: FetchableRecord, Decodable {
+        let id: Int64
+        let path: String
+        let fileSize: Int64
+        let modified: Double
+        let hash: String?
+        let detectedStudio: String?
+        var url: URL { URL(fileURLWithPath: path, isDirectory: false) }
+    }
+
+    // Advance by primary key even if a file could not be read and remains pending.
+    private static func pendingBatches(libraryID: Int64, catalog: Catalog, availableOnly: Bool,
+                                       process: ([LookupEntry]) async throws -> Void) async throws {
+        let availability = availableOnly ? """
+             AND EXISTS (SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
+                         WHERE m.entryID = e.id AND m.present AND s.online)
+            """ : ""
+        var lastID: Int64 = 0
+        while true {
+            try Task.checkCancellation()
+            let after = lastID
+            let batch = try await catalog.database.read { db in
+                try LookupEntry.fetchAll(db, sql: """
+                    SELECT id, path, fileSize, modified, hash, detectedStudio FROM entry e
+                    WHERE libraryID = ? AND needsLookup AND id > ?
+                    \(availability)
+                    ORDER BY id LIMIT 200
+                    """, arguments: [libraryID, after])
+            }
+            guard let last = batch.last else { return }
+            try await process(batch)
+            lastID = last.id
+        }
+    }
+
     /// Compute folder clues locally, including when PRDB is temporarily unavailable.
     public static func detectStudios(libraryID: Int64, catalog: Catalog) async throws {
-        let recognition = StudioRecognition(studios: try catalog.studios())
-        for entry in try catalog.entries(libraryID: libraryID) where entry.needsLookup {
-            try Task.checkCancellation()
-            if let studio = recognition.match(url: entry.url), studio.name != entry.detectedStudio {
-                try catalog.setDetectedStudio(entryID: entry.id, name: studio.name, fileSize: entry.fileSize, modified: entry.modified)
+        let studios = try catalog.studios()
+        guard !studios.isEmpty else { return }
+        let recognition = StudioRecognition(studios: studios)
+        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: false) { batch in
+            for entry in batch {
+                try Task.checkCancellation()
+                if let studio = recognition.match(url: entry.url), studio.name != entry.detectedStudio {
+                    try catalog.setDetectedStudio(entryID: entry.id, name: studio.name, fileSize: entry.fileSize, modified: entry.modified)
+                }
             }
         }
     }
 
     public static func identify(libraryID: Int64, catalog: Catalog, key: String, client: PRDBClient,
                                 updated: @Sendable () async -> Void) async throws {
-        let pending = try catalog.entries(libraryID: libraryID).filter { $0.needsLookup && $0.availability == .available }
         let recognition = StudioRecognition(studios: try catalog.studios())
-        for first in stride(from: 0, to: pending.count, by: 200) {
+        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: true) { batch in
             var files: [PRDBFile] = []
-            let batch = pending[first..<min(first + 200, pending.count)]
             for entry in batch {
                 try Task.checkCancellation()
                 var hash = entry.hash
@@ -27,10 +65,10 @@ public enum LibraryJobs {
                     catch { continue }
                     try catalog.setHash(entryID: entry.id, hash: hash, fileSize: entry.fileSize, modified: entry.modified)
                 }
-                files.append(PRDBFile(ref: String(entry.id), filename: entry.filename, filesize: entry.fileSize, osHash: hash))
+                files.append(PRDBFile(ref: String(entry.id), filename: entry.url.lastPathComponent, filesize: entry.fileSize, osHash: hash))
             }
             let results = try await client.identify(files, key: key)
-            var fallback: [(CatalogEntry, PRDBStudio?)] = []
+            var fallback: [(LookupEntry, PRDBStudio?)] = []
             for entry in batch {
                 try Task.checkCancellation()
                 guard let result = results[String(entry.id)] else { continue }
@@ -46,6 +84,7 @@ public enum LibraryJobs {
                 }
             }
             await updated()
+            guard !fallback.isEmpty else { return }
             for (entry, studio) in fallback {
                 try Task.checkCancellation()
                 let title = entry.url.deletingPathExtension().lastPathComponent

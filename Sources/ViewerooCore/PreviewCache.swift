@@ -55,10 +55,12 @@ public struct PreviewCache: Sendable {
         return frames.allSatisfy { FileManager.default.fileExists(atPath: $0.url.path) } ? frames : []
     }
 
-    public func prepare(media: URL, directory: URL) async throws {
-        if !Self.frames(in: directory).isEmpty { return }
+    @discardableResult
+    public func prepare(media: URL, directory: URL) async throws -> Bool {
+        if !Self.frames(in: directory).isEmpty { return false }
         do { try await generate(media: media, directory: directory) }
         catch where PreviewError.isUnsupported(error) { throw PreviewError.unsupportedVideo }
+        return true
     }
 
     private func generate(media: URL, directory: URL) async throws {

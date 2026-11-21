@@ -8,6 +8,19 @@ struct PRDBTests {
                                           httpVersion: nil, headerFields: nil)!)
     }
 
+    @Test func invalidRetryDelayFallsBackToTheNormalRetryInterval() async {
+        for value in ["inf", "NaN", "-5"] {
+            let client = PRDBClient { request in
+                let response = HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil,
+                                               headerFields: ["Retry-After": value])!
+                return (Data(), response)
+            }
+            await #expect(throws: PRDBError.rateLimited(retryAfter: nil)) {
+                try await client.validate(key: "fixture")
+            }
+        }
+    }
+
     @Test func identifyMapsResultsByRefAndOnlyAutoLinksUniqueHashes() async throws {
         let film = #"{"id":"one","title":"River","site":{"id":"s","title":"Birch"},"actors":[{"id":"p","name":"Alex","images":[{"imageType":3,"url":"https://img.example/p.jpg"}]}],"images":[{"url":"https://img.example/v.jpg"}]}"#
         let other = #"{"id":"two","title":"Ridge","actors":[],"images":[]}"#

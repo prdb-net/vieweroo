@@ -60,13 +60,15 @@ import ViewerooCore
     try await writeColorMovie(to: movie)
     let cache = PreviewCache(root: temporary.appendingPathComponent("Thumbnails"))
     let directory = cache.directory(for: movie, size: 512, modificationDate: Date(timeIntervalSince1970: 0))
-    try await cache.prepare(media: movie, directory: directory)
+    let generated = try await cache.prepare(media: movie, directory: directory)
+    #expect(generated)
     let frames = PreviewCache.frames(in: directory)
     #expect(frames.count >= 3)
     #expect(frames.first?.time == 0)
     #expect(fm.fileExists(atPath: PreviewCache.posterURL(in: directory).path))
     let timestamp = try directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-    try await cache.prepare(media: movie, directory: directory)
+    let regenerated = try await cache.prepare(media: movie, directory: directory)
+    #expect(!regenerated)
     let reusedTimestamp = try directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     #expect(timestamp == reusedTimestamp)
     let controller = PlayerController()

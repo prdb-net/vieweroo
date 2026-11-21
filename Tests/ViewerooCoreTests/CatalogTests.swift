@@ -37,6 +37,23 @@ private struct LibraryFixture {
 }
 
 final class CatalogTests: XCTestCase {
+    func testSymlinkedSourceKeepsItsSelectedPathAcrossScans() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        _ = try fixture.add("Nested/Workshop.mp4")
+        let link = fixture.base.appendingPathComponent("Linked media")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.media)
+        let library = try fixture.catalog.createLibrary(name: "Linked folders")
+        let source = try fixture.catalog.addSource(libraryID: library.id, url: link)
+        let scanner = CatalogScanner(catalog: fixture.catalog)
+        try scanner.scan(source: source)
+        let first = try XCTUnwrap(fixture.catalog.entries(libraryID: library.id).first)
+        XCTAssertEqual(first.path, link.appendingPathComponent("Nested/Workshop.mp4").standardizedFileURL.path)
+        XCTAssertEqual(first.availability, .available)
+        try scanner.scan(source: source)
+        XCTAssertEqual(try fixture.catalog.entries(libraryID: library.id).map(\.id), [first.id])
+    }
+
     func testLibraryIsolationSurvivesRestartAndMatchCorrection() throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }

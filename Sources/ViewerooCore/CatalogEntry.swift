@@ -23,7 +23,7 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let availability: CatalogAvailability
     public let playbackFailure: String?
 
-    public var url: URL { URL(fileURLWithPath: path) }
+    public var url: URL { URL(fileURLWithPath: path, isDirectory: false) }
     public var filename: String { url.lastPathComponent }
     public var title: String { match?.title ?? url.deletingPathExtension().lastPathComponent }
     public var studio: String? { manualStudio ?? match?.studio?.name ?? detectedStudio }
@@ -56,6 +56,13 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     }
 }
 
+public struct LibrarySnapshot: Sendable {
+    public let libraries: [CatalogLibrary]
+    public let sources: [CatalogSource]
+    public let entries: [CatalogEntry]
+    public let playlists: [CatalogPlaylist]
+}
+
 extension Catalog {
     static let entryQuery = """
         SELECT e.*,
@@ -81,9 +88,22 @@ extension Catalog {
     }
 
     public func entries(libraryID: Int64) throws -> [CatalogEntry] {
-        try database.read { db in
-            try Row.fetchAll(db, sql: Self.entryQuery + " WHERE e.libraryID = ? ORDER BY e.path COLLATE NOCASE",
-                             arguments: [libraryID]).map(CatalogEntry.init)
+        try database.read { try Self.fetchEntries($0, libraryID: libraryID) }
+    }
+
+    static func fetchEntries(_ db: Database, libraryID: Int64) throws -> [CatalogEntry] {
+        let rows = try Row.fetchCursor(db, sql: entryQuery + " WHERE e.libraryID = ? ORDER BY e.path COLLATE NOCASE",
+                                       arguments: [libraryID])
+        return try Array(rows.map(CatalogEntry.init))
+    }
+
+    /// Read a consistent browsing snapshot on the database queue, including metadata decoding.
+    public func snapshot(libraryID: Int64?) async throws -> LibrarySnapshot {
+        try await database.read { db in
+            try LibrarySnapshot(libraries: Self.fetchLibraries(db),
+                                sources: libraryID.map { try Self.fetchSources(db, libraryID: $0) } ?? [],
+                                entries: libraryID.map { try Self.fetchEntries(db, libraryID: $0) } ?? [],
+                                playlists: libraryID.map { try Self.fetchPlaylists(db, libraryID: $0) } ?? [])
         }
     }
 

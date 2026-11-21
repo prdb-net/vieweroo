@@ -145,7 +145,7 @@ public struct PRDBClient: Sendable {
         case 403: throw PRDBError.subscriptionRequired
         case 429:
             let delay = response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
-            throw PRDBError.rateLimited(retryAfter: delay)
+            throw PRDBError.rateLimited(retryAfter: delay.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil })
         default: throw PRDBError.service(response.statusCode)
         }
     }

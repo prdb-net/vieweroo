@@ -55,10 +55,12 @@ public final class Catalog: Sendable {
     }
 
     public func libraries() throws -> [CatalogLibrary] {
-        try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT id, name FROM library ORDER BY name COLLATE NOCASE, id")
-                .map { CatalogLibrary(id: $0["id"], name: $0["name"]) }
-        }
+        try database.read(Self.fetchLibraries)
+    }
+
+    static func fetchLibraries(_ db: Database) throws -> [CatalogLibrary] {
+        try Row.fetchAll(db, sql: "SELECT id, name FROM library ORDER BY name COLLATE NOCASE, id")
+            .map { CatalogLibrary(id: $0["id"], name: $0["name"]) }
     }
 
     @discardableResult
@@ -77,10 +79,12 @@ public final class Catalog: Sendable {
     }
 
     public func sources(libraryID: Int64) throws -> [CatalogSource] {
-        try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM source WHERE libraryID = ? ORDER BY path",
-                             arguments: [libraryID]).map(CatalogSource.init)
-        }
+        try database.read { try Self.fetchSources($0, libraryID: libraryID) }
+    }
+
+    static func fetchSources(_ db: Database, libraryID: Int64) throws -> [CatalogSource] {
+        try Row.fetchAll(db, sql: "SELECT * FROM source WHERE libraryID = ? ORDER BY path",
+                         arguments: [libraryID]).map(CatalogSource.init)
     }
 
     @discardableResult
@@ -127,16 +131,22 @@ public final class Catalog: Sendable {
         }
     }
 
-    public func checkSources(libraryID: Int64) throws {
+    @discardableResult
+    public func checkSources(libraryID: Int64) throws -> Bool {
+        var changed = false
         for source in try sources(libraryID: libraryID) {
-            try markOnline(sourceID: source.id, online: CatalogScanner.canOpen(source.url))
+            try Task.checkCancellation()
+            let online = CatalogScanner.canOpen(source.url)
+            guard online != source.online else { continue }
+            let updated = try database.write { db in
+                try Task.checkCancellation()
+                try db.execute(sql: "UPDATE source SET online = ? WHERE id = ? AND online <> ?",
+                               arguments: [online, source.id, online])
+                return db.changesCount > 0
+            }
+            changed = changed || updated
         }
-    }
-
-    func markOnline(sourceID: Int64, online: Bool) throws {
-        try database.write { db in
-            try db.execute(sql: "UPDATE source SET online = ? WHERE id = ?", arguments: [online, sourceID])
-        }
+        return changed
     }
 
     public func deleteEntry(_ entryID: Int64) throws {

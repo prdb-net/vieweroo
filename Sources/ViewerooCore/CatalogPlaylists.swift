@@ -3,10 +3,19 @@ import Foundation
 
 extension Catalog {
     public func playlists(libraryID: Int64) throws -> [CatalogPlaylist] {
+        try database.read { try Self.fetchPlaylists($0, libraryID: libraryID) }
+    }
+
+    static func fetchPlaylists(_ db: Database, libraryID: Int64) throws -> [CatalogPlaylist] {
+        try Row.fetchAll(db, sql: "SELECT * FROM playlist WHERE libraryID = ? ORDER BY name COLLATE NOCASE, id",
+                         arguments: [libraryID])
+            .map { CatalogPlaylist(id: $0["id"], libraryID: $0["libraryID"], name: $0["name"]) }
+    }
+
+    public func playlistEntryIDs(_ id: Int64) throws -> [Int64] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM playlist WHERE libraryID = ? ORDER BY name COLLATE NOCASE, id",
-                             arguments: [libraryID])
-                .map { CatalogPlaylist(id: $0["id"], libraryID: $0["libraryID"], name: $0["name"]) }
+            try Int64.fetchAll(db, sql: "SELECT entryID FROM playlistItem WHERE playlistID = ? ORDER BY position",
+                               arguments: [id])
         }
     }
 
