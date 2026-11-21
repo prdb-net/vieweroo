@@ -26,12 +26,22 @@ final class PlayerController: ObservableObject {
     private var notifications: [NSObjectProtocol] = []
     private var periodicObserver: Any?
     private var generation = UUID()
+    private var sourceURL: URL?
+    private var mediaServer: AirPlayMediaServer?
+    private var routeObservation: NSKeyValueObservation?
+    private var itemStartAt = 0.0
+    private var handoffPosition: Double { ready ? position : itemStartAt }
+    private var airPlayFailed = false
+    private let makeMediaServer: (URL) throws -> AirPlayMediaServer
     private var seekID: UUID?
     @Published private(set) var wantsPlayback = false
     private var ready = false
     private var audibleVolume: Float = 1
 
-    init() { player.actionAtItemEnd = .pause }
+    init(makeMediaServer: @escaping (URL) throws -> AirPlayMediaServer = { try AirPlayMediaServer(movie: $0) }) {
+        self.makeMediaServer = makeMediaServer
+        player.actionAtItemEnd = .pause
+    }
 
     func open(entry: CatalogEntry, startAt: Double, previewDirectory: URL, catalog: Catalog) {
         let id = entry.id
@@ -49,10 +59,33 @@ final class PlayerController: ObservableObject {
         self.history = history
         self.previewDirectory = previewDirectory
         wantsPlayback = true
+        sourceURL = url
+        player.allowsExternalPlayback = true
+        routeObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, !self.player.isExternalPlaybackActive else { return }
+                self.externalPlaybackDidEnd()
+            }
+        }
+        installItem(url: url, startAt: startAt)
+    }
+
+    func externalPlaybackDidEnd() {
+        guard mediaServer != nil || airPlayFailed, let sourceURL else { return }
+        sample(playing: false)
+        closeMediaServer()
+        airPlayFailed = false
+        installItem(url: sourceURL, startAt: handoffPosition)
+    }
+
+    private func installItem(url: URL, startAt: Double) {
+        detachItemObservers()
+        error = nil
         waiting = true
+        itemStartAt = startAt
         let token = generation
         let item = AVPlayerItem(url: url)
-        player.allowsExternalPlayback = true
+        if let loopEnd { item.forwardPlaybackEndTime = CMTime(seconds: loopEnd, preferredTimescale: 60_000) }
         player.replaceCurrentItem(with: item)
 
         observations.append(item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
@@ -66,7 +99,7 @@ final class PlayerController: ObservableObject {
         observations.append(item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor in
                 guard let self, self.generation == token else { return }
-                if item.status == .failed { self.fail(item.error) }
+                if item.status == .failed { self.playbackFailed(item.error) }
                 if item.status == .readyToPlay, !self.ready {
                     self.ready = true
                     self.waiting = false
@@ -103,7 +136,7 @@ final class PlayerController: ObservableObject {
             controller.didJump()
         }
         listen(for: .AVPlayerItemFailedToPlayToEndTime, item: item) { controller, error in
-            controller.fail(error ?? item.error)
+            controller.playbackFailed(error ?? item.error)
         }
     }
 
@@ -119,7 +152,15 @@ final class PlayerController: ObservableObject {
         })
     }
 
-    private func fail(_ underlying: Error?) {
+    private func playbackFailed(_ underlying: Error?) {
+        if mediaServer != nil || airPlayFailed {
+            failAirPlay(underlying)
+            return
+        }
+        if player.isExternalPlaybackActive || Self.isAirPlayAssetError(underlying) {
+            startAirPlayStream()
+            return
+        }
         waiting = false
         wantsPlayback = false
         sample(playing: false)
@@ -130,6 +171,56 @@ final class PlayerController: ObservableObject {
             do { try reportUnsupported?(explanation) }
             catch { self.error = explanation + " The failure could not be saved to the catalog." }
         }
+    }
+
+    private static func isAirPlayAssetError(_ error: Error?) -> Bool {
+        guard let error = error as NSError? else { return false }
+        if error.domain == AVFoundationErrorDomain,
+           error.code == AVError.externalPlaybackNotSupportedForAsset.rawValue { return true }
+        // Core Media's VideoFormatCannotBeStreamedToAirPlayDevice can be wrapped in "Cannot Play".
+        if ["NSOSStatusErrorDomain", "CoreMediaErrorDomain"].contains(error.domain), error.code == -17226 { return true }
+        return isAirPlayAssetError(error.userInfo[NSUnderlyingErrorKey] as? Error)
+    }
+
+    private func startAirPlayStream() {
+        guard let sourceURL, sourceURL.isFileURL else { failAirPlay(nil); return }
+        sample(playing: false)
+        itemStartAt = handoffPosition
+        detachItemObservers()
+        error = nil
+        airPlayFailed = false
+        waiting = true
+        do {
+            let server = try makeMediaServer(sourceURL)
+            mediaServer = server
+            server.start { [weak self, weak server] result in
+                Task { @MainActor in
+                    guard let self, let server, self.mediaServer === server else { return }
+                    switch result {
+                    case .success(let url): self.installItem(url: url, startAt: self.handoffPosition)
+                    case .failure(let error): self.failAirPlay(error)
+                    }
+                }
+            }
+        } catch { failAirPlay(error) }
+    }
+
+    private func failAirPlay(_ underlying: Error?) {
+        sample(playing: false)
+        itemStartAt = handoffPosition
+        detachItemObservers()
+        closeMediaServer()
+        player.pause()
+        waiting = false
+        wantsPlayback = false
+        airPlayFailed = true
+        error = "AirPlay could not stream this video. Check that the receiver can reach your Mac on the local network and supports this video format."
+        if let underlying { error? += " " + underlying.localizedDescription }
+    }
+
+    private func closeMediaServer() {
+        mediaServer?.stop()
+        mediaServer = nil
     }
 
     private func sample(playing override: Bool? = nil) {
@@ -174,7 +265,13 @@ final class PlayerController: ObservableObject {
             player.pause()
         } else {
             wantsPlayback = true
-            if ready, duration > 0, ended || position >= (loopEnd ?? duration) - 0.05 {
+            if airPlayFailed, let sourceURL {
+                if player.isExternalPlaybackActive { startAirPlayStream() }
+                else {
+                    airPlayFailed = false
+                    installItem(url: sourceURL, startAt: handoffPosition)
+                }
+            } else if ready, duration > 0, ended || position >= (loopEnd ?? duration) - 0.05 {
                 seek(to: loopStart ?? 0, resume: true)
             } else if ready { player.play() }
         }
@@ -220,8 +317,9 @@ final class PlayerController: ObservableObject {
         player.currentItem?.forwardPlaybackEndTime = .invalid
     }
 
-    func stop() {
-        sample(playing: false)
+    private func detachItemObservers() {
+        ready = false
+        playing = false
         generation = UUID()
         seekID = nil
         observations.removeAll()
@@ -229,14 +327,21 @@ final class PlayerController: ObservableObject {
         notifications.removeAll()
         if let periodicObserver { player.removeTimeObserver(periodicObserver) }
         periodicObserver = nil
+    }
+
+    func stop() {
+        sample(playing: false)
+        routeObservation = nil
+        detachItemObservers()
+        closeMediaServer()
+        sourceURL = nil
+        airPlayFailed = false
         wantsPlayback = false
         player.pause()
         player.allowsExternalPlayback = false
         player.currentItem?.cancelPendingSeeks()
         player.replaceCurrentItem(with: nil)
         clearLoop()
-        ready = false
-        playing = false
         entryID = nil
         title = ""
         ended = false

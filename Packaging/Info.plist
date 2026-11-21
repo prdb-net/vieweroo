@@ -12,6 +12,8 @@
 <key>NSHighResolutionCapable</key><true/>
 <key>LSApplicationCategoryType</key><string>public.app-category.video</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSLocalNetworkUsageDescription</key><string>Vieweroo lets your selected AirPlay receiver stream the current video from this Mac.</string>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>NSRemovableVolumesUsageDescription</key><string>Vieweroo reads videos in the source folders you choose.</string>
 <key>NSNetworkVolumesUsageDescription</key><string>Vieweroo reads videos in the network folders you choose.</string>
 </dict></plist>
