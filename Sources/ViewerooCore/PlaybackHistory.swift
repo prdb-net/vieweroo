@@ -3,6 +3,8 @@ import Foundation
 /// Tracks one open player item. A session begins when the media clock first
 /// advances during playback. All inputs are timeline seconds at normal speed.
 public final class PlaybackHistory {
+    static let minimumWatchTime = 10.0
+
     private let begin: () throws -> Int64
     private let append: (Int64, Double, Double) throws -> Void
     private let resume: (Double) throws -> Void
@@ -11,6 +13,7 @@ public final class PlaybackHistory {
     private var lastPosition: Double?
     private var lastClock = 0.0
     private var wasPlaying = false
+    private var recordedWatchTime = 0.0
     private var lastSavedPosition: Double?
 
     public init(begin: @escaping () throws -> Int64, append: @escaping (Int64, Double, Double) throws -> Void,
@@ -56,12 +59,13 @@ public final class PlaybackHistory {
     private func finishInterval(at end: Double) throws {
         if let start = intervalStart, let session, end > start {
             try append(session, start, end)
+            recordedWatchTime += end - start
         }
         intervalStart = nil
     }
 
     private func savePosition(_ value: Double) throws {
-        guard value != lastSavedPosition else { return }
+        guard recordedWatchTime >= Self.minimumWatchTime, value != lastSavedPosition else { return }
         try resume(value)
         lastSavedPosition = value
     }

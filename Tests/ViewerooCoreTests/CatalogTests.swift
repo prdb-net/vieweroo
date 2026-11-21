@@ -53,8 +53,8 @@ final class CatalogTests: XCTestCase {
         try c.setTags(entryID: first.id, tags: ["blue","Blue","  "])
         try c.setFavorite(entryID: first.id, value: true)
         let session = try c.beginSession(entryID: first.id)
-        try c.recordInterval(sessionID: session, start: 0, end: 5)
-        try c.setResume(entryID: first.id, seconds: 5)
+        try c.recordInterval(sessionID: session, start: 0, end: 15)
+        try c.setResume(entryID: first.id, seconds: 15)
         let playlist = try c.createPlaylist(libraryID: fixture.library.id, name: "Queue")
         XCTAssertTrue(try c.addToPlaylist(playlist.id, entryID: first.id))
         XCTAssertFalse(try c.addToPlaylist(playlist.id, entryID: first.id))
@@ -74,8 +74,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(entry.favorite)
         XCTAssertEqual(entry.tags, ["blue"])
         XCTAssertEqual(entry.playCount, 1)
-        XCTAssertEqual(entry.watchTime, 5)
-        XCTAssertEqual(entry.resume, 5)
+        XCTAssertEqual(entry.watchTime, 15)
+        XCTAssertEqual(entry.resume, 15)
         XCTAssertEqual(try reopened.playlistEntries(playlist.id).map(\.id), [first.id])
         XCTAssertEqual(try reopened.entry(other.id), other)
         try reopened.deleteLibrary(fixture.library.id)
@@ -263,6 +263,48 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(stats.segments, [.init(start: 600, end: 660, passes: 2), .init(start: 0, end: 60, passes: 1)])
     }
 
+    func testShortSessionsStayOutOfHistoryAndPreserveResume() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Session.mp4")
+        try fixture.scan()
+        let catalog = fixture.catalog
+        let id = try XCTUnwrap(catalog.entries(libraryID: fixture.library.id).first).id
+        func open() -> PlaybackHistory {
+            PlaybackHistory(begin: { try catalog.beginSession(entryID: id) },
+                            append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
+                            resume: { try catalog.setResume(entryID: id, seconds: $0) })
+        }
+
+        for _ in 0..<2 {
+            let glance = open()
+            try glance.sample(position: 100, playing: true, clock: 0)
+            try glance.sample(position: 109.99, playing: false, clock: 10)
+        }
+        XCTAssertEqual(try catalog.entry(id)?.playCount, 0)
+        XCTAssertEqual(try catalog.entry(id)?.resume, 0)
+        XCTAssertEqual(try catalog.playbackStats(entryID: id).segments, [])
+
+        let session = open()
+        try session.sample(position: 0, playing: true, clock: 0)
+        try session.sample(position: 6, playing: false, clock: 6)
+        try session.jumped(to: 80, playing: true, clock: 60)
+        XCTAssertEqual(try catalog.entry(id)?.resume, 0)
+        try session.sample(position: 84, playing: false, clock: 64)
+
+        let glance = open()
+        try glance.sample(position: 0, playing: true, clock: 0)
+        try glance.sample(position: 3, playing: false, clock: 3)
+        let entry = try XCTUnwrap(catalog.entry(id))
+        let stats = try catalog.playbackStats(entryID: id)
+        XCTAssertEqual(entry.resume, 84)
+        XCTAssertEqual(entry.playCount, 1)
+        XCTAssertEqual(entry.watchTime, 10)
+        XCTAssertEqual(stats.playCount, entry.playCount)
+        XCTAssertEqual(stats.watchTime, entry.watchTime)
+        XCTAssertEqual(stats.segments, [.init(start: 0, end: 6, passes: 1), .init(start: 80, end: 84, passes: 1)])
+    }
+
     func testOpeningPreviousSchemaMigratesDataInPlace() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
@@ -275,7 +317,11 @@ final class CatalogTests: XCTestCase {
                 try db.execute(sql: """
                     INSERT INTO library(id,name) VALUES (1,'Legacy library');
                     INSERT INTO entry(id,libraryID,path,fileSize,modified,rating) VALUES (1,1,'/Synthetic.mp4',100,0,1);
-                    INSERT INTO session(id,entryID) VALUES (1,1);
+                    INSERT INTO entry(id,libraryID,path,fileSize,modified,resume) VALUES
+                        (2,1,'/Short.mp4',100,0,400), (3,1,'/Revisited.mp4',100,0,3);
+                    UPDATE entry SET resume = 25 WHERE id = 1;
+                    INSERT INTO session(id,entryID) VALUES (1,1),(2,2),(3,3),(4,3);
+                    INSERT INTO interval(sessionID,start,end) VALUES (2,397,400),(3,100,110),(3,1,2),(4,0,3);
                     INSERT INTO interval(sessionID,start,end) VALUES (1,10,20);
                     """)
             }
@@ -283,6 +329,10 @@ final class CatalogTests: XCTestCase {
         let upgraded = try Catalog(path: path)
         XCTAssertEqual(try upgraded.libraries().map(\.name), ["Legacy library"])
         XCTAssertEqual(try upgraded.entry(1)?.rating, 1)
+        XCTAssertEqual(try upgraded.entry(1)?.resume, 25)
+        XCTAssertEqual(try upgraded.entry(2)?.resume, 0)
+        XCTAssertEqual(try upgraded.entry(3)?.resume, 2)
+        XCTAssertEqual(try upgraded.playbackStats(entryID: 3).watchTime, 11)
         XCTAssertEqual(try upgraded.playbackStats(entryID: 1).watchTime, 10)
     }
 }

@@ -127,7 +127,7 @@ private final class WorkflowSecrets: SecretStore {
     #expect(reopened.shelf == .studios)
     let saved = try #require(reopened.entries.first)
     #expect(saved.id == entry.id && saved.favorite && saved.rating == 1)
-    #expect(saved.playCount == 2 && saved.resume > 0.3)
+    #expect(saved.playCount == 0 && saved.resume == 0 && saved.watchTime == 0)
     reopened.play(saved, at: saved.resume)
     try await until { reopened.playback.position > saved.resume + 0.2 }
     await server.setMode(.rejected)
@@ -149,7 +149,7 @@ private final class WorkflowSecrets: SecretStore {
     try fm.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? fm.removeItem(at: root) }
     let firstURL = folder.appendingPathComponent("First.mp4")
-    try await writeColorMovie(to: firstURL)
+    try await writeColorMovie(to: firstURL, seconds: 20)
     try fm.copyItem(at: firstURL, to: folder.appendingPathComponent("Second.mp4"))
     let suite = "vieweroo.suggestions.\(UUID().uuidString)"
     let preferences = try #require(UserDefaults(suiteName: suite))
@@ -168,11 +168,11 @@ private final class WorkflowSecrets: SecretStore {
     model.shelf = .all
     model.detailID = first.id
     model.play(first, at: 0)
-    try await until { model.playback.position > 0.65 }
+    try await until(timeout: .seconds(20)) { model.playback.position > 10.5 }
     model.playSuggested(second)
     try await until { model.playback.title == second.title && model.playback.position > 0.15 }
     let saved = try #require(try model.catalog?.entry(first.id)?.resume)
-    #expect(saved > 0.65)
+    #expect(saved > 10.5)
     #expect(first.resume == 0)
 
     // The same old tile may still be visible when selected again.
@@ -181,8 +181,8 @@ private final class WorkflowSecrets: SecretStore {
     #expect(model.playback.position >= saved - 0.05)
     model.endPlayback()
     #expect(model.shelf == .all && model.detailID == first.id)
-    #expect(try model.catalog?.entry(first.id)?.playCount == 2)
-    #expect(try model.catalog?.entry(second.id)?.playCount == 1)
+    #expect(try model.catalog?.entry(first.id)?.playCount == 1)
+    #expect(try model.catalog?.entry(second.id)?.playCount == 0)
     try model.access.setPIN(current: nil, new: "0000")
     model.pinEnabled = true
     model.lock()
@@ -192,8 +192,8 @@ private final class WorkflowSecrets: SecretStore {
 }
 
 @MainActor
-private func until(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-    let deadline = ContinuousClock.now + .seconds(12)
+private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+    let deadline = ContinuousClock.now + timeout
     while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
     try #require(condition(), "Timed out waiting for the workflow", sourceLocation: sourceLocation)
 }

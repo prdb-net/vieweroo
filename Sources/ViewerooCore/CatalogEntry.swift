@@ -61,8 +61,8 @@ extension Catalog {
         SELECT e.*,
             (SELECT json_group_array(name) FROM
                 (SELECT name FROM entryTag WHERE entryID = e.id ORDER BY name COLLATE NOCASE)) AS tags,
-            (SELECT COUNT(*) FROM session s WHERE s.entryID = e.id) AS playCount,
-            (SELECT COALESCE(SUM(i.end - i.start),0) FROM session s JOIN interval i ON i.sessionID = s.id
+            (SELECT COUNT(*) FROM \(visibleSessions) s WHERE s.entryID = e.id) AS playCount,
+            (SELECT COALESCE(SUM(s.watchTime),0) FROM \(visibleSessions) s
                 WHERE s.entryID = e.id) AS watchTime,
             CASE WHEN EXISTS(SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
                 WHERE m.entryID = e.id AND m.present AND s.online) THEN 'available'

@@ -14,6 +14,12 @@ public struct PlaybackStats: Equatable, Sendable {
 }
 
 extension Catalog {
+    static let visibleSessions = """
+        (SELECT s.id, s.entryID,
+            (SELECT TOTAL(i.end - i.start) FROM interval i WHERE i.sessionID = s.id) AS watchTime
+         FROM session s WHERE watchTime >= \(PlaybackHistory.minimumWatchTime))
+        """
+
     public func beginSession(entryID: Int64) throws -> Int64 {
         try database.write { db in
             try db.execute(sql: "INSERT INTO session(entryID) VALUES (?)", arguments: [entryID])
@@ -37,9 +43,9 @@ extension Catalog {
 
     public func playbackStats(entryID: Int64) throws -> PlaybackStats {
         try database.read { db in
-            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM session WHERE entryID = ?", arguments: [entryID]) ?? 0
+            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(Self.visibleSessions) WHERE entryID = ?", arguments: [entryID]) ?? 0
             let intervals = try Row.fetchCursor(db, sql: """
-                SELECT i.start,i.end FROM interval i JOIN session s ON s.id = i.sessionID WHERE s.entryID = ?
+                SELECT i.start,i.end FROM interval i JOIN \(Self.visibleSessions) s ON s.id = i.sessionID WHERE s.entryID = ?
                 """, arguments: [entryID])
             var edges = [Double: Int]()
             var watchTime = 0.0

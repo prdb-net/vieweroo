@@ -56,7 +56,7 @@ Treat an unreachable source folder as offline. If a completed scan of a reachabl
 
 ### 6. Record playback sessions and watched intervals
 
-Count a session once actual playback begins. Pausing and resuming, seeking, looping, or switching to AirPlay within that session preserves the same play count.
+Record a session once actual playback begins. Only sessions with at least ten seconds of played intervals contribute to viewing history and Frequently Watched or update the resume position. A shorter visit preserves the previous resume position. Pausing and resuming, seeking, looping, or switching to AirPlay keeps the same session.
 
 Store the portions of the video timeline actually played in each session. Pausing closes the current interval. Seeking closes it at the departure time, and the next interval starts where playback resumes. Replaying a section, including through a loop, records another pass. Preserve repeated passes so both viewing duration and frequently replayed sections can be derived.
 

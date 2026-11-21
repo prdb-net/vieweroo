@@ -135,7 +135,7 @@ import ViewerooCore
 }
 
 @MainActor
-func writeColorMovie(to url: URL) async throws {
+func writeColorMovie(to url: URL, seconds: Int = 3) async throws {
     let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
         AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 96, AVVideoHeightKey: 64,
@@ -149,7 +149,7 @@ func writeColorMovie(to url: URL) async throws {
     guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
     writer.startSession(atSourceTime: .zero)
     let pool = try #require(adaptor.pixelBufferPool)
-    for index in 0..<30 {
+    for index in 0..<(seconds * 10) {
         let deadline = ContinuousClock.now + .seconds(4)
         while !input.isReadyForMoreMediaData {
             guard writer.status == .writing, ContinuousClock.now < deadline else {

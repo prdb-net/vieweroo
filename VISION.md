@@ -38,7 +38,7 @@ Enter full screen from the player to give the video the whole window. The contro
 
 AirPlay is part of the MVP. You can choose an Apple TV or another compatible AirPlay receiver from the player and watch the video on that screen while controlling playback from your Mac.
 
-Vieweroo records locally how often you play each video, how long you spend watching it, and which segments you play. If you jump from minute two to minute ten, those eight minutes are excluded from your watch time. This history lets you browse frequently watched videos and see which parts of a video you replay most. You can start playback directly from a highlighted segment.
+Vieweroo records locally how often you play each video, how long you spend watching it, and which segments you play. If you jump from minute two to minute ten, those eight minutes are excluded from your watch time. A session appears in viewing history and updates your resume position once you have watched at least ten seconds in that session. This history lets you browse frequently watched videos and see which parts of a video you replay most. You can start playback directly from a highlighted segment.
 
 Watching the same minute five times in a loop counts as one session, five minutes of viewing time at normal speed, and five passes through that segment. Pausing or switching to AirPlay keeps the session going.
 

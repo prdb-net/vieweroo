@@ -81,6 +81,20 @@ extension Catalog {
                 );
                 """)
         }
+        migrator.registerMigration("visible-playback-sessions-v4") { db in
+            try db.execute(sql: """
+                -- Older catalogs kept just one resume position per entry. If a brief
+                -- visit replaced it, recover the last interval of the last visible session.
+                UPDATE entry SET resume = COALESCE((
+                    SELECT i.end FROM interval i WHERE i.sessionID = (
+                        SELECT MAX(v.id) FROM \(visibleSessions) v WHERE v.entryID = entry.id
+                    ) ORDER BY i.rowid DESC LIMIT 1
+                ), 0)
+                WHERE (SELECT MAX(s.id) FROM session s WHERE s.entryID = entry.id)
+                    IS NOT (SELECT MAX(v.id) FROM \(visibleSessions) v WHERE v.entryID = entry.id)
+                    OR (resume > 0 AND NOT EXISTS (SELECT 1 FROM session s WHERE s.entryID = entry.id));
+                """)
+        }
         return migrator
     }
 }
