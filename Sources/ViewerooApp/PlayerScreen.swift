@@ -219,7 +219,10 @@ private struct PlayerTransport: View {
                 Button("Clear Loop") { controller.clearLoop() }.disabled(controller.loopStart == nil)
             } label: {
                 Label(controller.loopStart.map { start in
-                    controller.loopEnd.map { "\(clockLabel(start)) – \(clockLabel($0))" } ?? "From \(clockLabel(start))"
+                    controller.loopEnd.map { end in
+                        let short = end - start < 1
+                        return "\(clockLabel(start, tenths: short)) – \(clockLabel(end, tenths: short))"
+                    } ?? "From \(clockLabel(start))"
                 } ?? "Loop", systemImage: "repeat")
             }
             .fixedSize()
@@ -313,9 +316,22 @@ private struct PlayerTimeline: View {
     @State private var draft = 0.0
     @State private var editing = false
 
+    // At either end of the native slider, the knob's center is half its width in from the edge.
+    @State private var trackInset: CGFloat = 10
+
+    private var accessibilityPosition: String {
+        let position = "\(clockLabel(editing ? draft : controller.position)) of \(clockLabel(controller.duration))"
+        guard let start = controller.loopStart else { return position }
+        if let end = controller.loopEnd {
+            return "\(position). Loop from \(clockLabel(start, tenths: true)) to \(clockLabel(end, tenths: true))."
+        }
+        return "\(position). Loop start at \(clockLabel(start, tenths: true))."
+    }
+
     var body: some View {
         GeometryReader { layout in
             let width = max(1, layout.size.width)
+            let trackWidth = max(1, width - 2 * trackInset)
             Slider(value: Binding(get: { editing ? draft : controller.position }, set: { draft = $0 }),
                    in: 0...max(0.001, controller.duration), onEditingChanged: { started in
                 editing = started
@@ -323,16 +339,25 @@ private struct PlayerTimeline: View {
                 else { controller.seek(to: draft) }
             })
             .accessibilityLabel("Video timeline")
-            .accessibilityValue("\(clockLabel(editing ? draft : controller.position)) of \(clockLabel(controller.duration))")
+            .accessibilityValue(accessibilityPosition)
             .onContinuousHover { phase in
                 switch phase {
-                case .active(let point): hover = min(1, max(0, point.x / width))
+                case .active(let point): hover = min(1, max(0, (point.x - trackInset) / trackWidth))
                 case .ended: hover = nil
                 }
+            }
+            .overlay(alignment: .top) {
+                LoopTimelineMarks(start: controller.loopStart, end: controller.loopEnd, duration: controller.duration)
+                    .padding(.horizontal, trackInset)
+                    .frame(height: 10)
+                    .offset(y: -10)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             .overlay(alignment: .leading) {
                 if let hover {
                     let time = editing ? draft : Double(hover) * controller.duration
+                    let previewGap: CGFloat = controller.loopStart == nil ? 12 : 22
                     VStack(spacing: 3) {
                         if let frame = frames.min(by: { abs($0.time - time) < abs($1.time - time) }) {
                             TimelineStill(url: frame.url)
@@ -342,13 +367,14 @@ private struct PlayerTimeline: View {
                     .frame(width: 148).padding(4)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
                     .fixedSize()
-                    .alignmentGuide(VerticalAlignment.center) { $0[.bottom] + 12 }
-                    .offset(x: min(max(0, width * hover - 78), max(0, width - 156)))
+                    .alignmentGuide(VerticalAlignment.center) { $0[.bottom] + previewGap }
+                    .offset(x: min(max(0, trackInset + trackWidth * hover - 78), max(0, width - 156)))
                     .allowsHitTesting(false)
                 }
             }
         }
         .frame(height: 18)
+        .task { trackInset = NSSliderCell().knobThickness / 2 }
         .task(id: controller.previewDirectory) {
             frames = []
             guard let directory = controller.previewDirectory else { return }
@@ -358,6 +384,60 @@ private struct PlayerTimeline: View {
                 if !result.isEmpty { frames = result; return }
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
+        }
+    }
+}
+
+private struct LoopTimelineMarks: View {
+    let start: Double?
+    let end: Double?
+    let duration: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let startX = width * fraction(start)
+            let endX = width * fraction(end)
+            KeyframeAnimator(initialValue: 0.0, trigger: end) { pulse in
+                if start != nil, end != nil, duration > 0 {
+                    let strength = reduceMotion ? 0 : pulse
+                    Capsule().fill(.tint)
+                        .opacity(0.68 + 0.32 * strength)
+                        .frame(width: max(1, endX - startX), height: 2 + 2 * strength)
+                        .position(x: (startX + endX) / 2, y: 8)
+                    marker("B", at: endX, labelOffset: 6)
+                }
+            } keyframes: { _ in
+                LinearKeyframe(1, duration: 0.08)
+                CubicKeyframe(0, duration: 0.28)
+            }
+            KeyframeAnimator(initialValue: 0.0, trigger: start) { travel in
+                if start != nil, duration > 0 {
+                    marker("A", at: startX, labelOffset: -6)
+                        .offset(y: reduceMotion ? 0 : travel)
+                }
+            } keyframes: { _ in
+                MoveKeyframe(-4)
+                CubicKeyframe(0.8, duration: 0.14)
+                CubicKeyframe(0, duration: 0.10)
+            }
+        }
+    }
+
+    private func fraction(_ time: Double?) -> Double {
+        guard let time, duration > 0 else { return 0 }
+        return min(1, max(0, time / duration))
+    }
+
+    private func marker(_ letter: String, at x: CGFloat, labelOffset: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Text(letter).font(.system(size: 9, weight: .bold, design: .rounded))
+                .fixedSize()
+                .position(x: x + labelOffset, y: 4)
+            Capsule().fill(.tint)
+                .frame(width: 2, height: 7)
+                .position(x: x, y: 5.5)
         }
     }
 }
@@ -375,8 +455,10 @@ private struct TimelineStill: View {
     }
 }
 
-private func clockLabel(_ seconds: Double) -> String {
-    let value = Int(min(max(0, seconds), Double(Int32.max)))
-    if value >= 3600 { return String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) }
-    return String(format: "%d:%02d", value / 60, value % 60)
+private func clockLabel(_ seconds: Double, tenths: Bool = false) -> String {
+    let bounded = min(max(0, seconds), Double(Int32.max))
+    let value = Int(bounded)
+    let time = value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
+                             : String(format: "%d:%02d", value / 60, value % 60)
+    return tenths ? "\(time).\(Int(bounded * 10) % 10)" : time
 }

@@ -23,14 +23,17 @@ extension Catalog {
         try database.write { db in try db.execute(sql: "DELETE FROM playlist WHERE id = ?", arguments: [id]) }
     }
 
-    public func addToPlaylist(_ playlistID: Int64, entryID: Int64) throws {
+    /// Returns false when the video already belongs to this playlist.
+    @discardableResult
+    public func addToPlaylist(_ playlistID: Int64, entryID: Int64) throws -> Bool {
         try database.write { db in
             try db.execute(sql: """
                 INSERT INTO playlistItem(libraryID, playlistID, entryID, position)
-                SELECT libraryID, id, ?, COALESCE((SELECT MAX(position) + 1 FROM playlistItem WHERE playlistID = ?), 0)
-                FROM playlist WHERE id = ?
+                VALUES ((SELECT libraryID FROM playlist WHERE id = :playlist), :playlist, :entry,
+                        (SELECT COALESCE(MAX(position) + 1, 0) FROM playlistItem WHERE playlistID = :playlist))
                 ON CONFLICT(playlistID, entryID) DO NOTHING
-                """, arguments: [entryID, playlistID, playlistID])
+                """, arguments: ["playlist": playlistID, "entry": entryID])
+            return db.changesCount == 1
         }
     }
 

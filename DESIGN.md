@@ -47,11 +47,13 @@ Offer full screen in the current window with a visible button, F and a double-cl
 | File offline, playback failure or invalid field | At the affected video or field | Keep the explanation in context so the user can act on it. |
 | Destructive decision | Native confirmation dialog | State what is affected and offer Cancel before changing the catalog. |
 
-Inset notices 24 pt from the window edges and raise them above the player controls. Pair a short ease-out entrance with a small icon response and a thin countdown line. A newly saved favorite gets a pink heart and a brief sparkle. Use a warning symbol for errors. A notice passes clicks through, preserves focus and announces its text to assistive technology. Reduce Motion removes travel, sparkle and countdown movement. Reduce Transparency uses a solid system surface. Locking or changing libraries clears the current notice.
+Inset notices 24 pt from the window edges and raise them above the player controls. Pair a short ease-out entrance with a thin countdown line. Use a pink heart for a saved favorite and a warning symbol for errors. A notice passes clicks through, preserves focus and announces its text to assistive technology. Reduce Motion removes travel and countdown movement. Reduce Transparency uses a solid system surface. Locking or changing libraries clears the current notice.
 
-The [interactive reaction proposal](Design/reactions.html) explores feedback on the detail buttons. Try switching between Like and Dislike, saving a Favorite independently and turning on reduced motion. The proposed effects play once when a selection is saved. Clearing a selection returns its symbol to an outline.
+On the detail page, acknowledge a successful selection at the button. Three small pink hearts rise when saving a Favorite. Like lifts a mint thumb through four short rays. Dislike taps a violet thumb against a small impact line. Keep the label and button still. A filled symbol and tinted outline show the saved state. Clearing a selection restores its outline immediately. Reduce Motion keeps the state change instant. The [interactive reference](Design/reactions.html) demonstrates the three reactions.
 
-Two other candidates are playlist saves and A–B loops. A checkmark on **Add to Playlist** could confirm insertion while the notice names the chosen playlist. On the timeline, setting A could place a start marker. Setting B could briefly brighten the selected range and leave it visible while the loop is active.
+Briefly show a checkmark on **Add to Playlist** when a video joins a playlist. Name the destination in the notice. A repeat insertion reports that the video already belongs to that playlist.
+
+Place the A and B markers just above the native timeline at their playback times. Setting A settles the start marker into position. Setting B briefly brightens the span, which stays visible until the loop clears. Reduce Motion shows the markers and span immediately.
 
 ## Review on a Mac
 

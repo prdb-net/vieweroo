@@ -47,19 +47,6 @@ struct ActionNoticeView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(notice.kind.tint)
                     .scaleEffect(reduceMotion || visible ? 1 : 0.62)
-                    .symbolEffect(.bounce, options: .nonRepeating,
-                                  value: !reduceMotion && notice.kind == .favorite && elapsed)
-                if notice.kind == .favorite && !reduceMotion {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(notice.kind.tint)
-                        .keyframeAnimator(initialValue: 0.0, trigger: elapsed) { spark, phase in
-                            spark.opacity(1 - abs(2 * phase - 1))
-                                .offset(x: 11, y: -6 - 8 * phase)
-                        } keyframes: { _ in
-                            LinearKeyframe(1, duration: 0.8)
-                        }
-                }
             }
             .frame(width: 32, height: 32)
             .accessibilityHidden(true)

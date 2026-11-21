@@ -111,22 +111,15 @@ struct EntryView: View {
 
     private var organizationActions: some View {
         HStack(spacing: VSpace.tight) {
-            Button {
+            ReactionButton(reaction: .favorite, isSelected: entry.favorite) {
                 model.change(entry.favorite ? "Removed from Favorites" : "Added to Favorites",
                              kind: entry.favorite ? .success : .favorite) {
                     try $0.setFavorite(entryID: entry.id, value: !entry.favorite)
                 }
-            } label: {
-                Label(entry.favorite ? "Favorited" : "Favorite", systemImage: entry.favorite ? "heart.fill" : "heart")
-                    .foregroundStyle(entry.favorite ? Color.accentColor : .primary)
             }
-            rating(1, label: "Like", icon: "hand.thumbsup")
-            rating(-1, label: "Dislike", icon: "hand.thumbsdown")
-            Menu("Add to Playlist") {
-                ForEach(model.playlists) { list in
-                    Button(list.name) { model.change("Saved to playlist") { try $0.addToPlaylist(list.id, entryID: entry.id) } }
-                }
-            }.fixedSize().disabled(model.playlists.isEmpty)
+            rating(1, reaction: .like)
+            rating(-1, reaction: .dislike)
+            PlaylistMenu(model: model, entryID: entry.id)
         }
     }
 
@@ -211,13 +204,13 @@ struct EntryView: View {
     private func saveTags() {
         model.change("Tags saved") { try $0.setTags(entryID: entry.id, tags: tags.components(separatedBy: ",")) }
     }
-    private func rating(_ value: Int, label: String, icon: String) -> some View {
-        Button {
+    private func rating(_ value: Int, reaction: VideoReaction) -> some View {
+        ReactionButton(reaction: reaction, isSelected: entry.rating == value) {
             let updated = entry.rating == value ? 0 : value
-            model.change(updated == 0 ? "Rating cleared" : updated == 1 ? "Marked as liked" : "Marked as disliked") {
+            return model.change(updated == 0 ? "Rating cleared" : updated == 1 ? "Marked as liked" : "Marked as disliked") {
                 try $0.setRating(entryID: entry.id, value: updated)
             }
-        } label: { Label(label, systemImage: icon + (entry.rating == value ? ".fill" : "")) }
+        }
     }
 }
 
