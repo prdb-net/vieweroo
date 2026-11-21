@@ -16,6 +16,16 @@ Run these three commands from the repository root.
 
 The build produces `dist/Vieweroo.app`. The test suite uses temporary catalogs, generated video, synthetic PRDB responses, and a substitute Keychain. Packaging rebuilds and signs the Apple Silicon app locally, then writes `dist/Vieweroo-apple-silicon.zip`.
 
+## Run the synthetic test library
+
+Run `./scripts/test-library` on a supported Mac. The first run uses Python 3 and FFmpeg with libx264 (`brew install ffmpeg`) to generate 40 short H.264 movies with audio. It opens **Vieweroo Test Library** in the **Motion Archive** studio overview. Allow the initial scan and thumbnail generation to finish.
+
+Explore eight fictional studios with five titles each and a recurring cast of 16 performers with illustrated portraits. Search for **Lanterns at Dusk**, open its cast, or play another title from **More to Watch**. The clips run for 24–48 seconds so you can try seeking, resuming, muting and A–B loops.
+
+The debug app runs an in-process PRDB simulator with a synthetic key. Its scanner reads the files, computes OSHashes and identifies videos by hash and byte size. Studio lookup, title search and match correction use the same Swift client as the regular app. Test credentials and preferences use a dedicated defaults suite. Generated media, portraits, the API manifest, SQLite catalog, previews and test app live in `.local/test-library/`.
+
+Run the same command to return to an open test app. After quitting, the command rebuilds it and reuses the media and catalog, including your favorites and playback positions. Once prepared, you can also open **Vieweroo Test Library.app** directly from that folder.
+
 ## Install and update
 
 1. Extract the ZIP and drag **Vieweroo.app** to **Applications**.

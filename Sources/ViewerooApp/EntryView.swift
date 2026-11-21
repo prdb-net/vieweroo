@@ -141,7 +141,7 @@ struct EntryView: View {
                                 model.query = ""; model.detailID = nil; model.shelf = .performer(person)
                             } label: {
                                 VStack {
-                                    AsyncImage(url: person.portraitURL) { phase in
+                                    AsyncImage(url: model.artworkURL(person.portraitURL)) { phase in
                                         if let image = phase.image { image.resizable().scaledToFill() }
                                         else { Image(systemName: "person.fill").font(.title).foregroundStyle(.tertiary) }
                                     }.frame(width: 60, height: 60).background(.quaternary).clipShape(Circle())

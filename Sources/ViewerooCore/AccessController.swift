@@ -79,7 +79,11 @@ public final class AccessController {
     private var validationAttempt: UUID?
 
     public convenience init() {
-        self.init(store: KeychainStore()) {
+        self.init(store: KeychainStore())
+    }
+
+    convenience init(store: any SecretStore) {
+        self.init(store: store) {
             try await LAContext().evaluatePolicy(.deviceOwnerAuthentication,
                                                  localizedReason: "Set a new PIN for Vieweroo.")
         }

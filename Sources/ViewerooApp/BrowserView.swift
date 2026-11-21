@@ -148,7 +148,7 @@ struct Poster: View {
         Rectangle().fill(.quaternary.opacity(0.5))
             .aspectRatio(16/9, contentMode: .fit)
             .overlay {
-                AsyncImage(url: entry.match?.previewURL) { phase in
+                AsyncImage(url: model.artworkURL(entry.match?.previewURL)) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() }
                     else if let local { Image(nsImage: local).resizable().scaledToFill() }
                     else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }

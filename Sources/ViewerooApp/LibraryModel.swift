@@ -15,6 +15,8 @@ final class LibraryModel {
     @ObservationIgnored let access: AccessController
     @ObservationIgnored let client: PRDBClient
     @ObservationIgnored let playback = PlayerController()
+    @ObservationIgnored let artworkURL: (URL?) -> URL?
+    @ObservationIgnored private let prepareCatalog: ((Catalog) throws -> Void)?
     @ObservationIgnored let cache: PreviewCache
     @ObservationIgnored private let preferences: UserDefaults
     @ObservationIgnored private let directory: URL
@@ -55,12 +57,15 @@ final class LibraryModel {
     init(access: AccessController = AccessController(), client: PRDBClient = PRDBClient(),
          preferences: UserDefaults = .standard,
          directory: URL = URL.applicationSupportDirectory.appending(path: "net.prdb.vieweroo"),
-         cache: PreviewCache = PreviewCache(root: URL.cachesDirectory.appending(path: "net.prdb.vieweroo/Previews"))) {
+         cache: PreviewCache = PreviewCache(root: URL.cachesDirectory.appending(path: "net.prdb.vieweroo/Previews")),
+         artworkURL: @escaping (URL?) -> URL? = { $0 }, prepareCatalog: ((Catalog) throws -> Void)? = nil) {
         self.access = access
         self.client = client
         self.preferences = preferences
         self.directory = directory
         self.cache = cache
+        self.artworkURL = artworkURL
+        self.prepareCatalog = prepareCatalog
     }
 
     func start() {
@@ -85,6 +90,7 @@ final class LibraryModel {
         guard try access.apiKey() != nil else { phase = .setup; return }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let database = try catalog ?? Catalog(path: directory.appending(path: "Catalog.sqlite").path)
+        try prepareCatalog?(database)
         catalog = database
         libraries = try database.libraries()
         phase = .ready

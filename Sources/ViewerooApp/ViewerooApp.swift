@@ -5,10 +5,24 @@ import ViewerooCore
 @main
 struct ViewerooApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @State private var model = LibraryModel()
+    @State private var model: LibraryModel
+    private let title: String
+
+    init() {
+        #if DEBUG
+        if Bundle.main.bundleIdentifier == "net.prdb.vieweroo.test-library" {
+            title = "Vieweroo Test Library"
+            let root = Bundle.main.bundleURL.deletingLastPathComponent()
+            _model = State(initialValue: TestLibraryProfile.model(at: root))
+            return
+        }
+        #endif
+        title = "Vieweroo"
+        _model = State(initialValue: LibraryModel())
+    }
 
     var body: some Scene {
-        Window("Vieweroo", id: "library") {
+        Window(Text(verbatim: title), id: "library") {
             RootView(model: model)
                 .frame(minWidth: 790, minHeight: 535)
                 .background(WindowPrivacy())

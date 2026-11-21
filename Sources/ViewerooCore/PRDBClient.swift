@@ -171,12 +171,12 @@ private struct ResultRow: Decodable {
     let site: Site?
     let candidates: [String]
 }
-private struct Site: Decodable {
+struct Site: Codable {
     let id: String
     let title: String
     var studio: PRDBStudio { PRDBStudio(id: id, name: title) }
 }
-private struct RemoteImage: Decodable {
+struct RemoteImage: Codable {
     let url: String?
     let imageType: Int?
     var httpsURL: URL? {
@@ -185,7 +185,7 @@ private struct RemoteImage: Decodable {
         return parsed
     }
 }
-private struct Performer: Decodable {
+struct Performer: Codable {
     let id: String
     let name: String
     let images: [RemoteImage]?
@@ -195,7 +195,7 @@ private struct Performer: Decodable {
         return PRDBPerformer(id: id, name: name, portraitURL: face ?? images.lazy.compactMap(\.httpsURL).first)
     }
 }
-private struct Video: Decodable {
+struct Video: Codable {
     let id: String
     let title: String
     let site: Site?
@@ -206,7 +206,7 @@ private struct Video: Decodable {
                   previewURL: images.lazy.compactMap(\.httpsURL).first)
     }
 }
-private struct Summary: Decodable {
+struct Summary: Codable {
     let id: String
     let title: String
     let siteId: String
