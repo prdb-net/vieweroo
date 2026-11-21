@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# Normalize embedded file identifiers in Swift runtime diagnostics.
+args=(--configuration release --arch arm64 -Xswiftc -file-prefix-map -Xswiftc "$PWD=." -debug-info-format none)
+swift build "${args[@]}" --product Vieweroo
+bin="$(swift build "${args[@]}" --show-bin-path)"
+mkdir -p dist
+stage="$(mktemp -d "$PWD/dist/.build.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+app="$stage/Vieweroo.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+install -m 755 "$bin/Vieweroo" "$app/Contents/MacOS/Vieweroo"
+strip -x "$app/Contents/MacOS/Vieweroo"
+install -m 644 Packaging/Vieweroo.icns "$app/Contents/Resources/"
+install -m 644 .build/checkouts/GRDB.swift/LICENSE "$app/Contents/Resources/GRDB-LICENSE"
+install -m 644 LICENSE "$app/Contents/Resources/Vieweroo-LICENSE"
+install -m 644 Packaging/Info.plist "$app/Contents/Info.plist"
+for resources in "$bin"/*.bundle; do
+    [[ ! -d "$resources" ]] || ditto "$resources" "$app/Contents/Resources/$(basename "$resources")"
+done
+codesign --force --sign - --identifier net.prdb.vieweroo "$app"
+codesign --verify --strict --deep "$app"
+if [[ -e dist/Vieweroo.app ]]; then
+    mv dist/Vieweroo.app "$stage/previous.app"
+fi
+if ! mv "$app" dist/Vieweroo.app; then
+    [[ ! -e "$stage/previous.app" ]] || mv "$stage/previous.app" dist/Vieweroo.app
+    exit 1
+fi
+echo "Built dist/Vieweroo.app"

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>net.prdb.vieweroo</string>
+<key>CFBundleIconFile</key><string>Vieweroo.icns</string>
+<key>CFBundleName</key><string>Vieweroo</string>
+<key>CFBundleExecutable</key><string>Vieweroo</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>LSApplicationCategoryType</key><string>public.app-category.video</string>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSRemovableVolumesUsageDescription</key><string>Vieweroo reads videos in the source folders you choose.</string>
+<key>NSNetworkVolumesUsageDescription</key><string>Vieweroo reads videos in the network folders you choose.</string>
+</dict></plist>

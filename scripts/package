@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+./scripts/build
+archive="dist/Vieweroo-apple-silicon.zip"
+stage="$(mktemp -d "$PWD/dist/.package.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+/usr/bin/ditto -c -k --norsrc --keepParent dist/Vieweroo.app "$stage/release.zip"
+unzip -tq "$stage/release.zip"
+mv -f "$stage/release.zip" "$archive"
+echo "Packaged $archive"

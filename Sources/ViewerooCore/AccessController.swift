@@ -1,0 +1,174 @@
+import CommonCrypto
+import Foundation
+import LocalAuthentication
+import Security
+
+public enum AccessError: LocalizedError {
+    case invalidPIN
+    case incorrectPIN
+    case invalidKey
+    case unavailable
+    case recoveryFailed
+    case keychain(OSStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidPIN: "Enter a PIN of 4 to 12 digits."
+        case .incorrectPIN: "The current PIN is incorrect."
+        case .invalidKey: "Enter your personal PRDB API key."
+        case .unavailable: "The saved credential could not be read."
+        case .recoveryFailed: "macOS authentication did not complete. Your existing PIN is still active."
+        case let .keychain(status):
+            "Keychain access failed. \(SecCopyErrorMessageString(status, nil) as String? ?? "Check your login keychain permissions.")"
+        }
+    }
+}
+
+@MainActor
+protocol SecretStore {
+    func read(_ account: String) throws -> Data?
+    func write(_ data: Data?, account: String) throws
+}
+
+@MainActor
+private struct KeychainStore: SecretStore {
+    private func query(_ account: String) -> [String: Any] {
+        // Keep these identifiers stable across releases. The login keychain associates
+        // access with the executable and can prompt for authorization after an update.
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "net.prdb.vieweroo",
+         kSecAttrAccount as String: account]
+    }
+
+    func read(_ account: String) throws -> Data? {
+        var query = query(account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var value: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &value)
+        guard status != errSecItemNotFound else { return nil }
+        guard status == errSecSuccess else { throw AccessError.keychain(status) }
+        guard let data = value as? Data else { throw AccessError.unavailable }
+        return data
+    }
+
+    func write(_ data: Data?, account: String) throws {
+        var query = query(account)
+        guard let data else {
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw AccessError.keychain(status) }
+            return
+        }
+        let update = [kSecValueData as String: data] as CFDictionary
+        var status = SecItemUpdate(query as CFDictionary, update)
+        if status == errSecItemNotFound {
+            query[kSecValueData as String] = data
+            query[kSecAttrLabel as String] = "Vieweroo \(account)"
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw AccessError.keychain(status) }
+    }
+}
+
+@MainActor
+public final class AccessController {
+    private let store: any SecretStore
+    private let authenticate: @MainActor () async throws -> Bool
+    private let keyAccount = "PRDB API key"
+    private let pinAccount = "PIN verifier"
+    private var validationAttempt: UUID?
+
+    public convenience init() {
+        self.init(store: KeychainStore()) {
+            try await LAContext().evaluatePolicy(.deviceOwnerAuthentication,
+                                                 localizedReason: "Set a new PIN for Vieweroo.")
+        }
+    }
+
+    init(store: any SecretStore, authenticate: @escaping @MainActor () async throws -> Bool) {
+        self.store = store
+        self.authenticate = authenticate
+    }
+
+    /// Only successfully validated keys are persisted. An inaccessible Keychain throws.
+    public func apiKey() throws -> String? {
+        guard let data = try store.read(keyAccount) else { return nil }
+        guard let key = String(data: data, encoding: .utf8), !key.isEmpty else { throw AccessError.unavailable }
+        return key
+    }
+
+    public func validateAndStore(key: String, client: PRDBClient) async throws {
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else { throw AccessError.invalidKey }
+        let attempt = UUID()
+        validationAttempt = attempt
+        do {
+            try await client.validate(key: key)
+        } catch PRDBError.invalidKey {
+            if validationAttempt == attempt { try reject(key: key) }
+            throw PRDBError.invalidKey
+        }
+        try Task.checkCancellation()
+        guard validationAttempt == attempt else { throw CancellationError() }
+        try store.write(Data(key.utf8), account: keyAccount)
+    }
+
+    public func reject(key: String) throws {
+        if try apiKey() == key { try store.write(nil, account: keyAccount) }
+    }
+
+    public var hasPIN: Bool { get throws { try store.read(pinAccount) != nil } }
+
+    public func unlock(pin: String) throws {
+        guard let saved = try store.read(pinAccount) else { return }
+        try verify(pin: pin, saved: saved)
+    }
+
+    public func setPIN(current: String?, new: String?) throws {
+        if let saved = try store.read(pinAccount) {
+            guard let current else { throw AccessError.incorrectPIN }
+            try verify(pin: current, saved: saved)
+        }
+        try store.write(try new.map(makeVerifier), account: pinAccount)
+    }
+
+    public func recoverPIN(new: String) async throws {
+        try validatePIN(new)
+        guard let saved = try store.read(pinAccount) else { throw AccessError.recoveryFailed }
+        guard (try? await authenticate()) == true else { throw AccessError.recoveryFailed }
+        try Task.checkCancellation()
+        guard try store.read(pinAccount) == saved else { throw AccessError.recoveryFailed }
+        try store.write(try makeVerifier(new), account: pinAccount)
+    }
+
+    private func validatePIN(_ pin: String) throws {
+        guard (4...12).contains(pin.utf8.count), pin.utf8.allSatisfy({ (48...57).contains($0) })
+        else { throw AccessError.invalidPIN }
+    }
+
+    // Version byte, 16-byte random salt and 32-byte PBKDF2-HMAC-SHA256 output.
+    private func makeVerifier(_ pin: String) throws -> Data {
+        try validatePIN(pin)
+        var salt = [UInt8](repeating: 0, count: 16)
+        let status = SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt)
+        guard status == errSecSuccess else { throw AccessError.keychain(status) }
+        return Data([1] + salt + (try derive(pin, salt: salt)))
+    }
+
+    private func verify(pin: String, saved: Data) throws {
+        guard saved.count == 49, saved.first == 1 else { throw AccessError.unavailable }
+        try validatePIN(pin)
+        let actual = try derive(pin, salt: Array(saved.dropFirst().prefix(16)))
+        let difference = zip(actual, saved.suffix(32)).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) }
+        guard difference == 0 else { throw AccessError.incorrectPIN }
+    }
+
+    private func derive(_ pin: String, salt: [UInt8]) throws -> [UInt8] {
+        var derived = [UInt8](repeating: 0, count: 32)
+        let status = CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), pin, pin.utf8.count, salt, salt.count,
+                                         CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), 150_000, &derived, derived.count)
+        guard status == kCCSuccess else { throw AccessError.unavailable }
+        return derived
+    }
+}

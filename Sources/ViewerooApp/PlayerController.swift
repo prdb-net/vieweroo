@@ -1,0 +1,209 @@
+import AVFoundation
+import Combine
+import Foundation
+import ViewerooCore
+
+@MainActor
+final class PlayerController: ObservableObject {
+    let player = AVPlayer()
+    @Published private(set) var title = ""
+    @Published private(set) var position = 0.0
+    @Published private(set) var duration = 0.0
+    @Published private(set) var playing = false
+    @Published private(set) var loopStart: Double?
+    @Published private(set) var loopEnd: Double?
+    @Published private(set) var error: String?
+    @Published private(set) var previewDirectory: URL?
+    private var history: PlaybackHistory?
+    private var reportUnsupported: ((String) throws -> Void)?
+    private var observations: [NSKeyValueObservation] = []
+    private var notifications: [NSObjectProtocol] = []
+    private var periodicObserver: Any?
+    private var generation = UUID()
+    private var seekID: UUID?
+    private var wantsPlayback = false
+    private var ready = false
+
+    init() { player.actionAtItemEnd = .pause }
+
+    func open(entry: CatalogEntry, startAt: Double, previewDirectory: URL, catalog: Catalog) {
+        let id = entry.id
+        open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory,
+             history: PlaybackHistory(begin: { try catalog.beginSession(entryID: id) },
+                                      append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
+                                      resume: { try catalog.setResume(entryID: id, seconds: $0) }))
+        reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
+    }
+
+    func open(url: URL, title: String, startAt: Double, previewDirectory: URL, history: PlaybackHistory) {
+        stop()
+        self.title = title
+        self.history = history
+        self.previewDirectory = previewDirectory
+        wantsPlayback = true
+        let token = generation
+        let item = AVPlayerItem(url: url)
+        player.allowsExternalPlayback = true
+        player.replaceCurrentItem(with: item)
+
+        observations.append(item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, self.generation == token else { return }
+                if item.status == .failed { self.fail(item.error) }
+                if item.status == .readyToPlay, !self.ready {
+                    self.ready = true
+                    self.duration = max(0, item.duration.seconds.isFinite ? item.duration.seconds : 0)
+                    let initial = startAt.isFinite && startAt < self.duration - 0.05 ? startAt : 0
+                    self.seek(to: initial, resume: self.wantsPlayback)
+                }
+            }
+        })
+        observations.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, self.generation == token else { return }
+                self.sample()
+            }
+        })
+        periodicObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 5), queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == token else { return }
+                self.sample()
+            }
+        }
+        listen(for: .AVPlayerItemDidPlayToEndTime, item: item) { controller, _ in
+            controller.sample(playing: false)
+            if let start = controller.loopStart, controller.loopEnd != nil, controller.wantsPlayback {
+                controller.seek(to: start, resume: true)
+            } else { controller.wantsPlayback = false }
+        }
+        listen(for: .AVPlayerItemTimeJumped, item: item) { controller, _ in
+            guard controller.seekID == nil else { return }
+            controller.didJump()
+        }
+        listen(for: .AVPlayerItemFailedToPlayToEndTime, item: item) { controller, error in
+            controller.fail(error ?? item.error)
+        }
+    }
+
+    private func listen(for name: Notification.Name, item: AVPlayerItem,
+                        action: @escaping @MainActor @Sendable (PlayerController, Error?) -> Void) {
+        let token = generation
+        notifications.append(NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { [weak self] event in
+            let failure = event.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            MainActor.assumeIsolated {
+                guard let self, self.generation == token else { return }
+                action(self, failure)
+            }
+        })
+    }
+
+    private func fail(_ underlying: Error?) {
+        wantsPlayback = false
+        sample(playing: false)
+        player.pause()
+        let explanation = underlying?.localizedDescription ?? "AVFoundation could not decode this video."
+        error = explanation
+        if let underlying, PreviewError.isUnsupported(underlying) {
+            do { try reportUnsupported?(explanation) }
+            catch { self.error = explanation + " The failure could not be saved to the catalog." }
+        }
+    }
+
+    private func sample(playing override: Bool? = nil) {
+        guard ready, seekID == nil else { return }
+        let time = player.currentTime().seconds
+        guard time.isFinite else { return }
+        position = max(0, time)
+        playing = override ?? (player.timeControlStatus == .playing)
+        do { try history?.sample(position: position, playing: playing, clock: ProcessInfo.processInfo.systemUptime) }
+        catch { self.error = "Viewing history could not be saved. \(error.localizedDescription)" }
+    }
+
+    private func didJump() {
+        let time = player.currentTime().seconds
+        guard ready, time.isFinite else { return }
+        position = max(0, time)
+        do {
+            try history?.jumped(to: position, playing: player.timeControlStatus == .playing,
+                                clock: ProcessInfo.processInfo.systemUptime)
+        } catch { self.error = "The playback position could not be saved. \(error.localizedDescription)" }
+    }
+
+    func togglePlayback() {
+        if wantsPlayback {
+            sample(playing: false)
+            wantsPlayback = false
+            player.pause()
+        } else {
+            wantsPlayback = true
+            if ready, duration > 0, position >= (loopEnd ?? duration) - 0.05 {
+                seek(to: loopStart ?? 0, resume: true)
+            } else if ready { player.play() }
+        }
+    }
+
+    func seek(to seconds: Double, resume: Bool? = nil) {
+        guard ready, seconds.isFinite else { return }
+        sample(playing: false)
+        let target = max(0, min(seconds, duration))
+        if let loopStart, let loopEnd, target < loopStart || target >= loopEnd { clearLoop() }
+        wantsPlayback = resume ?? wantsPlayback
+        player.pause()
+        let ticket = UUID()
+        seekID = ticket
+        position = target
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 60_000),
+                    toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            Task { @MainActor in
+                guard let self, self.seekID == ticket else { return }
+                self.seekID = nil
+                self.didJump()
+                if finished, self.wantsPlayback { self.player.play() }
+            }
+        }
+    }
+
+    func markLoopStart() {
+        clearLoop()
+        loopStart = position
+    }
+
+    func markLoopEnd() {
+        guard let loopStart, position > loopStart + 0.1 else { return }
+        loopEnd = position
+        player.currentItem?.forwardPlaybackEndTime = CMTime(seconds: position, preferredTimescale: 60_000)
+        seek(to: loopStart, resume: true)
+    }
+
+    func clearLoop() {
+        loopStart = nil
+        loopEnd = nil
+        player.currentItem?.forwardPlaybackEndTime = .invalid
+    }
+
+    func stop() {
+        sample(playing: false)
+        generation = UUID()
+        seekID = nil
+        observations.removeAll()
+        for token in notifications { NotificationCenter.default.removeObserver(token) }
+        notifications.removeAll()
+        if let periodicObserver { player.removeTimeObserver(periodicObserver) }
+        periodicObserver = nil
+        wantsPlayback = false
+        player.pause()
+        player.allowsExternalPlayback = false
+        player.currentItem?.cancelPendingSeeks()
+        player.replaceCurrentItem(with: nil)
+        clearLoop()
+        ready = false
+        playing = false
+        title = ""
+        error = nil
+        history = nil
+        reportUnsupported = nil
+        position = 0
+        duration = 0
+        previewDirectory = nil
+    }
+}

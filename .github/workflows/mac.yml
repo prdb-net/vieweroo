@@ -1,0 +1,13 @@
+name: macOS
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app
+        run: ./scripts/build
+      - name: Run isolated tests
+        run: ./scripts/test
+      - name: Package the release ZIP
+        run: ./scripts/package
