@@ -8,6 +8,7 @@ private enum EditSheet: String, Identifiable {
 
 struct LibraryView: View {
     @Bindable var model: LibraryModel
+    let windowTitle: String
     @State private var sheet: EditSheet?
     @State private var deleteLibrary = false
 
@@ -70,11 +71,13 @@ struct LibraryView: View {
                 }
             }
         }
+        .overlay(alignment: .top) { Divider().allowsHitTesting(false).accessibilityHidden(true) }
         .searchable(text: $model.query, placement: .toolbar, prompt: "Search library")
         .onChange(of: model.query) { model.detailID = nil }
         .onChange(of: model.shelf) { model.detailID = nil; model.query = ""; model.loadPlaylist() }
         .onChange(of: model.libraryID) { sheet = nil }
         .toolbar {
+            libraryTitle
             ToolbarItemGroup {
                 if model.libraryID != nil {
                     Button { model.pickSource() } label: { Label("Add Source Folder", systemImage: "folder.badge.plus") }
@@ -85,6 +88,24 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    @ToolbarContentBuilder
+    private var libraryTitle: some ToolbarContent {
+        let title = Text(windowTitle).font(.headline).lineLimit(1).padding(.trailing, VSpace.tight)
+        #if compiler(>=6.2)
+        if #available(macOS 26, *) {
+            // Ungrouped toolbar items already have a 4 pt leading margin.
+            ToolbarItem(placement: .navigation) {
+                title.padding(.leading, VSpace.section - VSpace.unit)
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .navigation) { title.padding(.leading, VSpace.group) }
+        }
+        #else
+        ToolbarItem(placement: .navigation) { title.padding(.leading, VSpace.group) }
+        #endif
     }
 
     private var sidebar: some View {

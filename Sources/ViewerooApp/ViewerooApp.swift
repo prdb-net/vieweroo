@@ -23,9 +23,9 @@ struct ViewerooApp: App {
 
     var body: some Scene {
         Window(Text(verbatim: title), id: "library") {
-            RootView(model: model)
+            RootView(model: model, windowTitle: title)
                 .frame(minWidth: 790, minHeight: 535)
-                .background(WindowPrivacy())
+                .background(LibraryWindowConfiguration(browsing: model.phase == .ready && !model.playing))
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
@@ -57,22 +57,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldRestoreApplicationState(_ sender: NSApplication) -> Bool { false }
 }
 
-// Keep the window title neutral and opt out of system window sharing wherever supported.
-struct WindowPrivacy: NSViewRepresentable {
+// Keep the native title for system surfaces. The library toolbar draws its own aligned title.
+struct LibraryWindowConfiguration: NSViewRepresentable {
+    let browsing: Bool
+
     final class Host: NSView {
+        var browsing = false
+        func updateTitlebar() {
+            guard let window else { return }
+            let visibility: NSWindow.TitleVisibility = browsing ? .hidden : .visible
+            if window.titleVisibility != visibility { window.titleVisibility = visibility }
+            if window.titlebarAppearsTransparent != browsing { window.titlebarAppearsTransparent = browsing }
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             window?.sharingType = .none
             window?.isRestorable = false
             window?.tabbingMode = .disallowed
+            updateTitlebar()
         }
     }
     func makeNSView(context: Context) -> Host { Host() }
-    func updateNSView(_ nsView: Host, context: Context) {}
+    func updateNSView(_ nsView: Host, context: Context) {
+        nsView.browsing = browsing
+        nsView.updateTitlebar()
+    }
 }
 
 struct RootView: View {
     @Bindable var model: LibraryModel
+    let windowTitle: String
 
     var body: some View {
         Group {
@@ -80,7 +95,7 @@ struct RootView: View {
             case .starting: ProgressView()
             case .locked, .setup: AccessView(model: model)
             case .ready:
-                LibraryView(model: model)
+                LibraryView(model: model, windowTitle: windowTitle)
                     .overlay(alignment: .bottomTrailing) {
                         if let notice = model.notice {
                             ActionNoticeView(notice: notice) {
