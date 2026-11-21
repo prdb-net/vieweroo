@@ -120,6 +120,20 @@ final class PlayerController: ObservableObject {
                 self.sample()
             }
         })
+        let rateChangeReason = AVPlayer.rateDidChangeReasonKey
+        notifications.append(NotificationCenter.default.addObserver(forName: AVPlayer.rateDidChangeNotification,
+                                                                   object: player, queue: .main) { [weak self] event in
+            let hasReason = event.userInfo?[rateChangeReason] != nil
+            MainActor.assumeIsolated {
+                guard let self, self.generation == token, self.ready, item.status == .readyToPlay else { return }
+                let requested = self.player.rate != 0
+                // AVPlayer sets its rate to zero automatically at a loop boundary.
+                // The end-time notification decides whether to play the next pass.
+                if !requested, !hasReason,
+                   let end = self.loopEnd, self.player.currentTime().seconds >= end - 0.05 { return }
+                if self.wantsPlayback != requested { self.wantsPlayback = requested }
+            }
+        })
         periodicObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 5), queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.generation == token else { return }
@@ -288,7 +302,9 @@ final class PlayerController: ObservableObject {
         let target = max(0, min(seconds, duration))
         if let loopStart, let loopEnd, target < loopStart || target >= loopEnd { clearLoop() }
         wantsPlayback = resume ?? wantsPlayback
-        player.pause()
+        // AVPlayer preserves its desired rate across seeks. An artificial pause
+        // here would be indistinguishable from a pause requested on the receiver.
+        if !wantsPlayback, player.rate != 0 { player.pause() }
         let ticket = UUID()
         seekID = ticket
         position = target

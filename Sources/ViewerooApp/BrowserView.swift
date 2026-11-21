@@ -123,7 +123,7 @@ struct BrowserView: View {
                             }.buttonStyle(.plain)
                             .accessibilityAddTraits(model.visit.selectedTile == .video(entry.id) ? .isSelected : [])
                             .contextMenu {
-                                Button("Play") { model.play(entry, at: entry.resume) }.disabled(entry.availability != .available)
+                                Button("Play") { model.play(entry) }.disabled(entry.availability != .available)
                                 if let id = playlistID {
                                     Button("Move Earlier") { move(entry, by: -1, playlist: id) }.disabled(model.orderedIDs.first == entry.id)
                                     Button("Move Later") { move(entry, by: 1, playlist: id) }.disabled(model.orderedIDs.last == entry.id)

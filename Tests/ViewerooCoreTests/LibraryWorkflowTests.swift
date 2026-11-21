@@ -128,7 +128,7 @@ private final class WorkflowSecrets: SecretStore {
     let saved = try #require(reopened.entries.first)
     #expect(saved.id == entry.id && saved.favorite && saved.rating == 1)
     #expect(saved.playCount == 0 && saved.resume == 0 && saved.watchTime == 0)
-    reopened.play(saved, at: saved.resume)
+    reopened.play(saved)
     try await until { reopened.playback.position > saved.resume + 0.2 }
     await server.setMode(.rejected)
     reopened.refresh()
@@ -185,6 +185,19 @@ private final class WorkflowSecrets: SecretStore {
     #expect(watched.playCount == 1 && watched.duration == 20)
     #expect(abs(watched.weightedPlays - watched.watchTime / 20) < 0.001)
     #expect(try model.catalog?.entry(second.id)?.playCount == 0)
+    // The detail and context menu can still hold the tile from before playback.
+    model.play(first)
+    try await until { model.playback.playing }
+    #expect(model.playback.position >= saved - 0.05)
+    model.endPlayback()
+    model.play(first, at: 0)
+    try await until { model.playback.playing }
+    #expect(model.playback.position < 1)
+    model.endPlayback()
+    model.play(first, at: 3)
+    try await until { model.playback.playing }
+    #expect((2.95..<4).contains(model.playback.position))
+    model.endPlayback()
     try model.access.setPIN(current: nil, new: "0000")
     model.pinEnabled = true
     model.lock()

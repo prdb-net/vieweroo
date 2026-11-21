@@ -70,7 +70,7 @@ struct EntryView: View {
         ZStack(alignment: .bottomLeading) {
             Poster(model: model, entry: entry)
                 .contentShape(Rectangle())
-                .onTapGesture { if available { model.play(entry, at: entry.resume) } }
+                .onTapGesture { if available { model.play(entry) } }
             VStack(alignment: .leading, spacing: VSpace.control) {
                 VStack(alignment: .leading, spacing: VSpace.unit) {
                     Text(entry.title)
@@ -103,7 +103,7 @@ struct EntryView: View {
         let resume = entry.resume > 0
         let action = resume ? "Resume at \(durationLabel(entry.resume))" : "Play"
         return HStack(spacing: VSpace.tight) {
-            Button { model.play(entry, at: entry.resume) } label: {
+            Button { model.play(entry) } label: {
                 Label(action, systemImage: "play.fill")
                     .font(.headline).monospacedDigit()
                     .padding(.horizontal, VSpace.group)

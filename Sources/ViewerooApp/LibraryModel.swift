@@ -429,10 +429,19 @@ final class LibraryModel {
         }
     }
 
-    func play(_ entry: CatalogEntry, at position: Double) {
-        guard phase == .ready, entry.libraryID == libraryID, let catalog else { return }
-        playback.open(entry: entry, startAt: position, previewDirectory: previewDirectory(entry), catalog: catalog)
-        playing = true
+    func play(_ selection: CatalogEntry, at position: Double? = nil, suggested: Bool = false) {
+        guard phase == .ready, selection.libraryID == libraryID, let catalog else { return }
+        do {
+            // A visible tile can predate the last session or a source refresh.
+            guard let entry = try catalog.entry(selection.id), entry.libraryID == libraryID,
+                  entry.availability == .available, !suggested || entry.playbackFailure == nil else {
+                reload()
+                notify("This video is no longer available to play.", kind: .error)
+                return
+            }
+            playback.open(entry: entry, startAt: position ?? entry.resume, previewDirectory: previewDirectory(entry), catalog: catalog)
+            playing = true
+        } catch { message = error.localizedDescription }
     }
 
     func hasAlternatives(to current: CatalogEntry) -> Bool {
@@ -440,17 +449,7 @@ final class LibraryModel {
     }
 
     func playSuggested(_ suggestion: CatalogEntry) {
-        guard phase == .ready, suggestion.libraryID == libraryID, let catalog else { return }
-        do {
-            // Switching back can happen before the browser has reloaded the previous playback session.
-            guard let entry = try catalog.entry(suggestion.id), entry.libraryID == libraryID,
-                  entry.availability == .available, entry.playbackFailure == nil else {
-                reload()
-                notify("This video is no longer available to play.", kind: .error)
-                return
-            }
-            play(entry, at: entry.resume)
-        } catch { message = error.localizedDescription }
+        play(suggestion, suggested: true)
     }
 
     func endPlayback() { playback.stop(); playing = false; reload() }

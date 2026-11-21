@@ -76,11 +76,26 @@ import ViewerooCore
     #expect(controller.loopStart == previous && sessions == 1)
     controller.seek(to: 9, resume: true)
     try await waitUntil { controller.position > 9.3 }
+    // Exercise the underlying player's transport, as the receiver can do.
+    controller.player.pause()
+    try await waitUntil { !controller.wantsPlayback && !controller.playing }
+    controller.seek(to: 7)
+    try await waitUntil { abs(controller.player.currentTime().seconds - 7) < 0.05 }
+    #expect(!controller.wantsPlayback)
     controller.togglePlayback()
+    try await waitUntil { controller.playing && controller.position > 7.1 }
+    controller.togglePlayback()
+    controller.player.play()
+    try await waitUntil { controller.wantsPlayback && controller.playing }
+    controller.seek(to: 4)
+    controller.player.pause()
+    try await waitUntil {
+        !controller.wantsPlayback && !controller.playing && abs(controller.player.currentTime().seconds - 4) < 0.05
+    }
     controller.externalPlaybackDidEnd()
     try await waitUntil { controller.player.currentItem?.status == .readyToPlay && !controller.waiting }
     #expect((controller.player.currentItem?.asset as? AVURLAsset)?.url == movie)
-    #expect(!controller.wantsPlayback && sessions == 1)
+    #expect(!controller.wantsPlayback && controller.player.rate == 0 && sessions == 1)
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
     await #expect(throws: URLError.self) { _ = try await session.data(from: streamed) }
