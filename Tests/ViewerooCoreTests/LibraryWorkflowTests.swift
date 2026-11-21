@@ -98,8 +98,8 @@ private final class WorkflowSecrets: SecretStore {
     }
     #expect(!formSaved && formError == CatalogError.invalidValue.localizedDescription)
     #expect(first.notice?.id == previousNoticeID)
-    first.shelf = .favorites
-    first.detailID = entry.id
+    first.browse(.favorites)
+    first.openDetail(entry.id)
     first.play(entry, at: 0)
     try await until { first.playback.position > 0.3 }
     first.endPlayback()
@@ -112,7 +112,7 @@ private final class WorkflowSecrets: SecretStore {
     first.lock()
     #expect(first.phase == .locked && first.entries.isEmpty && first.playlists.isEmpty)
     #expect(first.notice == nil)
-    #expect(first.libraryID == nil && first.detailID == nil)
+    #expect(first.libraryID == nil && first.detailID == nil && !first.canGoBack)
     #expect(first.playback.player.currentItem == nil && !first.playback.player.allowsExternalPlayback)
 
     await server.setMode(.offline)
@@ -165,8 +165,8 @@ private final class WorkflowSecrets: SecretStore {
     model.addSources([folder])
     try await until { model.entries.count == 2 && !model.scanBusy }
     let first = model.entries[0], second = model.entries[1]
-    model.shelf = .all
-    model.detailID = first.id
+    model.browse(.all)
+    model.openDetail(first.id)
     model.play(first, at: 0)
     try await until(timeout: .seconds(20)) { model.playback.position > 10.5 }
     model.playSuggested(second)
@@ -196,4 +196,75 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     let deadline = ContinuousClock.now + timeout
     while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
     try #require(condition(), "Timed out waiting for the workflow", sourceLocation: sourceLocation)
+}
+
+@MainActor
+@Test func backRestoresVisitsAndSkipsDeletedDestinations() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.navigation." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Clips")
+    let catalog = try #require(model.catalog)
+    let library = try #require(model.libraryID)
+    let playlist = try catalog.createPlaylist(libraryID: library, name: "Saved")
+    let folder = root.appending(path: "Media")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try await writeColorMovie(to: folder.appending(path: "First.mp4"))
+    try FileManager.default.copyItem(at: folder.appending(path: "First.mp4"), to: folder.appending(path: "Second.mp4"))
+    model.addSources([folder])
+    try await until { model.entries.count == 2 && !model.scanBusy }
+    let first = model.entries[0], second = model.entries[1]
+    _ = try catalog.addToPlaylist(playlist.id, entryID: first.id)
+    model.browse(.playlist(playlist.id))
+    model.search("Fi")
+    model.search("First")
+    model.openDetail(first.id)
+    let person = PRDBPerformer(id: "fixture", name: "Morgan Reed")
+    model.browse(.performer(person), from: .performer(person.id))
+    model.openDetail(second.id)
+
+    model.goBack()
+    #expect(model.shelf == .performer(person) && model.visit.selectedTile == .video(second.id))
+    model.goBack()
+    #expect(model.detailID == first.id && model.visit.selectedTile == .performer(person.id))
+    model.goBack()
+    #expect(model.query == "First" && model.detailID == nil && model.visit.selectedTile == .video(first.id))
+    model.goBack()
+    #expect(model.query.isEmpty && model.shelf == .playlist(playlist.id) && model.orderedIDs == [first.id])
+
+    model.openDetail(first.id)
+    model.browse(.favorites)
+    try catalog.deleteEntry(first.id)
+    await model.reload()?.value
+    model.goBack()
+    #expect(model.shelf == .playlist(playlist.id) && model.detailID == nil && model.orderedIDs.isEmpty)
+    try catalog.deletePlaylist(playlist.id)
+    await model.reload()?.value
+    #expect(model.shelf == .studios && !model.canGoBack)
+    model.browse(.liked)
+    model.createLibrary("Another Library")
+    #expect(model.libraryID != library && model.shelf == .studios && !model.canGoBack)
+    let emptyLibrary = try #require(model.libraryID)
+    model.selectLibrary(library)
+    let previousLoad = model.reload()
+    model.selectLibrary(emptyLibrary)
+    let currentLoad = model.reload()
+    await previousLoad?.value
+    await currentLoad?.value
+    #expect(!model.loadingLibrary && model.entries.isEmpty && model.sources.isEmpty)
+    model.selectLibrary(library)
+    let unlockedLoad = model.reload()
+    try model.access.setPIN(current: nil, new: "1234")
+    model.pinEnabled = true
+    model.lock()
+    await unlockedLoad?.value
+    #expect(model.phase == .locked && model.entries.isEmpty && model.sources.isEmpty && model.libraries.isEmpty)
 }

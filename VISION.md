@@ -18,7 +18,7 @@ Vieweroo automatically links a video to its PRDB title when its file hash produc
 
 Vieweroo opens the last-used library in its studio overview. Open a studio to see its videos from across the library's folders, or choose **Unknown Studio** for videos still awaiting identification of their studio. Search the active library by title, filename, studio, performer, or tag. The sidebar gives you direct access to favorites, playlists, and frequently watched videos.
 
-For each matched video, the detail view shows the PRDB title, studio, and cast, with performer portraits where PRDB provides them. Select a portrait to see other videos in your library featuring that performer.
+For each matched video, the detail view shows the PRDB title, studio, and cast, with performer portraits where PRDB provides them. Select a portrait to see other videos in your library featuring that performer. Use Back to retrace your steps through videos, performers, studios and search results. Returning to a collection restores your place and highlights the tile you opened.
 
 Even a video with no PRDB title match can appear under its studio. Vieweroo looks for a recognizable studio name in the folder names and filename, so a collection already organized by studio is ready to browse as it is scanned.
 

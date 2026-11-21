@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import Observation
 import ViewerooCore
@@ -39,15 +40,26 @@ final class LibraryModel {
     var entries: [CatalogEntry] = []
     var playlists: [CatalogPlaylist] = []
     var orderedIDs: [Int64] = []
+    private(set) var loadingLibrary = false
     var libraryID: Int64?
-    var shelf: Shelf? = .studios
-    var query = ""
-    var detailID: Int64?
+    private(set) var visit = BrowseVisit()
+    private var backHistory: [BrowseVisit] = []
+    var shelf: Shelf { visit.shelf }
+    var query: String { visit.query }
+    var detailID: Int64? { visit.detailID }
+    var detailsExpanded: Bool {
+        get { visit.detailsExpanded }
+        set { visit.detailsExpanded = newValue }
+    }
+    var canGoBack: Bool { !backHistory.isEmpty }
     var playing = false
     var scanBusy = false
     var activity: String?
     var networkStatus: String?
-    var previewRevision = 0
+    @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
+    @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var snapshotRequested = false
+    @ObservationIgnored private var editRevision = 0
     var setupReason: String?
     var notice: ActionNotice?
     var message: String?
@@ -103,6 +115,8 @@ final class LibraryModel {
         session = UUID()
         scanToken = UUID()
         previewToken = UUID()
+        snapshotTask?.cancel()
+        snapshotTask = nil
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         playback.stop(); playing = false
         panel?.cancel(nil); panel = nil
@@ -112,7 +126,8 @@ final class LibraryModel {
     private func conceal(_ gate: Gate) {
         stopWork()
         phase = gate
-        message = nil; detailID = nil; libraryID = nil; query = ""; shelf = .studios
+        message = nil; libraryID = nil
+        resetNavigation()
         libraries = []; sources = []; entries = []; playlists = []; orderedIDs = []
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }
@@ -138,17 +153,22 @@ final class LibraryModel {
     func selectLibrary(_ id: Int64?) {
         guard phase == .ready else { return }
         stopWork()
-        libraryID = id; detailID = nil; shelf = .studios; query = ""
+        libraryID = id
+        loadingLibrary = id != nil
+        entries = []; sources = []; playlists = []; orderedIDs = []
+        resetNavigation()
         if let id { preferences.set(id, forKey: lastLibrary) }
-        reload()
+        let initialLoad = reload()
         guard let catalog else { return }
         let stamp = session
         if let id {
             availabilityTask = Task {
                 do {
-                    try await Task.detached(priority: .utility) { try catalog.checkSources(libraryID: id) }.value
+                    let probe = Task.detached(priority: .utility) { try catalog.checkSources(libraryID: id) }
+                    let changed = try await withTaskCancellationHandler { try await probe.value } onCancel: { probe.cancel() }
                     guard session == stamp, !Task.isCancelled else { return }
-                    reload()
+                    if changed { await reload()?.value } else { await initialLoad?.value }
+                    guard session == stamp, !Task.isCancelled else { return }
                     let pending = sources.filter { $0.online && $0.scanPending }
                     if !pending.isEmpty { scan(pending) } else { generatePreviews() }
                 } catch { if session == stamp, !Task.isCancelled { message = error.localizedDescription } }
@@ -157,20 +177,95 @@ final class LibraryModel {
         startLookups()
     }
 
-    func reload() {
-        guard phase == .ready, let catalog else { return }
-        do {
-            libraries = try catalog.libraries()
-            guard let id = libraryID else { entries = []; sources = []; playlists = []; orderedIDs = []; return }
-            entries = try catalog.entries(libraryID: id)
-            sources = try catalog.sources(libraryID: id)
-            playlists = try catalog.playlists(libraryID: id)
-            loadPlaylist()
-        } catch { message = error.localizedDescription }
+    private func resetNavigation() {
+        backHistory.removeAll()
+        visit = BrowseVisit()
+    }
+
+    private func navigate(to next: BrowseVisit, from tile: BrowseTile? = nil) {
+        guard phase == .ready, libraryID != nil, !playing else { return }
+        visit.scroll.save()
+        visit.castScroll.save()
+        if let tile { visit.selectedTile = tile }
+        backHistory.append(visit)
+        visit = next
+        loadPlaylist()
+    }
+
+    func browse(_ destination: Shelf, from tile: BrowseTile? = nil) {
+        guard destination != shelf || detailID != nil || !query.isEmpty else { return }
+        navigate(to: BrowseVisit(shelf: destination), from: tile)
+    }
+
+    func openDetail(_ id: Int64) {
+        guard id != detailID else { return }
+        navigate(to: BrowseVisit(shelf: shelf, query: query, detailID: id), from: .video(id))
+    }
+
+    func search(_ term: String) {
+        guard query != term, phase == .ready, libraryID != nil, !playing else { return }
+        if detailID != nil || query.isEmpty {
+            navigate(to: BrowseVisit(shelf: shelf, query: term))
+        } else if term.isEmpty, let previous = backHistory.last, previous.shelf == shelf,
+                  previous.query.isEmpty, previous.detailID == nil {
+            goBack()
+        } else {
+            // Refining the same search is one visit, regardless of the number of keystrokes.
+            visit = BrowseVisit(shelf: shelf, query: term)
+        }
+    }
+
+    func goBack() {
+        guard phase == .ready, !playing, let previous = backHistory.popLast() else { return }
+        visit = previous
+        loadPlaylist()
+    }
+
+    /// Collapse overlapping scan and PRDB notifications into one follow-up read.
+    @discardableResult
+    func reload() -> Task<Void, Never>? {
+        guard phase == .ready, let catalog else { return nil }
+        snapshotRequested = true
+        if let snapshotTask { return snapshotTask }
+        let stamp = session, id = libraryID
+        let task = Task {
+            guard session == stamp, !Task.isCancelled else { return }
+            while snapshotRequested {
+                let revision = editRevision
+                snapshotRequested = false
+                do {
+                    let snapshot = try await catalog.snapshot(libraryID: id)
+                    guard session == stamp, !Task.isCancelled else { return }
+                    if revision != editRevision { continue }
+                    loadingLibrary = false
+                    libraries = snapshot.libraries
+                    sources = snapshot.sources
+                    entries = snapshot.entries
+                    playlists = snapshot.playlists
+                    let entryIDs = Set(snapshot.entries.map(\.id))
+                    let playlistIDs = Set(snapshot.playlists.map(\.id))
+                    func valid(_ visit: BrowseVisit) -> Bool {
+                        if let id = visit.detailID, !entryIDs.contains(id) { return false }
+                        if case let .playlist(id) = visit.shelf { return playlistIDs.contains(id) }
+                        return true
+                    }
+                    backHistory.removeAll { !valid($0) }
+                    if !valid(visit) { visit = backHistory.popLast() ?? BrowseVisit() }
+                    loadPlaylist()
+                } catch {
+                    guard session == stamp, !Task.isCancelled else { return }
+                    loadingLibrary = false
+                    message = error.localizedDescription
+                }
+            }
+            snapshotTask = nil
+        }
+        snapshotTask = task
+        return task
     }
     func loadPlaylist() {
         if case let .playlist(id) = shelf {
-            do { orderedIDs = try catalog?.playlistEntries(id).map(\.id) ?? [] }
+            do { orderedIDs = try catalog?.playlistEntryIDs(id) ?? [] }
             catch { message = error.localizedDescription }
         } else { orderedIDs = [] }
     }
@@ -185,6 +280,7 @@ final class LibraryModel {
         guard phase == .ready, let catalog else { return false }
         do {
             try operation(catalog)
+            editRevision &+= 1
             reload()
             if let confirmation { notify(confirmation, kind: kind) }
             return true
@@ -231,13 +327,19 @@ final class LibraryModel {
         // A multi-folder selection may have saved earlier folders before a later one failed.
         if !saved { reload() }
         availabilityTask?.cancel()
-        scan(sources)
+        scanCurrentSources()
     }
 
     func refresh() {
         guard phase == .ready, libraryID != nil else { return }
         availabilityTask?.cancel()
-        scan(sources, requested: true)
+        scanCurrentSources(requested: true)
+    }
+
+    private func scanCurrentSources(requested: Bool = false) {
+        guard let catalog, let libraryID else { return }
+        do { scan(try catalog.sources(libraryID: libraryID), requested: requested) }
+        catch { message = error.localizedDescription }
     }
 
     private func scan(_ list: [CatalogSource], requested: Bool = false) {
@@ -262,7 +364,9 @@ final class LibraryModel {
                 catch { if !Task.isCancelled { errors.append(source.url.lastPathComponent) } }
             }
             guard scanToken == token, !Task.isCancelled else { return }
-            scanBusy = false; activity = nil; reload()
+            await reload()?.value
+            guard scanToken == token, !Task.isCancelled else { return }
+            scanBusy = false; activity = nil
             if !errors.isEmpty {
                 message = "Some folders could not be scanned: " + errors.joined(separator: ", ")
             } else if requested {
@@ -284,19 +388,22 @@ final class LibraryModel {
         previewToken = token
         let pending = entries.filter { $0.availability == .available }
         previewTask = Task(priority: .utility) {
+            var failuresChanged = false
             for entry in pending {
                 guard !Task.isCancelled else { return }
                 let directory = previewDirectory(entry)
                 do {
-                    try await cache.prepare(media: entry.url, directory: directory)
+                    let generated = try await cache.prepare(media: entry.url, directory: directory)
+                    guard previewToken == token else { return }
+                    if generated { posterPrepared.send(directory) }
                 } catch PreviewError.unsupportedVideo {
+                    guard previewToken == token, entry.playbackFailure != PreviewError.unsupportedVideo.localizedDescription else { continue }
+                    failuresChanged = true
                     try? catalog.setPlaybackFailure(entryID: entry.id, message: PreviewError.unsupportedVideo.localizedDescription,
                                                     fileSize: entry.fileSize, modified: entry.modified)
                 } catch { /* Playback reports decoder errors independently of preview generation. */ }
-                guard previewToken == token else { return }
-                previewRevision &+= 1
             }
-            if previewToken == token { reload() }
+            if failuresChanged, previewToken == token { reload() }
         }
     }
 
@@ -331,14 +438,16 @@ final class LibraryModel {
         worker?.cancel()
         let id = libraryID, stamp = session, client = client
         worker = Task(priority: .utility) {
-            if let id {
+            await snapshotTask?.value
+            guard session == stamp, !Task.isCancelled else { return }
+            if let id, entries.contains(where: \.needsLookup) {
                 try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
                 if session == stamp { reload() }
             }
             while !Task.isCancelled {
                 do {
-                    if let retryAfter, retryAfter.timeIntervalSinceNow > 0 {
-                        try await Task.sleep(for: .seconds(retryAfter.timeIntervalSinceNow))
+                    while let retryAfter, retryAfter.timeIntervalSinceNow > 0 {
+                        try await Task.sleep(for: .seconds(min(86_400, retryAfter.timeIntervalSinceNow)))
                     }
                     if !validated {
                         try await client.validate(key: key)
@@ -353,7 +462,7 @@ final class LibraryModel {
                             directoryUpdated = Date()
                         }
                         try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client) {
-                            await MainActor.run { if self.session == stamp { self.reload() } }
+                            await MainActor.run { if self.session == stamp { _ = self.reload() } }
                         }
                     }
                     guard session == stamp, !Task.isCancelled else { return }

@@ -55,6 +55,7 @@ import Testing
     try model.catalog?.setFavorite(entryID: entry.id, value: true)
     let reopened = TestLibraryProfile.model(at: root, preferences: prefs)
     reopened.start()
+    await reopened.reload()?.value
     #expect(reopened.libraries.count == 1 && reopened.sources.count == 1)
     #expect(reopened.entries.count == 1 && reopened.entries.first?.id == entry.id && reopened.entries.first?.favorite == true)
 }

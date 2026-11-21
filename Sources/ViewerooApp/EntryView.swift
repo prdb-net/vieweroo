@@ -7,7 +7,6 @@ struct EntryView: View {
     @State private var tags = ""
     @State private var studio = ""
     @State private var stats: PlaybackStats?
-    @State private var editingDetails = false
     @State private var matching = false
     @State private var deleting = false
     private var available: Bool { entry.availability == .available }
@@ -16,35 +15,32 @@ struct EntryView: View {
         GeometryReader { layout in
             let sideBySide = layout.size.width >= 760 && model.hasAlternatives(to: entry)
             ScrollView {
-                VStack(alignment: .leading, spacing: VSpace.group) {
-                    Button { model.detailID = nil } label: { Label("Back", systemImage: "chevron.left") }
-                        .keyboardShortcut(.escape, modifiers: [])
-                    HStack(alignment: .top, spacing: VSpace.section) {
-                        VStack(alignment: .leading, spacing: VSpace.section) {
-                            overview(compactWidth: layout.size.width < 760 ? layout.size.width : nil)
-                            if !sideBySide {
-                                RelatedVideosView(model: model, current: entry, style: .shelf, onSelect: model.playSuggested)
-                            }
-                            performers
-                            historySection
-                            Divider()
-                            DisclosureGroup("Library Details", isExpanded: $editingDetails) {
-                                libraryDetails.padding(.top, VSpace.control)
-                            }
-                            if !available {
-                                Button("Remove Library Entry…", role: .destructive) { deleting = true }
-                            }
+                HStack(alignment: .top, spacing: VSpace.section) {
+                    VStack(alignment: .leading, spacing: VSpace.section) {
+                        overview
+                        performers
+                        if !sideBySide {
+                            RelatedVideosView(model: model, current: entry, style: .shelf, onSelect: model.playSuggested)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if sideBySide {
-                            RelatedVideosView(model: model, current: entry, onSelect: model.playSuggested)
-                                .frame(width: min(304, layout.size.width * 0.31), alignment: .leading)
+                        historySection
+                        Divider()
+                        DisclosureGroup("Library Details", isExpanded: $model.detailsExpanded) {
+                            libraryDetails.padding(.top, VSpace.control)
                         }
+                        if !available {
+                            Button("Remove Library Entry…", role: .destructive) { deleting = true }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if sideBySide {
+                        RelatedVideosView(model: model, current: entry, onSelect: model.playSuggested)
+                            .frame(width: min(304, layout.size.width * 0.31), alignment: .leading)
                     }
                 }
                 .padding(VSpace.section)
                 .frame(maxWidth: sideBySide ? 1320 : 780, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                .background(BrowseScrollAnchor(position: model.visit.scroll))
             }
         }
         .onAppear { tags = entry.tags.joined(separator: ", "); studio = entry.manualStudio ?? "" }
@@ -53,22 +49,14 @@ struct EntryView: View {
         .alert("Remove this entry?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Remove Entry", role: .destructive) {
-                model.change("Entry removed") { try $0.deleteEntry(entry.id); model.detailID = nil }
+                model.change("Entry removed") { try $0.deleteEntry(entry.id) }
             }
         } message: { Text("Its ratings, history, and playlist memberships will be deleted from this library.") }
     }
 
-    private func overview(compactWidth: CGFloat?) -> some View {
+    private var overview: some View {
         VStack(alignment: .leading, spacing: VSpace.group) {
-            if let compactWidth {
-                HStack(alignment: .center, spacing: VSpace.group) {
-                    playPoster.frame(width: compactWidth * 0.38)
-                    titleBlock
-                }
-            } else {
-                playPoster
-                titleBlock
-            }
+            playPoster
             if !available || entry.playbackFailure != nil {
                 Label(entry.availability == .offline ? "Reconnect the source drive to play this video." :
                         entry.availability == .missing ? "This file is missing from its source folder." :
@@ -79,34 +67,61 @@ struct EntryView: View {
     }
 
     private var playPoster: some View {
-        Button { model.play(entry, at: entry.resume) } label: {
+        ZStack(alignment: .bottomLeading) {
             Poster(model: model, entry: entry)
-                .overlay(alignment: .bottomLeading) {
-                    if available {
-                        Label(entry.resume > 1 ? "Resume at \(durationLabel(entry.resume))" : "Play",
-                              systemImage: "play.fill")
-                            .font(.headline)
-                            .padding(.horizontal, VSpace.group).padding(.vertical, VSpace.tight)
-                            .foregroundStyle(.black).background(.white, in: Capsule())
-                            .padding(VSpace.group)
-                    }
-                }
                 .contentShape(Rectangle())
+                .onTapGesture { if available { model.play(entry, at: entry.resume) } }
+            VStack(alignment: .leading, spacing: VSpace.control) {
+                VStack(alignment: .leading, spacing: VSpace.unit) {
+                    Text(entry.title)
+                        .font(.title.bold()).textSelection(.enabled)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(entry.studio ?? "Unknown Studio").font(.headline)
+                }
+                if available { playbackActions }
+            }
+            .foregroundStyle(.white)
+            .padding(VSpace.group)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.62)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 2 * VSpace.page)
+                    LinearGradient(colors: [.black.opacity(0.62), .black.opacity(0.86)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .padding(.top, -2 * VSpace.page)
+                .allowsHitTesting(false)
+            }
         }
-        .buttonStyle(.plain).disabled(!available)
-        .accessibilityLabel(entry.resume > 1 ? "Resume \(entry.title) at \(durationLabel(entry.resume))" : "Play \(entry.title)")
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.black)
+        .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
     }
 
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: VSpace.tight) {
-            VStack(alignment: .leading, spacing: VSpace.unit) {
-                Text(entry.title).font(.title.bold()).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-                Text(entry.studio ?? "Unknown Studio").font(.headline).foregroundStyle(.secondary)
+    private var playbackActions: some View {
+        let resume = entry.resume > 0
+        let action = resume ? "Resume at \(durationLabel(entry.resume))" : "Play"
+        return HStack(spacing: VSpace.tight) {
+            Button { model.play(entry, at: entry.resume) } label: {
+                Label(action, systemImage: "play.fill")
+                    .font(.headline).monospacedDigit()
+                    .padding(.horizontal, VSpace.group)
+                    .frame(height: VSpace.page)
+                    .foregroundStyle(.black).background(.white, in: Capsule())
             }
-            if entry.resume > 1 {
-                Button("From Beginning") { model.play(entry, at: 0) }.disabled(!available)
+            .accessibilityLabel(resume ? "Resume \(entry.title) at \(durationLabel(entry.resume))" : "Play \(entry.title)")
+            if resume {
+                Button { model.play(entry, at: 0) } label: {
+                    Label("Play from Beginning", systemImage: "backward.end.fill")
+                        .labelStyle(.iconOnly)
+                        .frame(width: VSpace.page, height: VSpace.page)
+                        .background(.white.opacity(0.2), in: Circle())
+                }
+                .help("Play from Beginning")
             }
         }
+        .buttonStyle(.plain)
     }
 
     private var organizationActions: some View {
@@ -131,18 +146,25 @@ struct EntryView: View {
                     HStack(alignment: .top, spacing: VSpace.group) {
                         ForEach(people) { person in
                             Button {
-                                model.query = ""; model.detailID = nil; model.shelf = .performer(person)
+                                model.browse(.performer(person), from: .performer(person.id))
                             } label: {
                                 VStack {
                                     AsyncImage(url: model.artworkURL(person.portraitURL)) { phase in
                                         if let image = phase.image { image.resizable().scaledToFill() }
                                         else { Image(systemName: "person.fill").font(.title).foregroundStyle(.tertiary) }
                                     }.frame(width: 60, height: 60).background(.quaternary).clipShape(Circle())
+                                    .overlay {
+                                        if model.visit.selectedTile == .performer(person.id) {
+                                            Circle().strokeBorder(Color.accentColor, lineWidth: 2)
+                                        }
+                                    }
                                     Text(person.name).lineLimit(2).frame(width: 92)
                                 }
                             }.buttonStyle(.plain)
+                            .accessibilityAddTraits(model.visit.selectedTile == .performer(person.id) ? .isSelected : [])
                         }
                     }
+                    .background(BrowseScrollAnchor(position: model.visit.castScroll))
                 }
             }
         }
@@ -215,8 +237,9 @@ struct EntryView: View {
 }
 
 private func durationLabel(_ seconds: Double) -> String {
-    let total = max(0, Int(seconds))
-    return String(format: "%d:%02d", total / 60, total % 60)
+    guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "—" }
+    let total = Int(seconds)
+    return "\(total / 60):" + String(format: "%02d", total % 60)
 }
 
 private struct MatchView: View {

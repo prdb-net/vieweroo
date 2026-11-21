@@ -25,11 +25,13 @@ Follow the system appearance and accent. Use SF Symbols with a short action labe
 
 ## Choosing a video
 
-The library grid opens details. The large poster on a detail page starts playback and shows the saved time when resuming. Keep **From Beginning** beside the title information when a resume point exists. Keep **Library Details** expandable for file information, tags, manual studio assignment and PRDB corrections.
+Keep **Back** at the upper leading edge of the content, above the scroll area. Enable it when an earlier browsing location exists. Command–[ retraces one step, restoring the search term, scroll position and selected tile. Clear this history when locking or switching libraries.
+
+The library grid opens details. The large poster on a detail page starts playback and shows the saved time when resuming. Place the full title and studio on a shaded overlay at the bottom of the poster. When a resume point exists, place an icon-only **Play from Beginning** button beside **Resume**. Keep reactions and playlist actions directly below the poster, followed by the cast. Keep **Library Details** expandable for file information, tags, manual studio assignment and PRDB corrections.
 
 **More to Watch** offers up to eight playable titles from the current library. Prefer the same studio, then a shared performer, then a shared tag. Fill the remaining places in catalog order, starting after the current video. Include the relationship in the subtitle when available. Choosing a title starts it at its saved position. The list stays out of the layout when there are no alternatives.
 
-Adapt to the width available to each surface. At 760 pt of detail space the list can sit beside the poster. Below that, put it in a horizontal shelf after the viewing actions and show a compact poster beside the title. At 960 pt of player width, show a 300 pt side list. Give it unused horizontal space when height limits the picture, up to 400 pt or one third of the window width, whichever is smaller. In a smaller player, expose the same list from a labeled header button. Full screen uses the video area for playback.
+Adapt to the width available to each surface. At 760 pt of detail space the list can sit beside the poster. Below that, use the column width for the poster and put the recommendations in a horizontal shelf below the cast. At 960 pt of player width, show a 300 pt side list. Give it unused horizontal space when height limits the picture, up to 400 pt or one third of the window width, whichever is smaller. In a smaller player, expose the same list from a labeled header button. Full screen uses the video area for playback.
 
 ## Watching
 

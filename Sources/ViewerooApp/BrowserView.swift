@@ -4,16 +4,24 @@ import ViewerooCore
 struct BrowserView: View {
     @Bindable var model: LibraryModel
     @State private var deletingPlaylist = false
-    private let columns = [GridItem(.adaptive(minimum: 176, maximum: 320), spacing: VSpace.group, alignment: .topLeading)]
+    // A legacy scroller consumes width when it appears. If that changes the tile
+    // height, the last row can fit again and AppKit removes the scroller mid-layout.
+    private func columns(for viewportWidth: CGFloat) -> [GridItem] {
+        let gutter = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        let width = max(1, viewportWidth - 2 * VSpace.section - gutter)
+        let count = max(1, Int((width + VSpace.group) / (176 + VSpace.group)))
+        let tileWidth = min(320, floor((width - CGFloat(count - 1) * VSpace.group) / CGFloat(count)))
+        return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
+    }
     private var searching: Bool { !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var studioIndex: Bool { !searching && (model.shelf ?? .studios) == .studios }
+    private var studioIndex: Bool { !searching && model.shelf == .studios }
     private var playlistID: Int64? {
         if case let .playlist(id) = model.shelf, !searching { return id }
         return nil
     }
     private var title: String {
         if searching { return "Search Results" }
-        switch model.shelf ?? .studios {
+        switch model.shelf {
         case .studios: return "Studios"
         case .all: return "All Videos"
         case .favorites: return "Favorites"
@@ -47,8 +55,20 @@ struct BrowserView: View {
     }
 
     var body: some View {
+        GeometryReader { viewport in
+            collection(columns: columns(for: viewport.size.width))
+        }
+        .alert("Delete this playlist?", isPresented: $deletingPlaylist) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete Playlist", role: .destructive) {
+                if let id = playlistID { model.change("Playlist deleted") { try $0.deletePlaylist(id) } }
+            }
+        } message: { Text("All videos will remain in the library.") }
+    }
+
+    private func collection(columns: [GridItem]) -> some View {
         let records = filtered
-        ScrollView {
+        return ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(title).font(.largeTitle.bold()).textSelection(.enabled).accessibilityAddTraits(.isHeader)
@@ -67,9 +87,9 @@ struct BrowserView: View {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(groups.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }), id: \.self) { studio in
                             if let group = groups[studio], let cover = group.first {
-                                Button { model.shelf = .studio(studio) } label: {
+                                Button { model.browse(.studio(studio), from: .studio(studio)) } label: {
                                     VStack(alignment: .leading, spacing: VSpace.tight) {
-                                        Poster(model: model, entry: cover)
+                                        poster(cover, tile: .studio(studio))
                                         VStack(alignment: .leading, spacing: VSpace.unit) {
                                             Text(studio).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
                                             Text(group.count == 1 ? "1 video" : "\(group.count) videos")
@@ -77,21 +97,23 @@ struct BrowserView: View {
                                         }
                                     }.contentShape(Rectangle())
                                 }.buttonStyle(.plain)
+                                .accessibilityAddTraits(model.visit.selectedTile == .studio(studio) ? .isSelected : [])
                             }
                         }
                     }
                 } else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(records) { entry in
-                            Button { model.detailID = entry.id } label: {
+                            Button { model.openDetail(entry.id) } label: {
                                 VStack(alignment: .leading, spacing: VSpace.tight) {
-                                    Poster(model: model, entry: entry)
+                                    poster(entry, tile: .video(entry.id))
                                     VStack(alignment: .leading, spacing: VSpace.unit) {
                                         Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
                                         Text(subtitle(entry)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                                     }
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                            .accessibilityAddTraits(model.visit.selectedTile == .video(entry.id) ? .isSelected : [])
                             .contextMenu {
                                 Button("Play") { model.play(entry, at: entry.resume) }.disabled(entry.availability != .available)
                                 if let id = playlistID {
@@ -104,14 +126,20 @@ struct BrowserView: View {
                     }
                 }
             }.padding(VSpace.section).frame(maxWidth: .infinity, alignment: .leading)
+            .background(BrowseScrollAnchor(position: model.visit.scroll))
         }
-        .alert("Delete this playlist?", isPresented: $deletingPlaylist) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete Playlist", role: .destructive) {
-                if let id = playlistID { model.change("Playlist deleted") { try $0.deletePlaylist(id); model.shelf = .studios } }
-            }
-        } message: { Text("All videos will remain in the library.") }
+        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
     }
+    private func poster(_ entry: CatalogEntry, tile: BrowseTile) -> some View {
+        Poster(model: model, entry: entry)
+            .overlay {
+                if model.visit.selectedTile == tile {
+                    RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                }
+            }
+    }
+
     private func subtitle(_ entry: CatalogEntry) -> String {
         if entry.availability == .offline { return "Source offline" }
         if entry.availability == .missing { return "File missing" }
@@ -143,8 +171,10 @@ struct Poster: View {
     var model: LibraryModel
     var entry: CatalogEntry
     @State private var local: NSImage?
+    @State private var revision = 0
     @State private var loadedDirectory: URL?
     var body: some View {
+        let directory = model.previewDirectory(entry)
         Rectangle().fill(.quaternary.opacity(0.5))
             .aspectRatio(16/9, contentMode: .fit)
             .overlay {
@@ -154,14 +184,16 @@ struct Poster: View {
                     else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
                 }
             }.clipped().clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
-            .task(id: ImageRequest(directory: model.previewDirectory(entry), revision: model.previewRevision)) {
-                let directory = model.previewDirectory(entry)
+            .onReceive(model.posterPrepared) { ready in
+                if ready == directory { revision &+= 1 }
+            }
+            .task(id: ImageRequest(directory: directory, revision: revision)) {
                 if loadedDirectory != directory { local = nil; loadedDirectory = directory }
                 let url = PreviewCache.posterURL(in: directory)
                 if local != nil { return }
                 let bytes = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
                 if !Task.isCancelled, let bytes { local = NSImage(data: bytes) }
-            }.accessibilityHidden(true)
+            }.allowsHitTesting(false).accessibilityHidden(true)
     }
     private struct ImageRequest: Equatable { var directory: URL; var revision: Int }
 }

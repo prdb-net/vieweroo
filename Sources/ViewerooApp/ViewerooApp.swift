@@ -25,7 +25,12 @@ struct ViewerooApp: App {
         Window(Text(verbatim: title), id: "library") {
             RootView(model: model, windowTitle: title)
                 .frame(minWidth: 790, minHeight: 535)
-                .background(LibraryWindowConfiguration(browsing: model.phase == .ready && !model.playing))
+                .background {
+                    LibraryWindowConfiguration(browsing: model.phase == .ready && !model.playing)
+                        .frame(width: 0, height: 0)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
@@ -69,10 +74,20 @@ struct LibraryWindowConfiguration: NSViewRepresentable {
 
     final class Host: NSView {
         var browsing = false
+        private var titlebarUpdatePending = false
+        private var titleVisibility: NSWindow.TitleVisibility { browsing ? .hidden : .visible }
+
         func updateTitlebar() {
-            guard let window else { return }
-            let visibility: NSWindow.TitleVisibility = browsing ? .hidden : .visible
-            if window.titleVisibility != visibility { window.titleVisibility = visibility }
+            guard let window, window.titleVisibility != titleVisibility, !titlebarUpdatePending else { return }
+            // Changing window chrome can request another constraint pass. Let SwiftUI
+            // finish attaching and hit-testing its views before changing the window.
+            titlebarUpdatePending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                titlebarUpdatePending = false
+                guard let window = self.window, window.titleVisibility != titleVisibility else { return }
+                window.titleVisibility = titleVisibility
+            }
         }
 
         override func viewDidMoveToWindow() {

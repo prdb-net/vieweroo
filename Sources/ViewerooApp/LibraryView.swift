@@ -39,7 +39,7 @@ struct LibraryView: View {
                     if kind == .library { return model.createLibrary(name, onFailure: onFailure) }
                     guard let id = model.libraryID else { return false }
                     return model.change("Playlist created", onFailure: onFailure) { db in
-                        model.shelf = .playlist(try db.createPlaylist(libraryID: id, name: name).id)
+                        model.browse(.playlist(try db.createPlaylist(libraryID: id, name: name).id))
                     }
                 }
             }
@@ -60,31 +60,50 @@ struct LibraryView: View {
                 } description: {
                     Text("Group videos from one or more folders into a library.")
                 } actions: { Button("New Library…") { sheet = .library }.buttonStyle(.borderedProminent) }
+            } else if model.loadingLibrary {
+                ProgressView("Opening library…")
             } else {
-                ZStack {
-                    if model.shelf == .sources && model.query.isEmpty {
-                        SourcesView(model: model)
-                    } else {
-                        BrowserView(model: model)
-                            .disabled(model.detailID != nil)
-                            .accessibilityHidden(model.detailID != nil)
+                VStack(alignment: .leading, spacing: 0) {
+                    Button(action: model.goBack) {
+                        Label("Back", systemImage: "chevron.left")
                     }
-                    if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
-                        EntryView(model: model, entry: entry).id(id)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(.background)
+                    .keyboardShortcut("[", modifiers: .command, localization: .custom)
+                    .background {
+                        if model.detailID != nil {
+                            // SwiftUI assigns one shortcut per button. Keep Escape available on detail pages.
+                            Button("Back", action: model.goBack)
+                                .keyboardShortcut(.escape, modifiers: [])
+                                .focusable(false)
+                                .opacity(0)
+                                .accessibilityHidden(true)
+                                .allowsHitTesting(false)
+                        }
                     }
+                    .help("Go Back (⌘[)")
+                    .disabled(!model.canGoBack)
+                    .padding(.leading, VSpace.section)
+                    .padding(.top, VSpace.section)
+
+                    Group {
+                        if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
+                            EntryView(model: model, entry: entry)
+                        } else if model.shelf == .sources && model.query.isEmpty {
+                            SourcesView(model: model)
+                        } else {
+                            BrowserView(model: model)
+                        }
+                    }
+                    .id(model.visit.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
         .overlay(alignment: .top) { Divider().allowsHitTesting(false).accessibilityHidden(true) }
-        .searchable(text: $model.query, isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
+        .searchable(text: Binding(get: { model.query }, set: model.search), isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
         .focusedSceneValue(\.librarySearch, Binding(get: { searchPresented }, set: { present in
             if present { columns = .all }
             searchPresented = present
         }))
-        .onChange(of: model.query) { model.detailID = nil }
-        .onChange(of: model.shelf) { model.detailID = nil; model.query = ""; model.loadPlaylist() }
         .onChange(of: model.libraryID) { sheet = nil }
         .toolbar { libraryTitle }
     }
@@ -123,7 +142,7 @@ struct LibraryView: View {
                 Label(model.libraries.first { $0.id == model.libraryID }?.name ?? "Libraries", systemImage: "rectangle.stack")
                     .lineLimit(1).font(.headline)
             }.menuStyle(.borderlessButton).padding(VSpace.group)
-            List(selection: $model.shelf) {
+            List(selection: Binding<Shelf?>(get: { model.shelf }, set: { if let shelf = $0 { model.browse(shelf) } })) {
                 Section("Library") {
                     Label("Studios", systemImage: "square.grid.2x2").tag(Shelf.studios)
                     Label("All Videos", systemImage: "film.stack").tag(Shelf.all)

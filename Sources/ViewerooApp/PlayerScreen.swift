@@ -69,7 +69,12 @@ struct PlayerScreen: View {
             }
         }
         .ignoresSafeArea(.container, edges: window.fullScreen ? .top : [])
-        .background(PlayerWindowReader(presentation: window))
+        .background {
+            PlayerWindowReader(presentation: window)
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .onReceive(model.playback.$entryID.removeDuplicates()) { entryID = $0 }
         .onReceive(model.playback.$videoAspectRatio.removeDuplicates()) { videoAspectRatio = $0 ?? 16.0 / 9 }
         .onReceive(model.playback.$playing.removeDuplicates()) { active in
