@@ -12,6 +12,20 @@ public struct CatalogScanner: Sendable {
         return true
     }
 
+    // A selected root may itself be a link. An ancestor above the last link
+    // cannot discover its files, because recursive enumeration skips links.
+    static func traversalBoundary(for root: URL, upTo ancestor: String = "/") -> String {
+        var directory = root
+        while directory.path != ancestor && directory.path != "/" {
+            var info = stat()
+            guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) != S_IFLNK else {
+                return directory.path
+            }
+            directory.deleteLastPathComponent()
+        }
+        return directory.path
+    }
+
     public func scan(source: CatalogSource, onDiscovery: @Sendable (CatalogEntry) -> Void = { _ in }) throws {
         let generation = try catalog.database.write { db -> Int64 in
             try db.execute(sql: "UPDATE library SET scanClock = scanClock + 1 WHERE id = ?", arguments: [source.libraryID])
@@ -30,36 +44,57 @@ public struct CatalogScanner: Sendable {
 
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         var traversalError: Error?
-        // FileManager will open a symlinked root but cannot enumerate it as a directory.
-        // Traverse the target and retain the user-selected path as the catalog identity.
-        let linkedRoot = try source.url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true
-        let root = linkedRoot ? source.url.resolvingSymlinksInPath() : source.url
-        let rootDepth = root.standardizedFileURL.pathComponents.count
+        var unreadablePaths = Set<String>()
+        var links = Set<String>()
+        let prefix = source.path.hasSuffix("/") ? source.path : source.path + "/"
+        let nestedSources = try catalog.sources(libraryID: source.libraryID).filter {
+            $0.id != source.id && $0.path.hasPrefix(prefix)
+        }
+        let boundary = Self.traversalBoundary(for: source.url)
+        if boundary != "/" { links.insert(boundary) }
+        // Retain the selected path as the entry identity even when the root is linked.
+        let root = source.url.resolvingSymlinksInPath()
+        let rootDepth = root.pathComponents.count
+        let remap = root.standardizedFileURL.path != source.path
+        func selectedURL(for item: URL) -> URL {
+            guard remap else { return item }
+            let relative = item.standardizedFileURL.pathComponents.dropFirst(rootDepth)
+            return source.url.appendingPathComponent(relative.joined(separator: "/"), isDirectory: false)
+        }
+        func rememberError(at item: URL, _ error: Error) {
+            unreadablePaths.insert(selectedURL(for: item).standardizedFileURL.path)
+            traversalError = traversalError ?? error
+        }
         guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys),
-                                                         options: [], errorHandler: { _, error in
-            traversalError = error
-            return false
+                                                         options: [], errorHandler: { url, error in
+            rememberError(at: url, error)
+            return true
         }) else { throw CatalogError.unavailableFolder }
 
         do {
             for case let file as URL in files {
                 try Task.checkCancellation()
-                guard ["mp4","m4v","mov"].contains(file.pathExtension.lowercased()) else { continue }
-                let info = try file.resourceValues(forKeys: keys)
-                guard info.isRegularFile == true, info.isSymbolicLink != true,
-                      let size = info.fileSize, let modified = info.contentModificationDate else { continue }
-                let selectedFile: URL
-                if linkedRoot {
-                    let relative = file.standardizedFileURL.pathComponents.dropFirst(rootDepth).joined(separator: "/")
-                    selectedFile = source.url.appendingPathComponent(relative, isDirectory: false)
-                } else {
-                    selectedFile = file
+                let supported = ["mp4","m4v","mov"].contains(file.pathExtension.lowercased())
+                guard supported || !nestedSources.isEmpty else { continue }
+                let info: URLResourceValues
+                do { info = try file.resourceValues(forKeys: keys) }
+                catch { rememberError(at: file, error); continue }
+                if info.isSymbolicLink == true {
+                    let path = selectedURL(for: file).standardizedFileURL.path
+                    if nestedSources.contains(where: { $0.path == path || $0.path.hasPrefix(path + "/") }) {
+                        links.insert(path)
+                    }
+                    continue
                 }
-                let entry = try discover(file: selectedFile, size: Int64(size), modified: modified.timeIntervalSince1970,
-                                         source: source, generation: generation)
+                guard supported, info.isRegularFile != false else { continue }
+                guard info.isRegularFile == true, let size = info.fileSize, let modified = info.contentModificationDate else {
+                    rememberError(at: file, CocoaError(.fileReadUnknown))
+                    continue
+                }
+                let entry = try discover(file: selectedURL(for: file), size: Int64(size), modified: modified.timeIntervalSince1970,
+                                         source: source, generation: generation, boundary: boundary)
                 onDiscovery(entry)
             }
-            if let traversalError { throw traversalError }
         } catch {
             if !Self.canOpen(source.url) { try setReachability(false, source: source, generation: generation) }
             throw error
@@ -72,6 +107,27 @@ public struct CatalogScanner: Sendable {
         }
         try catalog.database.write { db in
             try verifyGeneration(db, sourceID: source.id, generation: generation)
+            // Older catalogs inferred membership solely from a path prefix. Remove
+            // claims across links, retaining the membership of any explicitly selected linked root.
+            for link in links {
+                try db.execute(sql: """
+                    DELETE FROM membership WHERE generation < ? AND sourceID IN (
+                        SELECT id FROM source WHERE libraryID = ? AND instr(?, rtrim(path, '/') || '/') = 1
+                    ) AND entryID IN (
+                        SELECT child.entryID FROM membership child JOIN source s ON s.id = child.sourceID
+                        WHERE s.libraryID = ? AND instr(rtrim(s.path, '/') || '/', rtrim(?, '/') || '/') = 1
+                    )
+                    """, arguments: [generation, source.libraryID, link, source.libraryID, link])
+            }
+            // Carry forward the previous observation under each unreadable path.
+            // Missing files in successfully traversed siblings can still be reconciled.
+            for path in unreadablePaths {
+                try db.execute(sql: """
+                    UPDATE membership SET generation = ? WHERE sourceID = ? AND generation < ? AND entryID IN (
+                        SELECT id FROM entry WHERE libraryID = ? AND (path = ? OR instr(path, rtrim(?, '/') || '/') = 1)
+                    )
+                    """, arguments: [generation, source.id, generation, source.libraryID, path, path])
+            }
             // An overlapping scan can discover a file after this scan passed its folder.
             // Only invalidate observations older than the start of this traversal.
             try db.execute(sql: """
@@ -79,8 +135,9 @@ public struct CatalogScanner: Sendable {
                     SELECT entryID FROM membership WHERE sourceID = ? AND generation < ?
                 ) AND generation < ? AND sourceID IN (SELECT id FROM source WHERE online = 1)
                 """, arguments: [source.id, generation, generation])
-            try db.execute(sql: "UPDATE source SET scanPending = 0 WHERE id = ?", arguments: [source.id])
+            try db.execute(sql: "UPDATE source SET scanPending = ? WHERE id = ?", arguments: [traversalError != nil, source.id])
         }
+        if let traversalError { throw traversalError }
     }
 
     private func setReachability(_ online: Bool, source: CatalogSource, generation: Int64) throws {
@@ -95,7 +152,7 @@ public struct CatalogScanner: Sendable {
         else { throw CatalogError.staleScan }
     }
 
-    private func discover(file: URL, size: Int64, modified: Double, source: CatalogSource, generation: Int64) throws -> CatalogEntry {
+    private func discover(file: URL, size: Int64, modified: Double, source: CatalogSource, generation: Int64, boundary: String) throws -> CatalogEntry {
         let path = file.standardizedFileURL.path
         return try catalog.database.write { db in
             try verifyGeneration(db, sourceID: source.id, generation: generation)
@@ -113,8 +170,9 @@ public struct CatalogScanner: Sendable {
                 INSERT INTO membership(libraryID, sourceID, entryID, present, generation)
                 SELECT s.libraryID, s.id, ?, 1, l.scanClock FROM source s JOIN library l ON l.id = s.libraryID
                 WHERE s.libraryID = ? AND instr(?, rtrim(s.path, '/') || '/') = 1
+                    AND instr(rtrim(s.path, '/') || '/', rtrim(?, '/') || '/') = 1
                 ON CONFLICT(sourceID, entryID) DO UPDATE SET present = 1, generation = excluded.generation
-                """, arguments: [id, source.libraryID, path])
+                """, arguments: [id, source.libraryID, path, boundary])
             return try Catalog.fetchEntry(db, id: id)!
         }
     }

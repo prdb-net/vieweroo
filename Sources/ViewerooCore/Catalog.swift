@@ -14,6 +14,12 @@ public struct CatalogSource: Identifiable, Hashable, Sendable {
     public let scanPending: Bool
     public var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
 
+    fileprivate var prefix: String { path.hasSuffix("/") ? path : path + "/" }
+
+    fileprivate func canTraverse(to nested: CatalogSource) -> Bool {
+        nested.prefix.hasPrefix(prefix) && CatalogScanner.traversalBoundary(for: nested.url, upTo: path) == path
+    }
+
     init(_ row: Row) {
         id = row["id"]
         libraryID = row["libraryID"]
@@ -91,21 +97,28 @@ public final class Catalog: Sendable {
     public func addSource(libraryID: Int64, url: URL) throws -> CatalogSource {
         guard url.isFileURL else { throw CatalogError.invalidValue }
         let path = url.standardizedFileURL.path
-        let prefix = path.hasSuffix("/") ? path : path + "/"
         return try database.write { db in
             try db.execute(sql: """
                 INSERT INTO source(libraryID, path) VALUES (?, ?) ON CONFLICT(libraryID, path) DO NOTHING
                 """, arguments: [libraryID, path])
+            let inserted = db.changesCount == 1
             let row = try Row.fetchOne(db, sql: "SELECT * FROM source WHERE libraryID = ? AND path = ?",
                                        arguments: [libraryID, path])!
             let source = CatalogSource(row)
-            // A nested root already covers known files, including before its first full scan.
-            try db.execute(sql: """
-                INSERT OR IGNORE INTO membership(libraryID, sourceID, entryID, present)
-                SELECT libraryID, ?, id, EXISTS(
-                    SELECT 1 FROM membership m WHERE m.entryID = entry.id AND m.present = 1
-                ) FROM entry WHERE libraryID = ? AND substr(path, 1, length(?)) = ?
-                """, arguments: [source.id, libraryID, prefix, prefix])
+            guard inserted else { return source }
+            // Inherit observations only from overlapping roots that can actually
+            // traverse the same subtree. A linked child is its own source.
+            let coverage = try Self.fetchSources(db, libraryID: libraryID).filter { other in
+                other.id != source.id && (other.canTraverse(to: source) || source.canTraverse(to: other))
+            }
+            for other in coverage {
+                try db.execute(sql: """
+                    INSERT INTO membership(libraryID, sourceID, entryID, present)
+                    SELECT e.libraryID, ?, e.id, m.present FROM membership m JOIN entry e ON e.id = m.entryID
+                    WHERE m.sourceID = ? AND instr(e.path, ?) = 1
+                    ON CONFLICT(sourceID,entryID) DO UPDATE SET present = MAX(membership.present, excluded.present)
+                    """, arguments: [source.id, other.id, source.prefix])
+            }
             return source
         }
     }

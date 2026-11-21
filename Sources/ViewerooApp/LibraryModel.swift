@@ -28,6 +28,9 @@ final class LibraryModel {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var availabilityTask: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var scanQueue: [CatalogSource] = []
+    @ObservationIgnored private var scanningSourceID: Int64?
+    @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var session = UUID()
     @ObservationIgnored private var scanToken = UUID()
@@ -160,6 +163,9 @@ final class LibraryModel {
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         playback.stop(); playing = false
         panel?.cancel(nil); panel = nil
+        scanQueue.removeAll()
+        scanningSourceID = nil
+        refreshRequested = false
         scanBusy = false; activity = nil; lookupStatus = nil
     }
 
@@ -219,7 +225,7 @@ final class LibraryModel {
                     if changed { await reload()?.value } else { await initialLoad?.value }
                     guard session == stamp, !Task.isCancelled else { return }
                     let pending = sources.filter { $0.online && $0.scanPending }
-                    if !pending.isEmpty { scan(pending) } else { generatePreviews() }
+                    if !pending.isEmpty { scan(pending) } else if !scanBusy { generatePreviews() }
                 } catch { if session == stamp, !Task.isCancelled { message = error.localizedDescription } }
             }
         }
@@ -375,8 +381,7 @@ final class LibraryModel {
         }
         // A multi-folder selection may have saved earlier folders before a later one failed.
         if !saved { reload() }
-        availabilityTask?.cancel()
-        scanCurrentSources()
+        scanCurrentSources(requested: false)
     }
 
     func refresh() {
@@ -385,21 +390,36 @@ final class LibraryModel {
         scanCurrentSources(requested: true)
     }
 
-    private func scanCurrentSources(requested: Bool = false) {
+    private func scanCurrentSources(requested: Bool) {
         guard let catalog, let libraryID else { return }
-        do { scan(try catalog.sources(libraryID: libraryID), requested: requested) }
-        catch { message = error.localizedDescription }
+        do {
+            let sources = try catalog.sources(libraryID: libraryID)
+            let pending = requested ? sources : sources.filter { $0.scanPending && $0.online }
+            if requested || !pending.isEmpty { scan(pending, requested: requested) }
+        } catch { message = error.localizedDescription }
     }
 
     private func scan(_ list: [CatalogSource], requested: Bool = false) {
         guard let catalog else { return }
-        scanTask?.cancel()
+        refreshRequested = refreshRequested || requested
+        var queued = Set(scanQueue.map(\.id))
+        for source in list where (requested || source.id != scanningSourceID) && queued.insert(source.id).inserted {
+            scanQueue.append(source)
+        }
+        guard !scanBusy else { return }
         let token = UUID()
         scanToken = token; scanBusy = true; activity = "Scanning folders…"
         scanTask = Task {
             var errors: [String] = []
-            for source in list {
-                guard !Task.isCancelled else { return }
+            while true {
+                guard scanToken == token, !Task.isCancelled else { return }
+                if scanQueue.isEmpty {
+                    await reload()?.value
+                    guard scanToken == token, !Task.isCancelled else { return }
+                    if scanQueue.isEmpty { break }
+                }
+                let source = scanQueue.removeFirst()
+                scanningSourceID = source.id
                 let task = Task.detached(priority: .utility) {
                     // Scanner invokes this callback serially on its worker.
                     let throttle = DiscoveryUpdates()
@@ -410,17 +430,17 @@ final class LibraryModel {
                     }
                 }
                 do { try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() } }
-                catch { if !Task.isCancelled { errors.append(source.url.lastPathComponent) } }
+                catch { if !Task.isCancelled { errors.append("\(source.url.lastPathComponent) (\(error.localizedDescription))") } }
+                guard scanToken == token else { return }
+                scanningSourceID = nil
             }
-            guard scanToken == token, !Task.isCancelled else { return }
-            await reload()?.value
-            guard scanToken == token, !Task.isCancelled else { return }
             scanBusy = false; activity = nil
             if !errors.isEmpty {
                 message = "Some folders could not be scanned: " + errors.joined(separator: ", ")
-            } else if requested {
+            } else if refreshRequested {
                 notify("Library refreshed")
             }
+            refreshRequested = false
             generatePreviews()
             startLookups()
         }

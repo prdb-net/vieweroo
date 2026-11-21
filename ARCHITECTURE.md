@@ -44,7 +44,7 @@ Treat original media files as read-only. Before removing a source folder, show t
 
 ### 5. Catalog files locally before enriching them from PRDB
 
-Recursively scan a source folder when the user adds it. Opening a library checks whether its source folders are reachable. The user can start a full rescan with **Refresh Library**. Make each discovered file available while the scan continues and resolve its metadata in the background.
+Queue newly added folders alongside pending scans. Leave a running scan in progress. Opening a library checks whether its source folders are reachable. The user can start a full rescan with **Refresh Library**. Make each discovered file available while the scan continues and resolve its metadata in the background.
 
 Use OSHash for MVP file identification and reuse the stored hash for unchanged files. Check the Swift implementation against PRDB's reference files and expected results. Defer perceptual hashing (pHash) until after the MVP.
 
@@ -54,7 +54,7 @@ Attempt to identify the studio for every entry. Use the studio from a matched PR
 
 Store a manual studio selection on the library entry. It takes precedence over automatic detection across rescans until the user selects **Use Automatic Studio**.
 
-Treat an unreachable source folder as offline. If a completed scan of a reachable folder finds that a previously cataloged file is absent, mark the entry as missing. In both cases, retain the entry, its personal data, and its playlist memberships until the user explicitly removes it.
+Treat an unreachable source folder as offline. If a scan encounters an unreadable subtree, continue through its readable siblings and preserve prior observations in the unreadable area. Mark a file as missing only after checking its location. Only credit a source with files its scanner can reach. A separately selected symbolic link can cover files outside the parent scan. Retain offline and missing entries, personal data, and playlist memberships until the user explicitly removes them.
 
 ### 6. Record playback sessions and watched intervals
 

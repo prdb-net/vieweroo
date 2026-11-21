@@ -102,6 +102,16 @@ extension Catalog {
                 DROP INDEX interval_by_session;
                 """)
         }
+        migrator.registerMigration("overlapping-source-coverage-v6") { db in
+            // Recheck old path-prefix memberships once their sources are reachable.
+            try db.execute(sql: """
+                UPDATE source SET scanPending = 1 WHERE EXISTS (
+                    SELECT 1 FROM source other WHERE other.libraryID = source.libraryID AND other.id <> source.id
+                    AND (instr(source.path, rtrim(other.path, '/') || '/') = 1
+                         OR instr(other.path, rtrim(source.path, '/') || '/') = 1)
+                )
+                """)
+        }
         return migrator
     }
 }
