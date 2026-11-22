@@ -299,7 +299,7 @@ private struct MatchDirectoryFilter: View {
 }
 
 private extension LibraryModel {
-    func matchLookup<Result>(_ operation: (String) async throws -> Result) async throws -> Result {
+    func matchLookup<Result>(_ operation: @MainActor (String) async throws -> Result) async throws -> Result {
         guard phase == .ready else { throw CancellationError() }
         guard let key = try access.apiKey() else { throw AccessError.unavailable }
         let result: Result
