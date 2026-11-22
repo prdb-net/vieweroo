@@ -59,6 +59,7 @@ final class LibraryModel {
     var query: String { visit.query }
     var detailID: Int64? { visit.detailID }
     var canGoBack: Bool { !backHistory.isEmpty }
+    private(set) var cinemaMode = false
     var playing = false
     var scanBusy = false
     private(set) var scanningFolder: String?
@@ -169,6 +170,7 @@ final class LibraryModel {
         videoInfoTask?.cancel()
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         playback.stop(); playing = false
+        cinemaMode = false
         panel?.cancel(nil); panel = nil
         scanQueue.removeAll()
         scanningSourceID = nil
@@ -383,6 +385,7 @@ final class LibraryModel {
                         visit = backHistory.popLast() ?? BrowseVisit()
                     }
                     loadPlaylist()
+                    if cinemaMode, let detailID, !orderedIDs.contains(detailID) { goBack() }
                 } catch {
                     guard session == stamp, !Task.isCancelled else { return }
                     loadingLibrary = false
@@ -664,7 +667,23 @@ final class LibraryModel {
         play(suggestion, suggested: true)
     }
 
-    func endPlayback() { playback.stop(); playing = false; reload() }
+    func startPlaylistCinema() {
+        guard case .playlist = shelf, detailID == nil,
+              let first = videosInCollection.first(where: Self.cinemaPlayable) else { return }
+        play(first, suggested: true)
+        cinemaMode = playing && detailID == first.id
+    }
+
+    nonisolated static func cinemaPlayable(_ entry: CatalogEntry) -> Bool {
+        entry.availability == .available && entry.playbackFailure == nil
+    }
+
+    func endPlayback() {
+        playback.stop()
+        playing = false
+        cinemaMode = false
+        reload()
+    }
 
     private func startLookups() {
         guard let catalog, let key = try? access.apiKey() else { return }

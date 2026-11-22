@@ -21,7 +21,14 @@ struct PlayerScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if window.fullScreen {
+            if model.cinemaMode {
+                picture
+                    .background(.black)
+                    .overlay(alignment: .bottom) {
+                        CinemaControls(model: model, window: window)
+                            .environment(\.colorScheme, .dark)
+                    }
+            } else if window.fullScreen {
                 picture
                     .background(.black)
                     .overlay {
@@ -63,7 +70,7 @@ struct PlayerScreen: View {
     private var videoSurface: some View {
         GeometryReader { viewport in
             let bounds = CGRect(origin: .zero, size: viewport.size)
-            let picture = window.fullScreen ? bounds : AVMakeRect(
+            let picture = window.fullScreen || model.cinemaMode ? bounds : AVMakeRect(
                 aspectRatio: CGSize(width: videoAspectRatio, height: 1), insideRect: bounds
             )
             PlayerSurface(player: model.playback.player)
@@ -83,7 +90,11 @@ struct PlayerScreen: View {
                         if model.playback.duration > 0 { model.playback.togglePlayback() }
                     }))
                 .accessibilityHidden(true)
-            PlayerStatus(controller: model.playback)
+            VStack {
+                PlayerStatus(controller: model.playback)
+                if model.cinemaMode { Spacer() }
+            }
+            .padding(.top, model.cinemaMode ? 48 : 0)
         }
     }
 
@@ -123,10 +134,114 @@ struct PlayerScreen: View {
     }
 }
 
+private struct CinemaControls: View {
+    let model: LibraryModel
+    @ObservedObject var window: PlayerWindow
+    @State private var adjustingVolume = false
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let playlist = model.videosInCollection
+        if let index = playlist.firstIndex(where: { $0.id == model.detailID }) {
+            let entry = playlist[index]
+            let previous = playlist[..<index].last(where: LibraryModel.cinemaPlayable)
+            let next = playlist.dropFirst(index + 1).first(where: LibraryModel.cinemaPlayable)
+            VStack(spacing: VSpace.tight) {
+                HStack(spacing: VSpace.control) {
+                    Button {
+                        window.leavePlayer()
+                        model.goBack()
+                    } label: { Label("Return to Playlist", systemImage: "chevron.left") }
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .help("Return to Playlist (Esc)")
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.title).font(.headline)
+                        Text("\(model.collectionTitle) · \(index + 1) of \(playlist.count)")
+                            .font(.caption)
+                    }
+                    .lineLimit(1)
+                    .frame(maxWidth: 200, alignment: .leading)
+                    .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
+
+                    PlayerTimeline(controller: model.playback)
+                        .id(entry.id)
+                    PlaybackTime(controller: model.playback)
+                }
+
+                HStack(spacing: VSpace.tight) {
+                    step("Previous Video", symbol: "backward.end.fill", to: previous)
+                    PlaybackButtons(controller: model.playback)
+                    step("Next Video", symbol: "forward.end.fill", to: next)
+                    Spacer(minLength: VSpace.group)
+                    EntryReactions(model: model, entry: entry)
+                    PlayerOptions(controller: model.playback, window: window, adjustingVolume: $adjustingVolume,
+                                  cinema: true)
+                        .padding(.leading, VSpace.control)
+                }
+            }
+            .padding(.horizontal, VSpace.section)
+            .padding(.bottom, VSpace.group)
+            .padding(.top, VSpace.section)
+            .foregroundStyle(.white)
+            .tint(.white)
+            .background {
+                if reduceTransparency {
+                    Color.black
+                } else {
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.38), location: 0.35),
+                        .init(color: .black.opacity(0.54), location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
+                }
+            }
+        }
+    }
+
+    private func step(_ label: String, symbol: String, to entry: CatalogEntry?) -> some View {
+        Button {
+            if let entry { model.play(entry, suggested: true) }
+        } label: { Label(label, systemImage: symbol) }
+        .labelStyle(.iconOnly)
+        .disabled(entry == nil)
+        .help(entry.map { "\(label): \($0.title)" } ?? label)
+    }
+}
+
 private struct PlayerTransport: View {
     @ObservedObject var controller: PlayerController
     @ObservedObject var window: PlayerWindow
     @Binding var adjustingVolume: Bool
+
+    var body: some View {
+        VStack(spacing: VSpace.tight) {
+            PlayerTimeline(controller: controller)
+                .disabled(controller.duration <= 0)
+            HStack(spacing: VSpace.control) {
+                PlaybackButtons(controller: controller)
+                PlaybackTime(controller: controller).foregroundStyle(.secondary)
+                Spacer(minLength: VSpace.unit)
+                PlayerOptions(controller: controller, window: window, adjustingVolume: $adjustingVolume)
+            }
+        }
+    }
+}
+
+private struct PlaybackTime: View {
+    @ObservedObject var controller: PlayerController
+
+    var body: some View {
+        Text("\(clockLabel(controller.position)) / \(clockLabel(controller.duration))")
+            .font(.callout.monospacedDigit())
+            .fixedSize()
+    }
+}
+
+private struct PlaybackButtons: View {
+    @ObservedObject var controller: PlayerController
 
     private var playLabel: String {
         if controller.ended { return "Replay" }
@@ -134,20 +249,6 @@ private struct PlayerTransport: View {
     }
 
     var body: some View {
-        VStack(spacing: VSpace.tight) {
-            PlayerTimeline(controller: controller)
-                .disabled(controller.duration <= 0)
-            HStack(spacing: VSpace.control) {
-                transportButtons
-                Text("\(clockLabel(controller.position)) / \(clockLabel(controller.duration))")
-                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                Spacer(minLength: VSpace.unit)
-                auxiliaryControls
-            }
-        }
-    }
-
-    private var transportButtons: some View {
         HStack(spacing: VSpace.tight) {
             Button { controller.seek(to: controller.position - 10) } label: {
                 Label("Back 10 seconds", systemImage: "gobackward.10")
@@ -170,8 +271,15 @@ private struct PlayerTransport: View {
         .disabled(controller.duration <= 0)
         .labelStyle(.iconOnly)
     }
+}
 
-    private var auxiliaryControls: some View {
+private struct PlayerOptions: View {
+    @ObservedObject var controller: PlayerController
+    @ObservedObject var window: PlayerWindow
+    @Binding var adjustingVolume: Bool
+    var cinema = false
+
+    var body: some View {
         HStack(spacing: VSpace.control) {
             Menu {
                 Button("Set Loop Start") { controller.markLoopStart() }.keyboardShortcut("[", modifiers: [])
@@ -179,12 +287,16 @@ private struct PlayerTransport: View {
                     .disabled(controller.loopStart.map { controller.position <= $0 + 0.1 } ?? true)
                 Button("Clear Loop") { controller.clearLoop() }.disabled(controller.loopStart == nil)
             } label: {
-                Label(controller.loopStart.map { start in
-                    controller.loopEnd.map { end in
-                        let short = end - start < 1
-                        return "\(clockLabel(start, tenths: short)) – \(clockLabel(end, tenths: short))"
-                    } ?? "From \(clockLabel(start))"
-                } ?? "Loop", systemImage: "repeat")
+                if cinema {
+                    Label("Loop", systemImage: "repeat").labelStyle(.iconOnly)
+                } else {
+                    Label(controller.loopStart.map { start in
+                        controller.loopEnd.map { end in
+                            let short = end - start < 1
+                            return "\(clockLabel(start, tenths: short)) – \(clockLabel(end, tenths: short))"
+                        } ?? "From \(clockLabel(start))"
+                    } ?? "Loop", systemImage: "repeat")
+                }
             }
             .fixedSize()
             .disabled(controller.duration <= 0)
@@ -203,7 +315,7 @@ private struct PlayerTransport: View {
                     .accessibilityLabel("Volume")
                     .help("Playback volume")
             }
-            if !window.fullScreen {
+            if cinema || !window.fullScreen {
                 AirPlayRoute(player: controller.player)
                     .frame(width: 28, height: 24)
                     .help("Choose an AirPlay video receiver")

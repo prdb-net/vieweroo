@@ -589,3 +589,48 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     model.lock()
     #expect(model.previews.total == 0 && model.previews.remaining.isEmpty && model.lookupActivity == nil)
 }
+
+@MainActor
+@Test func playlistCinemaUsesPlayableMembersAndRestoresTheFilteredPlaylist() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.cinema." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Cinema")
+    let catalog = try #require(model.catalog)
+    let libraryID = try #require(model.libraryID)
+    let list = try catalog.createPlaylist(libraryID: libraryID, name: "Double Feature")
+    model.browse(.playlist(list.id))
+    model.startPlaylistCinema()
+    #expect(!model.cinemaMode && !model.playing)
+
+    let folder = root.appending(path: "Media")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let movie = folder.appending(path: "First.mp4")
+    try await writeColorMovie(to: movie)
+    try FileManager.default.copyItem(at: movie, to: folder.appending(path: "Second.mp4"))
+    model.addSources([folder])
+    try await until { model.entries.count == 2 && !model.scanBusy }
+    let first = model.entries[0], second = model.entries[1]
+    _ = try catalog.addToPlaylist(list.id, entryID: first.id)
+    _ = try catalog.addToPlaylist(list.id, entryID: second.id)
+    try catalog.setPlaybackFailure(entryID: first.id, message: "Unsupported video", fileSize: first.fileSize, modified: first.modified)
+    await model.reload()?.value
+    model.search("No matches")
+    let origin = model.visit.id
+    model.startPlaylistCinema()
+    #expect(model.cinemaMode && model.playing && model.detailID == second.id)
+    try catalog.removeFromPlaylist(list.id, entryID: second.id)
+    await model.reload()?.value
+    #expect(!model.cinemaMode && model.playback.player.currentItem == nil)
+    #expect(model.visit.id == origin && model.query == "No matches")
+    model.startPlaylistCinema()
+    #expect(!model.cinemaMode && !model.playing)
+}

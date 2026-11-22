@@ -36,6 +36,8 @@ Sometimes you want to watch an entire video. Other times you have a particular s
 
 Enter full screen from the player to give the video the whole window. The controls recede during uninterrupted playback and return on pointer movement. Leave full screen to browse other titles while watching.
 
+Choose **Cinema Mode** in a playlist to watch in the library window, with the video extending behind the Mac window buttons. Previous and Next move through playable titles in playlist order. Playback controls and icon-only reactions stay visible along the bottom, with the picture showing through the controls. Returning to the playlist restores your browsing position.
+
 AirPlay is part of the MVP. You can choose an Apple TV or another compatible AirPlay receiver from the player and watch the video on that screen while controlling playback from your Mac.
 
 Vieweroo records locally how often you play each video, how long you spend watching it, and which segments you play. If you jump from minute two to minute ten, those eight minutes are excluded from your watch time. A session appears in viewing history and updates your resume position once you have watched at least ten seconds in that session. This history lets you browse frequently watched videos and see which parts of a video you replay most. You can start playback directly from a highlighted segment.

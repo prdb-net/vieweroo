@@ -1,4 +1,5 @@
 import SwiftUI
+import ViewerooCore
 
 enum VideoReaction: String {
     case favorite = "Favorite"
@@ -159,5 +160,34 @@ private struct ReactionButtonStyle: ButtonStyle {
                 shape.strokeBorder(color.opacity(contrast == .increased ? 0.8 : border))
                     .allowsHitTesting(false)
             }
+    }
+}
+
+struct EntryReactions: View {
+    let model: LibraryModel
+    let entry: CatalogEntry
+
+    var body: some View {
+        HStack(spacing: VSpace.tight) {
+            ReactionButton(reaction: .favorite, isSelected: entry.favorite) {
+                let confirmation = entry.favorite ? "Removed from Favorites" : "Added to Favorites"
+                return model.change(model.cinemaMode ? nil : confirmation,
+                             kind: entry.favorite ? .success : .favorite) {
+                    try $0.setFavorite(entryID: entry.id, value: !entry.favorite)
+                }
+            }
+            rating(1, reaction: .like)
+            rating(-1, reaction: .dislike)
+        }
+    }
+
+    private func rating(_ value: Int, reaction: VideoReaction) -> some View {
+        ReactionButton(reaction: reaction, isSelected: entry.rating == value) {
+            let updated = entry.rating == value ? 0 : value
+            let confirmation = updated == 0 ? "Rating cleared" : updated == 1 ? "Marked as liked" : "Marked as disliked"
+            return model.change(model.cinemaMode ? nil : confirmation) {
+                try $0.setRating(entryID: entry.id, value: updated)
+            }
+        }
     }
 }

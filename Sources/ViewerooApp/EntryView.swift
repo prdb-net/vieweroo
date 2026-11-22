@@ -153,14 +153,7 @@ struct EntryView: View {
 
     private var organizationActions: some View {
         HStack(spacing: VSpace.tight) {
-            ReactionButton(reaction: .favorite, isSelected: entry.favorite) {
-                model.change(entry.favorite ? "Removed from Favorites" : "Added to Favorites",
-                             kind: entry.favorite ? .success : .favorite) {
-                    try $0.setFavorite(entryID: entry.id, value: !entry.favorite)
-                }
-            }
-            rating(1, reaction: .like)
-            rating(-1, reaction: .dislike)
+            EntryReactions(model: model, entry: entry)
             PlaylistMenu(model: model, entryID: entry.id).help("Add to Playlist")
         }
     }
@@ -203,15 +196,6 @@ struct EntryView: View {
                     }
                     .background(BrowseScrollAnchor(position: model.visit.castScroll))
                 }
-            }
-        }
-    }
-
-    private func rating(_ value: Int, reaction: VideoReaction) -> some View {
-        ReactionButton(reaction: reaction, isSelected: entry.rating == value) {
-            let updated = entry.rating == value ? 0 : value
-            return model.change(updated == 0 ? "Rating cleared" : updated == 1 ? "Marked as liked" : "Marked as disliked") {
-                try $0.setRating(entryID: entry.id, value: updated)
             }
         }
     }

@@ -94,6 +94,8 @@ Use an available PRDB preview image for a video tile, with a locally extracted s
 
 Use native window full screen so AVPlayer, its active item and the privacy boundary stay together. Switching videos closes the previous playback session and reads the selected entry’s current saved position. Embed the windowed player in the title page. A direct start from a collection opens that same page. Selecting a suggested title replaces the current detail visit, preserving the original collection, selection, scroll position and search for Back. Use cached frames for pointer previews without opening a player or creating a session. Compute alternatives using the active catalog entries on the Mac. Window width determines where the list is presented.
 
+Playlist Cinema Mode presents the shared player edge to edge in the same window. Preserve the native window buttons and the video aspect ratio. Enter at the first playable playlist member, independent of collection filters. Previous and Next replace the current detail visit and skip missing, offline and known unsupported videos. Returning to the playlist, switching libraries or locking ends Cinema Mode.
+
 The [interface guide](DESIGN.md) defines layout, spacing and feedback. Use one transient action notice in the unlocked window. Clear it on a library or access change. Keep form errors, persistent status and destructive confirmations at their point of use.
 
 ## MVP acceptance checks

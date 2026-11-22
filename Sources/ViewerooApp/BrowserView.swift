@@ -40,6 +40,13 @@ struct BrowserView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
+                    if playlistID != nil {
+                        Button(action: model.startPlaylistCinema) {
+                            Label("Cinema Mode", systemImage: "play.rectangle")
+                        }
+                        .disabled(!model.videosInCollection.contains(where: LibraryModel.cinemaPlayable))
+                        .help("Play this playlist in Cinema Mode")
+                    }
                     if case let .studio(_, id?) = model.shelf, let account = model.studioDirectory.site(id)?.creator {
                         CreatorProfileView(account: account)
                     }

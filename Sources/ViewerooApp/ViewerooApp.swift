@@ -27,7 +27,7 @@ struct ViewerooApp: App {
             RootView(model: model)
                 .frame(minWidth: 790, minHeight: 535)
                 .background {
-                    LibraryWindowConfiguration(browsing: model.phase == .ready)
+                    LibraryWindowConfiguration(browsing: model.phase == .ready, cinema: model.cinemaMode)
                         .frame(width: 0, height: 0)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -77,14 +77,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // The library menu occupies a single leading toolbar item while browsing.
 struct LibraryWindowConfiguration: NSViewRepresentable {
     let browsing: Bool
+    var cinema = false
 
     final class Host: NSView {
+        var cinema = false
         var browsing = false
         private var titlebarUpdatePending = false
         private var titleVisibility: NSWindow.TitleVisibility { browsing ? .hidden : .visible }
 
-        func updateTitlebar() {
-            guard let window, window.titleVisibility != titleVisibility, !titlebarUpdatePending else { return }
+        func updateTitlebar(changingPresentation: Bool = false) {
+            guard let window, !titlebarUpdatePending, changingPresentation || window.titleVisibility != titleVisibility else { return }
             // Changing window chrome can request another constraint pass. Let SwiftUI
             // finish attaching and hit-testing its views before changing the window.
             titlebarUpdatePending = true
@@ -106,8 +108,10 @@ struct LibraryWindowConfiguration: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> Host { Host() }
     func updateNSView(_ nsView: Host, context: Context) {
+        let changingPresentation = nsView.cinema != cinema
+        nsView.cinema = cinema
         nsView.browsing = browsing
-        nsView.updateTitlebar()
+        nsView.updateTitlebar(changingPresentation: changingPresentation)
     }
 }
 

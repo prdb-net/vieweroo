@@ -21,9 +21,10 @@ struct LibraryView: View {
 
     var body: some View {
         ZStack {
-            if model.playing && playerWindow.fullScreen {
+            if model.playing && (playerWindow.fullScreen || model.cinemaMode) {
                 PlayerScreen(model: model, window: playerWindow)
                     .ignoresSafeArea()
+                    .toolbarBackground(model.cinemaMode ? .hidden : .automatic, for: .windowToolbar)
             } else {
                 navigation
             }
