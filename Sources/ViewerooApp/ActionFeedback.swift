@@ -1,5 +1,6 @@
 import Accessibility
 import SwiftUI
+import ViewerooCore
 
 struct ActionNotice: Identifiable {
     enum Kind {
@@ -25,13 +26,15 @@ struct ActionNotice: Identifiable {
     let id = UUID()
     let text: String
     let kind: Kind
-    var lifetime: TimeInterval { kind == .error ? 5 : 3.2 }
+    var undo: BulkEditReceipt?
+    var lifetime: TimeInterval { undo != nil ? 12 : (kind == .error ? 5 : 3.2) }
 }
 
 /// Mounted once at the window edge. The notice identity restarts its animation and timer
 /// even when two successive actions produce the same message.
 struct ActionNoticeView: View {
     let notice: ActionNotice
+    let onUndo: () -> Void
     let onExpire: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
@@ -53,6 +56,9 @@ struct ActionNoticeView: View {
             Text(notice.text)
                 .font(.body.weight(.medium))
                 .fixedSize(horizontal: false, vertical: true)
+            if notice.undo != nil {
+                Button("Undo", action: onUndo)
+            }
         }
         .padding(.leading, VSpace.control)
         .padding(.trailing, VSpace.group)
@@ -81,8 +87,8 @@ struct ActionNoticeView: View {
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
         .opacity(visible ? 1 : 0)
         .offset(x: visible || reduceMotion ? 0 : 16, y: visible || reduceMotion ? 0 : 8)
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
+        .allowsHitTesting(notice.undo != nil)
+        .accessibilityElement(children: notice.undo == nil ? .combine : .contain)
         .task {
             withAnimation(.easeOut(duration: reduceMotion ? 0.12 : 0.34)) { visible = true }
             withAnimation(.linear(duration: notice.lifetime)) { elapsed = true }

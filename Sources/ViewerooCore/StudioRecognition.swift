@@ -37,7 +37,7 @@ public struct StudioRecognition: Sendable {
 
     public func match(url: URL, sourcePath: String? = "/", siteHint: PRDBStudio? = nil) -> PRDBStudio? {
         var matches = candidates(url: url, sourcePath: sourcePath)
-        if let siteHint, names[Self.parts(siteHint.name).joined()]?.contains(siteHint) != true {
+        if let siteHint, names[Self.parts(siteHint.name).joined()]?.contains(where: { $0.id == siteHint.id }) != true {
             let hint = StudioRecognition(studios: [siteHint])
             matches.formUnion(hint.candidates(url: url, sourcePath: sourcePath))
         }

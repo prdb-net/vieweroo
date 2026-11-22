@@ -115,12 +115,35 @@ public struct PRDBClient: Sendable {
     }
 
     public func search(_ query: String, key: String) async throws -> [PRDBTitle] {
+        try await searchTitles(query, key: key).items
+    }
+
+    public static let titleSearchPageSize = 30
+
+    public func searchTitles(_ query: String, studioID: String? = nil, performerID: String? = nil,
+                             page: Int = 1, key: String) async throws -> (items: [PRDBTitle], total: Int) {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return [] }
-        let response: Items<Summary> = try await fetch("videos", key: key, query: [
-            URLQueryItem(name: "Search", value: term), URLQueryItem(name: "PageSize", value: "30")
+        guard !term.isEmpty || studioID != nil || performerID != nil else { return ([], 0) }
+        var parameters = [URLQueryItem(name: "Page", value: String(page)), URLQueryItem(name: "PageSize", value: String(Self.titleSearchPageSize))]
+        if !term.isEmpty { parameters.append(URLQueryItem(name: "Search", value: term)) }
+        if let studioID { parameters.append(URLQueryItem(name: "SiteId", value: studioID)) }
+        if let performerID { parameters.append(URLQueryItem(name: "ActorId", value: performerID)) }
+        let response: Page<Summary> = try await fetch("videos", key: key, query: parameters)
+        return (response.items.map(\.titleRecord), response.totalCount)
+    }
+
+    public func searchStudios(_ term: String, key: String) async throws -> (items: [PRDBStudio], total: Int) {
+        let response: Page<Site> = try await fetch("sites", key: key, query: [
+            URLQueryItem(name: "Search", value: term), URLQueryItem(name: "PageSize", value: "50")
         ])
-        return response.items.map(\.titleRecord)
+        return (response.items.map(\.studio), response.totalCount)
+    }
+
+    public func searchPerformers(_ term: String, key: String) async throws -> (items: [PRDBPerformer], total: Int) {
+        let response: Page<Performer> = try await fetch("actors", key: key, query: [
+            URLQueryItem(name: "Search", value: term), URLQueryItem(name: "PageSize", value: "50")
+        ])
+        return (response.items.map(\.record), response.totalCount)
     }
 
     public func title(id: String, key: String) async throws -> PRDBTitle {
@@ -184,7 +207,6 @@ public struct PRDBClient: Sendable {
 }
 
 private struct Identity: Decodable { let userHash: String }
-private struct Items<T: Decodable>: Decodable { let items: [T] }
 private struct Page<T: Decodable>: Decodable {
     let items: [T]
     let totalCount: Int
@@ -203,10 +225,27 @@ private struct ResultRow: Decodable {
     let site: Site?
     let candidates: [String]
 }
-struct Site: Codable {
+private protocol PlatformFields {
+    var platformId: String? { get }
+    var platformKey: String? { get }
+    var platformTitle: String? { get }
+    var accountHandle: String? { get }
+}
+
+private extension PlatformFields {
+    var creator: CreatorAccount? {
+        CreatorAccount(platformID: platformId, key: platformKey, title: platformTitle, handle: accountHandle)
+    }
+}
+
+struct Site: Codable, PlatformFields {
     let id: String
     let title: String
-    var studio: PRDBStudio { PRDBStudio(id: id, name: title) }
+    var platformId: String?
+    var platformKey: String?
+    var platformTitle: String?
+    var accountHandle: String?
+    var studio: PRDBStudio { PRDBStudio(id: id, name: title, creator: creator) }
 }
 struct RemoteImage: Codable {
     let url: String?
@@ -238,14 +277,19 @@ struct Video: Codable {
                   previewURL: images.lazy.compactMap(\.httpsURL).first)
     }
 }
-struct Summary: Codable {
+struct Summary: Codable, PlatformFields {
+    var platformId: String?
+    var platformKey: String?
+    var platformTitle: String?
+    var accountHandle: String?
+
     let id: String
     let title: String
     let siteId: String
     let siteTitle: String
     let actors: [Performer]
     var titleRecord: PRDBTitle {
-        PRDBTitle(id: id, title: title, studio: PRDBStudio(id: siteId, name: siteTitle),
+        PRDBTitle(id: id, title: title, studio: PRDBStudio(id: siteId, name: siteTitle, creator: creator),
                   performers: actors.map(\.record))
     }
 }

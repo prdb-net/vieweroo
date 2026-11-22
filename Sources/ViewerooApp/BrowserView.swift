@@ -3,7 +3,8 @@ import ViewerooCore
 
 struct BrowserView: View {
     @Bindable var model: LibraryModel
-    @State private var deletingPlaylist = false
+    @Binding var selection: Set<Int64>?
+    let selectionShortcuts: Bool
     // A legacy scroller consumes width when it appears. If that changes the tile
     // height, the last row can fit again and AppKit removes the scroller mid-layout.
     private func columns(for viewportWidth: CGFloat) -> [GridItem] {
@@ -13,108 +14,52 @@ struct BrowserView: View {
         let tileWidth = min(320, floor((width - CGFloat(count - 1) * VSpace.group) / CGFloat(count)))
         return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
     }
-    private var searching: Bool { !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var studioIndex: Bool { !searching && model.shelf == .studios }
+    @Environment(\.colorScheme) private var scheme
+    private var studioIndex: Bool { model.shelf == .studios }
     private var playlistID: Int64? {
-        if case let .playlist(id) = model.shelf, !searching { return id }
+        if case let .playlist(id) = model.shelf { return id }
         return nil
     }
-    private var title: String {
-        if searching { return "Search Results" }
-        switch model.shelf {
-        case .studios: return "Studios"
-        case .all: return "All Videos"
-        case .favorites: return "Favorites"
-        case .liked: return "Liked Videos"
-        case .frequent: return "Frequently Watched"
-        case let .studio(name): return name
-        case let .performer(person): return person.name
-        case let .playlist(id): return model.playlists.first { $0.id == id }?.name ?? "Playlist"
-        case .playlists: return "Playlists"
-        case .settings: return "Library Settings"
-        case .sources: return "Source Folders"
-        }
-    }
-    private var filtered: [CatalogEntry] {
-        if searching {
-            let term = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
-            return model.entries.filter { entry in
-                let fields = [entry.title, entry.filename, entry.studio ?? "Unknown Studio"] + entry.tags + (entry.match?.performers.map(\.name) ?? [])
-                return fields.contains { $0.localizedCaseInsensitiveContains(term) }
-            }
-        }
-        switch model.shelf {
-        case .favorites: return model.entries.filter(\.favorite)
-        case .liked: return model.entries.filter { $0.rating > 0 }
-        case .frequent:
-            return model.entries.filter { $0.playCount > 0 }.sorted {
-                ($0.weightedPlays, $0.watchTime) > ($1.weightedPlays, $1.watchTime)
-            }
-        case let .studio(name): return model.entries.filter { ($0.studio ?? "Unknown Studio") == name }
-        case let .performer(person): return model.entries.filter { $0.match?.performers.contains { $0.id == person.id } == true }
-        case .playlist:
-            let entries = Dictionary(uniqueKeysWithValues: model.entries.map { ($0.id, $0) })
-            return model.orderedIDs.compactMap { entries[$0] }
-        default: return model.entries
-        }
-    }
-
     var body: some View {
-        GeometryReader { viewport in
-            collection(columns: columns(for: viewport.size.width))
-        }
-        .alert("Delete this playlist?", isPresented: $deletingPlaylist) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete Playlist", role: .destructive) {
-                if let id = playlistID { model.change("Playlist deleted") { try $0.deletePlaylist(id) } }
+        let records = studioIndex ? [] : model.visibleVideos
+        VStack(spacing: 0) {
+            if selection != nil {
+                BulkEditBar(model: model, selection: $selection, visibleIDs: records.map(\.id),
+                            shortcutsEnabled: selectionShortcuts)
             }
-        } message: { Text("All videos will remain in the library.") }
+            GeometryReader { viewport in
+                collection(columns: columns(for: viewport.size.width), records: records)
+            }
+        }
     }
 
-    private func collection(columns: [GridItem]) -> some View {
-        let records = filtered
+    private func collection(columns: [GridItem], records: [CatalogEntry]) -> some View {
+        let studios = studioIndex ? model.visibleStudios : []
+        let count = studioIndex ? studios.count : records.count
+        let unit = studioIndex ? (count == 1 ? "studio" : "studios") : (count == 1 ? "video" : "videos")
         return ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.largeTitle.bold()).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-                    Spacer()
-                    if !records.isEmpty {
-                        Text("\(records.count) \(records.count == 1 ? "video" : "videos")")
-                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                    if playlistID != nil {
-                        Button { deletingPlaylist = true } label: { Label("Delete Playlist", systemImage: "trash").labelStyle(.iconOnly) }
+                CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
+                    if case let .studio(_, id?) = model.shelf, let account = model.studioDirectory.site(id)?.creator {
+                        CreatorProfileView(account: account)
                     }
                 }
-                if records.isEmpty { empty }
-                else if studioIndex {
-                    let groups = Dictionary(grouping: records) { $0.studio ?? "Unknown Studio" }
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
-                        ForEach(groups.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }), id: \.self) { studio in
-                            if let group = groups[studio], let cover = group.first {
-                                Button { model.browse(.studio(studio), from: .studio(studio)) } label: {
-                                    VStack(alignment: .leading, spacing: VSpace.tight) {
-                                        poster(cover, tile: .studio(studio))
-                                        VStack(alignment: .leading, spacing: VSpace.unit) {
-                                            Text(studio).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                                            Text(group.count == 1 ? "1 video" : "\(group.count) videos")
-                                                .font(.subheadline).foregroundStyle(.secondary)
-                                        }
-                                    }.contentShape(Rectangle())
-                                }.buttonStyle(.plain)
-                                .accessibilityAddTraits(model.visit.selectedTile == .studio(studio) ? .isSelected : [])
-                            }
-                        }
-                    }
-                } else {
+                if count == 0 { empty }
+                else if studioIndex { studioGrid(studios, columns: columns) }
+                else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(records) { entry in
-                            Button { model.openDetail(entry.id) } label: {
+                            Button {
+                                guard selection != nil else { model.openDetail(entry.id); return }
+                                NSApp.keyWindow?.makeFirstResponder(nil)
+                                if selection?.contains(entry.id) == true { selection?.remove(entry.id) }
+                                else { selection?.insert(entry.id) }
+                            } label: {
                                 VStack(alignment: .leading, spacing: VSpace.tight) {
                                     poster(entry, tile: .video(entry.id))
                                     VStack(alignment: .leading, spacing: VSpace.unit) {
                                         Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                                        if model.shelf == .frequent, !searching {
+                                        if model.shelf == .frequent {
                                             Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
                                         }
                                         if let subtitle = subtitle(entry) {
@@ -123,9 +68,18 @@ struct BrowserView: View {
                                     }
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
-                            .accessibilityAddTraits(model.visit.selectedTile == .video(entry.id) ? .isSelected : [])
+                            .accessibilityAddTraits(isSelected(.video(entry.id)) ? .isSelected : [])
                             .overlay(alignment: .topTrailing) {
-                                if entry.availability == .available {
+                                if let selection {
+                                    let checked = selection.contains(entry.id)
+                                    Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 24, weight: .semibold))
+                                        .foregroundStyle(.white, Color.accentColor)
+                                        .background(.black.opacity(0.72), in: Circle())
+                                        .padding(VSpace.tight)
+                                        .allowsHitTesting(false)
+                                        .accessibilityHidden(true)
+                                } else if entry.availability == .available {
                                     let action = entry.resume > 0 ? "Resume" : "Play"
                                     Button { model.play(entry) } label: {
                                         Image(systemName: "play.fill")
@@ -141,10 +95,12 @@ struct BrowserView: View {
                                 }
                             }
                             .contextMenu {
-                                Button("Play") { model.play(entry) }.disabled(entry.availability != .available)
+                                if selection == nil {
+                                    Button("Play") { model.play(entry) }.disabled(entry.availability != .available)
+                                }
                                 if let id = playlistID {
-                                    Button("Move Earlier") { move(entry, by: -1, playlist: id) }.disabled(model.orderedIDs.first == entry.id)
-                                    Button("Move Later") { move(entry, by: 1, playlist: id) }.disabled(model.orderedIDs.last == entry.id)
+                                    Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
+                                    Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
                                     Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
                                 }
                             }
@@ -156,10 +112,56 @@ struct BrowserView: View {
         }
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
     }
+    private func studioGrid(_ studios: [StudioTile], columns: [GridItem]) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
+            ForEach(studios) { item in
+                let studio = item.studio
+                let tile = BrowseTile.studio(studio.name, siteID: studio.siteID)
+                ZStack(alignment: Alignment(horizontal: .trailing, vertical: .studioTitle)) {
+                    Button { model.browse(.studio(studio.name, siteID: studio.siteID), from: tile) } label: {
+                        VStack(alignment: .leading, spacing: VSpace.tight) {
+                            if let cover = item.cover {
+                                poster(cover, tile: tile)
+                            } else {
+                                RoundedRectangle(cornerRadius: VSpace.tight)
+                                    .fill(.quaternary.opacity(0.5)).aspectRatio(16/9, contentMode: .fit)
+                                    .overlay { Image(systemName: "film.stack").font(.title).foregroundStyle(.secondary) }
+                            }
+                            VStack(alignment: .leading, spacing: VSpace.unit) {
+                                Text(studio.name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                                    .padding(.trailing, 28)
+                                    .alignmentGuide(.studioTitle) { $0[VerticalAlignment.center] }
+                                if let creator = studio.creator { Text(creator.platform).font(.subheadline).foregroundStyle(.secondary) }
+                                Text(item.count == 1 ? "1 video" : "\(item.count) videos")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    .accessibilityAddTraits(model.visit.selectedTile == tile ? .isSelected : [])
+                    let favorite = model.favoriteStudioIDs.contains(studio.id)
+                    Button { model.toggleStudioFavorite(studio) } label: {
+                        Image(systemName: favorite ? "heart.fill" : "heart")
+                            .foregroundStyle(favorite ? VideoReaction.favorite.tint(in: scheme) : Color.secondary)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help(favorite ? "Remove from favorite studios" : "Add to favorite studios")
+                    .accessibilityLabel("Favorite " + studio.name)
+                    .accessibilityValue(favorite ? "On" : "Off")
+                }
+            }
+        }
+    }
+
+    private func isSelected(_ tile: BrowseTile) -> Bool {
+        if let selection, case let .video(id) = tile { return selection.contains(id) }
+        return model.visit.selectedTile == tile
+    }
+
     private func poster(_ entry: CatalogEntry, tile: BrowseTile) -> some View {
-        Poster(model: model, entry: entry, scrubbable: tile == .video(entry.id))
+        Poster(model: model, entry: entry, scrubbable: selection == nil && tile == .video(entry.id))
             .overlay {
-                if model.visit.selectedTile == tile {
+                if isSelected(tile) {
                     RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous)
                         .strokeBorder(Color.accentColor, lineWidth: 2)
                 }
@@ -170,16 +172,21 @@ struct BrowserView: View {
         if entry.availability == .offline { return "Source offline" }
         if entry.availability == .missing { return "File missing" }
         if entry.playbackFailure != nil { return "Playback unavailable" }
-        if model.shelf == .frequent, !searching { return nil }
+        if model.shelf == .frequent { return nil }
         return entry.studio ?? "Unknown Studio"
     }
-    private func move(_ entry: CatalogEntry, by delta: Int, playlist id: Int64) {
+    private func move(_ entry: CatalogEntry, by delta: Int, among visible: [CatalogEntry], playlist: Int64) {
         var ids = model.orderedIDs
-        guard let i = ids.firstIndex(of: entry.id), ids.indices.contains(i + delta) else { return }
-        ids.swapAt(i, i + delta); model.change("Playlist order saved") { try $0.reorderPlaylist(id, entryIDs: ids) }
+        guard let index = visible.firstIndex(where: { $0.id == entry.id }), visible.indices.contains(index + delta),
+              let from = ids.firstIndex(of: entry.id), let to = ids.firstIndex(of: visible[index + delta].id) else { return }
+        ids.swapAt(from, to)
+        model.change("Playlist order saved") { try $0.reorderPlaylist(playlist, entryIDs: ids) }
     }
     @ViewBuilder private var empty: some View {
-        if searching { ContentUnavailableView.search(text: model.query) }
+        if model.narrowed {
+            ContentUnavailableView(studioIndex ? "No matching studios" : "No matching videos", systemImage: "magnifyingglass",
+                                   description: Text("Try a different search or clear a filter."))
+        }
         else if model.sources.isEmpty && model.entries.isEmpty {
             ContentUnavailableView {
                 Label("Add a video folder", systemImage: "folder.badge.plus")
@@ -191,6 +198,13 @@ struct BrowserView: View {
                                    description: Text(playlistID != nil ? "Open a video and choose Add to Playlist." : "Videos appear here when they belong to this collection."))
         }
     }
+}
+
+private extension VerticalAlignment {
+    enum StudioTitle: AlignmentID {
+        static func defaultValue(in dimensions: ViewDimensions) -> CGFloat { dimensions[VerticalAlignment.center] }
+    }
+    static let studioTitle = VerticalAlignment(StudioTitle.self)
 }
 
 struct Poster: View {

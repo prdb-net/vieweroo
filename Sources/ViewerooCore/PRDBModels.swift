@@ -1,9 +1,42 @@
 import Foundation
 
+public struct CreatorAccount: Codable, Hashable, Sendable {
+    public let platformID: String?
+    public let key: String?
+    public let title: String?
+    public let handle: String?
+
+    init?(platformID: String?, key: String?, title: String?, handle: String?) {
+        guard platformID != nil || key != nil else { return nil }
+        self.platformID = platformID
+        self.key = key?.lowercased()
+        self.title = title
+        var clean = handle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if clean.first == "@" { clean.removeFirst() }
+        self.handle = clean.isEmpty ? nil : clean
+    }
+
+    public var platform: String { title ?? key ?? "Creator platform" }
+
+    public var profileURL: URL? {
+        guard let handle, (2...100).contains(handle.utf8.count),
+              handle != "..", handle.utf8.allSatisfy({
+                  (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || [45, 46, 95].contains($0)
+              }) else { return nil }
+        switch key {
+        case "onlyfans": return URL(string: "https://onlyfans.com/" + handle)
+        case "fansly": return URL(string: "https://fansly.com/" + handle)
+        default: return nil
+        }
+    }
+}
+
 public struct PRDBStudio: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let name: String
-    public init(id: String, name: String) {
+    public let creator: CreatorAccount?
+    public init(id: String, name: String, creator: CreatorAccount? = nil) {
+        self.creator = creator
         self.id = id
         self.name = name
     }

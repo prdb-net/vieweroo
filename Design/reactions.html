@@ -91,7 +91,7 @@
   <figure aria-label="Video detail reaction preview">
     <figcaption><strong>Night Receiver</strong><small>Aster Relay</small></figcaption>
     <div class="controls" role="group" aria-label="Video reactions">
-      <button id="favorite" type="button" aria-pressed="false">
+      <button id="favorite" aria-label="Favorite" title="Add to Favorites" data-selected-title="Remove from Favorites" type="button" aria-pressed="false">
         <span class="anchor" aria-hidden="true">
           <svg class="glyph" viewBox="0 0 24 24"><use href="#heart"/></svg>
           <span class="effect">
@@ -99,22 +99,22 @@
             <svg class="heart" viewBox="0 0 24 24"><use href="#heart"/></svg>
             <svg class="heart" viewBox="0 0 24 24"><use href="#heart"/></svg>
           </span>
-        </span>Favorite
+        </span>
       </button>
-      <button id="like" type="button" aria-pressed="false">
+      <button id="like" aria-label="Like" title="Like Video" data-selected-title="Clear Like" type="button" aria-pressed="false">
         <span class="anchor" aria-hidden="true">
           <svg class="glyph" viewBox="0 0 24 24"><use href="#thumb"/></svg>
           <span class="effect">
             <i class="ray" style="--angle:-75deg"></i><i class="ray" style="--angle:-35deg"></i>
             <i class="ray" style="--angle:8deg"></i><i class="ray" style="--angle:52deg"></i>
           </span>
-        </span>Like
+        </span>
       </button>
-      <button id="dislike" type="button" aria-pressed="false">
+      <button id="dislike" aria-label="Dislike" title="Dislike Video" data-selected-title="Clear Dislike" type="button" aria-pressed="false">
         <span class="anchor" aria-hidden="true">
           <svg class="glyph" viewBox="0 0 24 24"><use href="#thumb" transform="rotate(180 12 12)"/></svg>
           <span class="effect"><i class="impact"></i></span>
-        </span>Dislike
+        </span>
       </button>
     </div>
     <label class="motion-option"><input type="checkbox" id="reduced"> Preview reduced motion</label>
@@ -123,6 +123,13 @@
     const controls = document.querySelector('.controls');
     const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
     const reduced = document.getElementById('reduced');
+    for (const button of controls.querySelectorAll('button')) {
+      button.dataset.defaultTitle = button.title;
+    }
+    function setSelection(button, selected) {
+      button.setAttribute('aria-pressed', String(selected));
+      button.title = selected ? button.dataset.selectedTitle : button.dataset.defaultTitle;
+    }
     function stopEffects() {
       controls.querySelectorAll('.reacting').forEach(button => button.classList.remove('reacting'));
     }
@@ -133,9 +140,9 @@
       if (button.id === 'like' || button.id === 'dislike') {
         const opposite = document.getElementById(button.id === 'like' ? 'dislike' : 'like');
         opposite.classList.remove('reacting');
-        opposite.setAttribute('aria-pressed', 'false');
+        setSelection(opposite, false);
       }
-      button.setAttribute('aria-pressed', String(!selected));
+      setSelection(button, !selected);
       button.classList.toggle('reacting', !selected && !motionPreference.matches && !reduced.checked);
     });
     reduced.addEventListener('change', stopEffects);

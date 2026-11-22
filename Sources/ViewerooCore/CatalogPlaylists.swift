@@ -43,6 +43,15 @@ extension Catalog {
         }
     }
 
+    public func renamePlaylist(_ id: Int64, to name: String) throws {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { throw CatalogError.invalidValue }
+        try database.write { db in
+            try db.execute(sql: "UPDATE playlist SET name = ? WHERE id = ?", arguments: [clean, id])
+            guard db.changesCount == 1 else { throw CatalogError.invalidValue }
+        }
+    }
+
     public func deletePlaylist(_ id: Int64) throws {
         try database.write { db in try db.execute(sql: "DELETE FROM playlist WHERE id = ?", arguments: [id]) }
     }
@@ -50,15 +59,17 @@ extension Catalog {
     /// Returns false when the video already belongs to this playlist.
     @discardableResult
     public func addToPlaylist(_ playlistID: Int64, entryID: Int64) throws -> Bool {
-        try database.write { db in
-            try db.execute(sql: """
-                INSERT INTO playlistItem(libraryID, playlistID, entryID, position)
-                VALUES ((SELECT libraryID FROM playlist WHERE id = :playlist), :playlist, :entry,
-                        (SELECT COALESCE(MAX(position) + 1, 0) FROM playlistItem WHERE playlistID = :playlist))
-                ON CONFLICT(playlistID, entryID) DO NOTHING
-                """, arguments: ["playlist": playlistID, "entry": entryID])
-            return db.changesCount == 1
-        }
+        try database.write { try Self.appendToPlaylist($0, playlistID: playlistID, entryID: entryID) }
+    }
+
+    static func appendToPlaylist(_ db: Database, playlistID: Int64, entryID: Int64) throws -> Bool {
+        try db.execute(sql: """
+            INSERT INTO playlistItem(libraryID, playlistID, entryID, position)
+            VALUES ((SELECT libraryID FROM playlist WHERE id = :playlist), :playlist, :entry,
+                    (SELECT COALESCE(MAX(position) + 1, 0) FROM playlistItem WHERE playlistID = :playlist))
+            ON CONFLICT(playlistID, entryID) DO NOTHING
+            """, arguments: ["playlist": playlistID, "entry": entryID])
+        return db.changesCount == 1
     }
 
     public func removeFromPlaylist(_ playlistID: Int64, entryID: Int64) throws {

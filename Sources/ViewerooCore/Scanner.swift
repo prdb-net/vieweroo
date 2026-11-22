@@ -27,6 +27,8 @@ public struct CatalogScanner: Sendable {
     }
 
     public func scan(source: CatalogSource, onDiscovery: @Sendable (CatalogEntry) -> Void = { _ in }) throws {
+        catalog.activeScans.withLock { $0 += 1 }
+        defer { catalog.activeScans.withLock { $0 -= 1 } }
         let generation = try catalog.database.write { db -> Int64 in
             try db.execute(sql: "UPDATE library SET scanClock = scanClock + 1 WHERE id = ?", arguments: [source.libraryID])
             try db.execute(sql: """
@@ -159,7 +161,7 @@ public struct CatalogScanner: Sendable {
             try db.execute(sql: """
                 INSERT INTO entry(libraryID,path,fileSize,modified) VALUES (?,?,?,?)
                 ON CONFLICT(libraryID,path) DO UPDATE SET
-                    fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL, duration = NULL,
+                    fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL, duration = NULL, videoInfo = NULL,
                     matchData = CASE WHEN confirmed THEN matchData END, candidateData = NULL,
                     detectedStudio = NULL, needsLookup = NOT confirmed
                 WHERE entry.fileSize <> excluded.fileSize OR entry.modified <> excluded.modified

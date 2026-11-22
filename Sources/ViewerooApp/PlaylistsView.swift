@@ -2,24 +2,24 @@ import SwiftUI
 
 struct PlaylistsView: View {
     let model: LibraryModel
-    let newPlaylist: () -> Void
 
     var body: some View {
+        let matches = model.visiblePlaylists
         VStack(alignment: .leading, spacing: VSpace.group) {
-            HStack {
-                Text("Playlists").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button("New Playlist…", action: newPlaylist)
-            }
-            .padding([.horizontal, .top], VSpace.section)
+            CollectionHeading(title: "Playlists", count: matches.count == 1 ? "1 playlist" : "\(matches.count) playlists",
+                              filters: model.filterBinding) {}
+                .padding([.top, .horizontal], VSpace.section)
 
-            if model.playlists.isEmpty {
+            if matches.isEmpty && model.narrowed {
+                ContentUnavailableView("No matching playlists", systemImage: "magnifyingglass",
+                                       description: Text("Try a different search or clear a filter."))
+            } else if matches.isEmpty {
                 ContentUnavailableView("No playlists yet", systemImage: "list.and.film",
-                                       description: Text("Create a playlist, then add videos from this library."))
+                                       description: Text("Open Manage Playlists to create your first playlist."))
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(model.playlists) { playlist in
+                        ForEach(matches) { playlist in
                             let selected = model.visit.selectedTile == .playlist(playlist.id)
                             Button {
                                 model.browse(.playlist(playlist.id), from: .playlist(playlist.id))

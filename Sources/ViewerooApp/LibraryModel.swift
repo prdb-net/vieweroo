@@ -9,7 +9,7 @@ enum Gate { case starting, setup, locked, ready, failed }
 
 enum Shelf: Hashable {
     case studios, all, favorites, liked, frequent, playlists, settings, sources
-    case studio(String), performer(PRDBPerformer), playlist(Int64)
+    case studio(String, siteID: String? = nil), performer(PRDBPerformer), playlist(Int64)
 }
 
 @MainActor @Observable
@@ -31,6 +31,7 @@ final class LibraryModel {
     @ObservationIgnored private var scanQueue: [CatalogSource] = []
     @ObservationIgnored private var scanningSourceID: Int64?
     @ObservationIgnored private var refreshRequested = false
+    @ObservationIgnored private var videoInfoTask: Task<Void, Never>?
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var session = UUID()
     @ObservationIgnored private var scanToken = UUID()
@@ -41,6 +42,9 @@ final class LibraryModel {
     var libraries: [CatalogLibrary] = []
     var sources: [CatalogSource] = []
     var entries: [CatalogEntry] = []
+    var favoriteStudioIDs: Set<String> = []
+    var studioDirectory = StudioDirectory()
+    var studioOptions: [StudioOption] { studioDirectory.options }
     var playlists: [CatalogPlaylist] = []
     var recentPlaylists: [CatalogPlaylist] {
         Array(playlists.filter { $0.lastOpenedOrder > 0 }.sorted { $0.lastOpenedOrder > $1.lastOpenedOrder }.prefix(5))
@@ -50,13 +54,10 @@ final class LibraryModel {
     var libraryID: Int64?
     private(set) var visit = BrowseVisit()
     private var backHistory: [BrowseVisit] = []
+    @ObservationIgnored private var lastCollections: [CollectionKey: BrowseVisit] = [:]
     var shelf: Shelf { visit.shelf }
     var query: String { visit.query }
     var detailID: Int64? { visit.detailID }
-    var detailsExpanded: Bool {
-        get { visit.detailsExpanded }
-        set { visit.detailsExpanded = newValue }
-    }
     var canGoBack: Bool { !backHistory.isEmpty }
     var playing = false
     var scanBusy = false
@@ -165,6 +166,7 @@ final class LibraryModel {
         previewToken = UUID()
         snapshotTask?.cancel()
         snapshotTask = nil
+        videoInfoTask?.cancel()
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         playback.stop(); playing = false
         panel?.cancel(nil); panel = nil
@@ -181,7 +183,7 @@ final class LibraryModel {
         phase = gate
         message = nil; libraryID = nil
         resetNavigation()
-        libraries = []; sources = []; entries = []; playlists = []; orderedIDs = []
+        libraries = []; sources = []; entries = []; playlists = []; studioDirectory = StudioDirectory(); orderedIDs = []
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }
         }
@@ -214,11 +216,11 @@ final class LibraryModel {
     }
 
     func selectLibrary(_ id: Int64?) {
-        guard phase == .ready else { return }
+        guard phase == .ready, id == nil || id != libraryID else { return }
         stopWork()
         libraryID = id
         loadingLibrary = id != nil
-        entries = []; sources = []; playlists = []; orderedIDs = []
+        entries = []; sources = []; playlists = []; studioDirectory = StudioDirectory(); orderedIDs = []
         resetNavigation()
         if let id { preferences.set(id, forKey: lastLibrary) }
         let initialLoad = reload()
@@ -241,47 +243,101 @@ final class LibraryModel {
     }
 
     private func resetNavigation() {
+        favoriteStudioIDs.removeAll()
         backHistory.removeAll()
+        lastCollections.removeAll()
         visit = BrowseVisit()
     }
 
     private func navigate(to next: BrowseVisit, from tile: BrowseTile? = nil) {
         guard phase == .ready, libraryID != nil else { return }
         if playing { endPlayback() }
-        visit.scroll.save()
-        visit.castScroll.save()
         if let tile { visit.selectedTile = tile }
+        saveCurrentLocation()
         backHistory.append(visit)
         visit = next
         loadPlaylist(recordOpening: true)
     }
 
+    private func saveCurrentLocation() {
+        visit.scroll.save()
+        visit.castScroll.save()
+        guard detailID == nil else { return }
+        let key = CollectionKey(shelf)
+        // Back can display an older search. Passing through it does not apply it again.
+        if let latest = lastCollections[key], latest.query != query || latest.filters != visit.filters { return }
+        lastCollections[key] = visit
+    }
+
     func browse(_ destination: Shelf, from tile: BrowseTile? = nil) {
-        guard destination != shelf || detailID != nil || !query.isEmpty else { return }
-        navigate(to: BrowseVisit(shelf: destination), from: tile)
+        guard destination != shelf || detailID != nil else { return }
+        let next = lastCollections[CollectionKey(destination)]?.reopened(on: destination) ?? BrowseVisit(shelf: destination)
+        navigate(to: next, from: tile)
     }
 
     func openDetail(_ id: Int64) {
         guard id != detailID else { return }
-        navigate(to: BrowseVisit(shelf: shelf, query: query, detailID: id), from: .video(id))
+        navigate(to: BrowseVisit(shelf: shelf, detailID: id), from: .video(id))
     }
 
     func search(_ term: String) {
-        guard query != term, phase == .ready, libraryID != nil else { return }
-        if detailID != nil || query.isEmpty {
-            navigate(to: BrowseVisit(shelf: shelf, query: term))
-        } else if term.isEmpty, let previous = backHistory.last, previous.shelf == shelf,
-                  previous.query.isEmpty, previous.detailID == nil {
+        refine(query: term, filters: visit.filters)
+    }
+
+    func setFilters(_ filters: CollectionFilters) {
+        refine(query: query, filters: filters)
+    }
+
+    func refine(query: String, filters: CollectionFilters) {
+        guard phase == .ready, libraryID != nil, detailID == nil else { return }
+        defer { lastCollections[CollectionKey(shelf)] = visit }
+        guard query != visit.query || filters != visit.filters else { return }
+        if visit.query.isEmpty && visit.filters.isEmpty {
+            navigate(to: BrowseVisit(shelf: shelf, query: query, filters: filters))
+        } else if query.isEmpty && filters.isEmpty, let previous = backHistory.last,
+                  previous.shelf == shelf, previous.detailID == nil, previous.query.isEmpty, previous.filters.isEmpty {
             goBack()
         } else {
-            // Refining the same search is one visit, regardless of the number of keystrokes.
-            visit = BrowseVisit(shelf: shelf, query: term)
+            visit.query = query
+            visit.filters = filters
+        }
+    }
+
+    func toggleStudioFavorite(_ studio: StudioOption) {
+        guard let libraryID else { return }
+        let save = !favoriteStudioIDs.contains(studio.id)
+        change(save ? "Studio added to favorites" : "Studio removed from favorites") { db in
+            try db.setStudioFavorite(libraryID: libraryID, studio: studio, favorite: save)
+            if save { favoriteStudioIDs.insert(studio.id) } else { favoriteStudioIDs.remove(studio.id) }
+        }
+    }
+
+    func renameStudio(_ name: String, to newName: String, in libraryID: Int64, onFailure: @escaping (String) -> Void) -> Bool {
+        guard self.libraryID == libraryID else { return false }
+        return change("Studio renamed", onFailure: onFailure) { catalog in
+            try catalog.renameCustomStudio(libraryID: libraryID, name: name, to: newName)
+            visit.renameStudio(name, to: newName)
+            for index in backHistory.indices { backHistory[index].renameStudio(name, to: newName) }
+            let oldKey = CollectionKey(.studio(name)), newKey = CollectionKey(.studio(newName))
+            if let saved = lastCollections.removeValue(forKey: oldKey) { lastCollections[newKey] = saved }
+            for key in lastCollections.keys { lastCollections[key]?.renameStudio(name, to: newName) }
+        }
+    }
+
+    func deleteStudio(_ name: String, in libraryID: Int64, onFailure: @escaping (String) -> Void) {
+        guard self.libraryID == libraryID else { return }
+        change("Studio deleted", onFailure: onFailure) { catalog in
+            try catalog.deleteCustomStudio(libraryID: libraryID, name: name)
+            let key = CollectionKey(.studio(name))
+            lastCollections.removeValue(forKey: key)
+            backHistory.removeAll { $0.detailID == nil && CollectionKey($0.shelf) == key }
         }
     }
 
     func goBack() {
         guard phase == .ready, let previous = backHistory.popLast() else { return }
         if playing { endPlayback() }
+        saveCurrentLocation()
         visit = previous
         loadPlaylist(recordOpening: true)
     }
@@ -310,6 +366,8 @@ final class LibraryModel {
                         snapshot.entries.lazy.filter { $0.availability == .available }.count
                     entries = snapshot.entries
                     if availabilityChanged { generatePreviews() }
+                    favoriteStudioIDs = snapshot.favoriteStudioIDs
+                    studioDirectory = StudioDirectory(snapshot.studioOptions)
                     playlists = snapshot.playlists
                     let entryIDs = Set(snapshot.entries.map(\.id))
                     let playlistIDs = Set(snapshot.playlists.map(\.id))
@@ -319,6 +377,7 @@ final class LibraryModel {
                         return true
                     }
                     backHistory.removeAll { !valid($0) }
+                    lastCollections = lastCollections.filter { valid($0.value) }
                     if !valid(visit) {
                         if playing { endPlayback() }
                         visit = backHistory.popLast() ?? BrowseVisit()
@@ -342,7 +401,7 @@ final class LibraryModel {
         }
         do {
             orderedIDs = try catalog.playlistEntryIDs(id)
-            if recordOpening, detailID == nil, query.isEmpty, recentPlaylists.first?.id != id {
+            if recordOpening, detailID == nil, recentPlaylists.first?.id != id {
                 playlists = try catalog.recordPlaylistOpen(id, libraryID: libraryID)
                 // An older in-flight snapshot could otherwise restore the previous order.
                 if snapshotTask != nil {
@@ -363,6 +422,7 @@ final class LibraryModel {
         guard phase == .ready, let catalog else { return false }
         do {
             try operation(catalog)
+            if notice?.undo != nil { notice = nil }
             editRevision &+= 1
             reload()
             if let confirmation { notify(confirmation, kind: kind) }
@@ -475,8 +535,50 @@ final class LibraryModel {
         }
     }
 
+    func renameFile(_ entry: CatalogEntry, basename: String) async throws {
+        guard phase == .ready, detailID == entry.id, let catalog else { throw FileRenameError.unavailable }
+        let stamp = session
+        try await Task.detached(priority: .userInitiated) {
+            try catalog.renameFile(entry, basename: basename)
+        }.value
+        guard phase == .ready, session == stamp else { return }
+        editRevision &+= 1
+        await reload()?.value
+        guard phase == .ready, session == stamp else { return }
+        if let updated = entries.first(where: { $0.id == entry.id }), updated.path != entry.path {
+            if playing && detailID == entry.id {
+                playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
+            }
+            generatePreviews()
+            notify("File renamed")
+        }
+    }
+
     func previewDirectory(_ entry: CatalogEntry) -> URL {
         cache.directory(for: entry)
+    }
+
+    private func readVideoInfo(in entries: [CatalogEntry], catalog: Catalog) {
+        videoInfoTask?.cancel()
+        videoInfoTask = Task(priority: .utility) {
+            let updates = DiscoveryUpdates()
+            var pendingReload = false
+            for entry in entries where entry.videoInfo == nil {
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let info = try await VideoInfo.read(from: entry.url) else { continue }
+                    try Task.checkCancellation()
+                    try await catalog.storeVideoInfo(info, for: entry)
+                    guard !Task.isCancelled else { return }
+                    pendingReload = true
+                    if entry.id == detailID || updates.shouldRefresh() {
+                        reload()
+                        pendingReload = false
+                    }
+                } catch { /* An unreadable file is retried on refresh or next launch. */ }
+            }
+            if pendingReload && !Task.isCancelled { reload() }
+        }
     }
 
     private func generatePreviews() {
@@ -485,6 +587,7 @@ final class LibraryModel {
         let token = UUID()
         previewToken = token
         let pending = entries.filter { $0.availability == .available }
+        readVideoInfo(in: pending, catalog: catalog)
         previews = PreviewProgress(phase: .checking)
         previewTask = Task(priority: .utility) {
             // Older catalogs may already have preview images but lack movie durations.
@@ -545,7 +648,7 @@ final class LibraryModel {
                 openDetail(entry.id)
             } else if detailID != entry.id {
                 // Switching from More to Watch keeps Back anchored to the original collection.
-                visit = BrowseVisit(shelf: shelf, query: query, detailID: entry.id)
+                visit = BrowseVisit(shelf: shelf, detailID: entry.id)
             }
             playback.open(entry: entry, startAt: position ?? entry.resume, previewDirectory: previewDirectory(entry), catalog: catalog)
             playing = true
@@ -586,17 +689,18 @@ final class LibraryModel {
                         try Task.checkCancellation()
                         validated = true
                     }
+                    if let id, directoryUpdated.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true {
+                        lookupActivity = "Updating studio directory…"
+                        let directory = try await client.studios(key: key)
+                        try Task.checkCancellation()
+                        try catalog.saveStudios(directory)
+                        directoryUpdated = Date()
+                        try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
+                        try Task.checkCancellation()
+                        reload()
+                    }
                     if let id, entries.contains(where: { $0.needsLookup && $0.availability == .available }) {
                         lookupActivity = "Matching videos…"
-                        if directoryUpdated.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true {
-                            let directory = try await client.studios(key: key)
-                            try Task.checkCancellation()
-                            try catalog.saveStudios(directory)
-                            directoryUpdated = Date()
-                            try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
-                            try Task.checkCancellation()
-                            reload()
-                        }
                         try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client) {
                             await MainActor.run { if self.session == stamp { _ = self.reload() } }
                         }

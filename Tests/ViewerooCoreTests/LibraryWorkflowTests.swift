@@ -30,7 +30,7 @@ private actor WorkflowServer {
                 ["ref": try #require($0["ref"] as? String), "confidence": 0, "candidates": []] as [String: Any]
             }]
         case "/videos":
-            body = ["items": []]
+            body = ["items": [], "totalCount": 0]
         default:
             Issue.record("Unexpected local fixture request for \(url.path)")
             throw URLError(.unsupportedURL)
@@ -175,10 +175,13 @@ private final class WorkflowSecrets: SecretStore {
     first.addSources([source])
     try await until {
         guard let entry = first.entries.first else { return false }
-        return !first.scanBusy && !entry.needsLookup && !PreviewCache.frames(in: first.previewDirectory(entry)).isEmpty
+        return !first.scanBusy && !entry.needsLookup && entry.videoInfo != nil && !PreviewCache.frames(in: first.previewDirectory(entry)).isEmpty
     }
     let entry = try #require(first.entries.first)
     #expect(entry.filename == "Colors.MP4")
+    #expect(entry.videoInfo?.width == 96 && entry.videoInfo?.height == 64)
+    #expect(entry.videoInfo?.codec == "H.264" && entry.videoInfo?.quality == "SD")
+    #expect(entry.videoInfo?.container == "MPEG-4" && entry.videoInfo?.frameRate != nil)
     #expect(first.playback.player.currentItem == nil)
     first.change("Added to Favorites", kind: .favorite) { catalog in
         try catalog.setFavorite(entryID: entry.id, value: true)
@@ -223,6 +226,7 @@ private final class WorkflowSecrets: SecretStore {
     #expect(reopened.phase == .ready && reopened.libraryID == libraryID)
     #expect(reopened.shelf == .studios)
     let saved = try #require(reopened.entries.first)
+    #expect(saved.videoInfo == entry.videoInfo)
     #expect(saved.id == entry.id && saved.favorite && saved.rating == 1)
     #expect(saved.playCount == 0 && saved.resume == 0 && saved.watchTime == 0)
     reopened.play(saved)
@@ -338,9 +342,34 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     try await until { model.entries.count == 2 && !model.scanBusy }
     let first = model.entries[0], second = model.entries[1]
     _ = try catalog.addToPlaylist(playlist.id, entryID: first.id)
-    model.browse(.playlist(playlist.id))
-    model.search("Fi")
+    try catalog.setFavorite(entryID: second.id, value: true)
+    try catalog.setRating(entryID: first.id, value: 1)
+    try catalog.setTags(entryID: first.id, tags: ["Shared tag"])
+    try catalog.setTags(entryID: second.id, tags: ["Shared tag"])
+    await model.reload()?.value
+    model.browse(.favorites)
+    model.search("Shared tag")
+    #expect(model.visibleVideos.map(\.id) == [second.id])
+    model.setFilters(.init(selected: [.liked]))
+    #expect(model.visibleVideos.isEmpty)
+    model.browse(.liked)
+    model.search("Shared tag")
+    #expect(model.visibleVideos.map(\.id) == [first.id])
+    model.browse(.all)
+    model.search("shared TAG")
+    #expect(model.visibleVideos.count == 2)
+    model.browse(.playlists)
+    model.search("saved")
+    #expect(model.visiblePlaylists.map(\.id) == [playlist.id])
     model.search("First")
+    #expect(model.visiblePlaylists.isEmpty)
+    while model.canGoBack { model.goBack() }
+    model.browse(.playlist(playlist.id))
+    model.search("Second")
+    #expect(model.visibleVideos.isEmpty)
+    model.search("First")
+    model.setFilters(.init(selected: [.liked]))
+    #expect(model.visibleVideos.map(\.id) == [first.id])
     model.openDetail(first.id)
     let person = PRDBPerformer(id: "fixture", name: "Morgan Reed")
     model.browse(.performer(person), from: .performer(person.id))
@@ -351,6 +380,7 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     model.goBack()
     #expect(model.detailID == first.id && model.visit.selectedTile == .performer(person.id))
     model.goBack()
+    #expect(model.visit.filters.selected == [.liked])
     #expect(model.query == "First" && model.detailID == nil && model.visit.selectedTile == .video(first.id))
     model.goBack()
     #expect(model.query.isEmpty && model.shelf == .playlist(playlist.id) && model.orderedIDs == [first.id])
@@ -382,6 +412,99 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     model.lock()
     await unlockedLoad?.value
     #expect(model.phase == .locked && model.entries.isEmpty && model.sources.isEmpty && model.libraries.isEmpty)
+}
+
+@MainActor
+@Test func collectionRevisitsRestoreIndependentFiltersPositionsAndHistory() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.collection-memory." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) }, preferences: preferences,
+                             directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Archive")
+    await model.reload()?.value
+    let library = try #require(model.libraryID)
+    let catalog = try #require(model.catalog)
+    let playlist = try catalog.createPlaylist(libraryID: library, name: "First")
+    let otherPlaylist = try catalog.createPlaylist(libraryID: library, name: "Second")
+    try catalog.createStudio(libraryID: library, name: "Local")
+    let person = PRDBPerformer(id: "p", name: "Person")
+    let collections: [(Shelf, String)] = [
+        (.studios, "Directory"), (.liked, "Positive"), (.frequent, "Repeated"),
+        (.playlists, "Lists"), (.sources, "Folder"), (.playlist(playlist.id), "One"),
+        (.playlist(otherPlaylist.id), "Two"), (.studio("Local"), "Local search"),
+        (.studio("Twin", siteID: "a"), "First studio"), (.studio("Twin", siteID: "b"), "Second studio"),
+        (.performer(person), "First performer"), (.performer(.init(id: "q", name: person.name)), "Second performer")
+    ]
+    for (scope, query) in collections {
+        model.browse(scope)
+        #expect(model.query.isEmpty)
+        model.search(query)
+    }
+    for (scope, query) in collections {
+        model.browse(scope)
+        #expect(model.query == query)
+    }
+    model.browse(.performer(.init(id: "p", name: "Updated name")))
+    #expect(model.query == "First performer")
+    model.browse(.studio("New label", siteID: "a"))
+    #expect(model.query == "First studio")
+    #expect(model.renameStudio("Local", to: "Renamed", in: library) { Issue.record("\($0)") })
+    model.browse(.studio("RENAMED"))
+    #expect(model.query == "Local search")
+    model.browse(.studios)
+    model.deleteStudio("Renamed", in: library) { Issue.record("\($0)") }
+    try catalog.createStudio(libraryID: library, name: "Renamed")
+    model.browse(.studio("Renamed"))
+    #expect(model.query.isEmpty)
+
+    let videoFilters = CollectionFilters(qualities: ["4K"], tags: ["interview": "Interview"])
+    model.browse(.all)
+    model.refine(query: "No matching video", filters: videoFilters)
+    let originalID = model.visit.id
+    let originalPosition = model.visit.scroll
+    let scroll = NSScrollView()
+    scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 180))
+    originalPosition.view = scroll
+    model.browse(.favorites)
+    #expect(model.query.isEmpty && model.visit.filters.isEmpty)
+    model.setFilters(.init(selected: [.unplayed]))
+    model.browse(.all)
+    #expect(model.query == "No matching video" && model.visit.filters == videoFilters && model.visibleVideos.isEmpty)
+    #expect(model.visit.id != originalID && model.visit.scroll !== originalPosition && model.visit.scroll.origin.y == 180)
+    model.refine(query: "Edited", filters: .init())
+    model.goBack()
+    #expect(model.shelf == .favorites && model.visit.filters.selected == [.unplayed])
+    model.goBack()
+    #expect(model.shelf == .favorites && model.visit.filters.isEmpty)
+    model.goBack()
+    #expect(model.visit.id == originalID && model.query == "No matching video" && model.visit.filters == videoFilters)
+    model.refine(query: "", filters: .init())
+    model.browse(.favorites)
+    model.browse(.all)
+    #expect(model.query.isEmpty && model.visit.filters.isEmpty)
+
+    model.browse(.favorites)
+    model.selectLibrary(library)
+    #expect(model.visit.filters.selected == [.unplayed])
+    model.createLibrary("Other")
+    model.selectLibrary(library)
+    model.browse(.favorites)
+    #expect(model.query.isEmpty && model.visit.filters.isEmpty)
+    model.search("Private query")
+    model.browse(.studios)
+    try model.access.setPIN(current: nil, new: "1234")
+    model.pinEnabled = true
+    model.lock()
+    try model.unlock(pin: "1234")
+    model.browse(.favorites)
+    #expect(model.query.isEmpty && model.visit.filters.isEmpty)
 }
 
 @MainActor

@@ -6,29 +6,48 @@ struct SourcesView: View {
     @State private var removal: CatalogSource?
     @State private var affected = 0
     var body: some View {
+        let matches = model.visibleSources
         VStack(alignment: .leading, spacing: VSpace.section) {
-            HStack {
-                Text("Source Folders").font(.largeTitle.bold())
-                Spacer()
-                Button("Add Folder…") { model.pickSource() }
+            CollectionHeading(title: "Source Folders", count: matches.count == 1 ? "1 folder" : "\(matches.count) folders",
+                              filters: model.filterBinding) {
+                if !model.sources.isEmpty || model.narrowed {
+                    IconActionButton(.add, "Add Folder…") { model.pickSource() }
+                }
             }.padding([.top, .horizontal], VSpace.section)
-            if model.sources.isEmpty {
-                ContentUnavailableView("No source folders", systemImage: "folder", description: Text("Add a folder to begin scanning this library."))
+
+            if matches.isEmpty && model.narrowed {
+                ContentUnavailableView("No matching folders", systemImage: "magnifyingglass",
+                                       description: Text("Try a different search or clear a filter."))
+            } else if matches.isEmpty {
+                ContentUnavailableView {
+                    Label("No source folders", systemImage: "folder")
+                } description: {
+                    Text("Add a folder to begin scanning this library.")
+                } actions: {
+                    Button("Add Folder…") { model.pickSource() }.buttonStyle(.borderedProminent)
+                }
             } else {
-                List(model.sources) { source in
-                    HStack(spacing: VSpace.control) {
-                        Image(systemName: source.online ? "folder" : "externaldrive.badge.xmark").font(.title2)
-                        VStack(alignment: .leading, spacing: VSpace.unit) {
-                            Text(source.url.lastPathComponent).font(.headline)
-                            Text(source.path).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(matches) { source in
+                            HStack(spacing: VSpace.control) {
+                                Image(systemName: source.online ? "folder" : "externaldrive.badge.xmark").font(.title2)
+                                VStack(alignment: .leading, spacing: VSpace.unit) {
+                                    Text(source.url.lastPathComponent).font(.headline)
+                                    Text(source.path).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                                Spacer()
+                                if !source.online { Text("Offline").foregroundStyle(.secondary) }
+                                IconActionButton(.remove, "Remove Source Folder…", targetLabel: "Remove Source Folder “\(source.path)”") {
+                                    do { affected = try model.catalog?.sourceRemovalCount(source.id) ?? 0; removal = source }
+                                    catch { model.message = error.localizedDescription }
+                                }.disabled(model.scanBusy)
+                            }.padding(.vertical, VSpace.tight)
+                            Divider()
                         }
-                        Spacer()
-                        if !source.online { Text("Offline").foregroundStyle(.secondary) }
-                        Button("Remove…") {
-                            do { affected = try model.catalog?.sourceRemovalCount(source.id) ?? 0; removal = source }
-                            catch { model.message = error.localizedDescription }
-                        }.disabled(model.scanBusy)
-                    }.padding(.vertical, VSpace.tight)
+                    }
+                    .padding(.horizontal, VSpace.section)
+                    .background(BrowseScrollAnchor(position: model.visit.scroll))
                 }
             }
             Spacer(minLength: 0)

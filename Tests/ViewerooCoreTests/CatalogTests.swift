@@ -37,6 +37,85 @@ private struct LibraryFixture {
 }
 
 final class CatalogTests: XCTestCase {
+    func testVideoQualityForCroppedAndPortraitFrames() {
+        for (width, height, quality) in [(3840, 1600, "4K"), (2160, 3840, "4K"), (2560, 1440, "1440p"),
+                                         (1920, 800, "1080p"), (720, 1280, "720p"), (720, 576, "SD")] {
+            XCTAssertEqual(VideoInfo(width: width, height: height, codec: "test", container: nil,
+                                     frameRate: nil).quality, quality)
+        }
+    }
+
+    func testFileReplacementInvalidatesVideoInfoAndRejectsStaleRead() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Movie.mp4")
+        try fixture.scan()
+        let original = try XCTUnwrap(fixture.catalog.entries(libraryID: fixture.library.id).first)
+        let info = VideoInfo(width: 1920, height: 1080, codec: "H.264", container: "MPEG-4", frameRate: 24)
+        try await fixture.catalog.storeVideoInfo(info, for: original)
+        try fixture.scan()
+        XCTAssertEqual(try fixture.catalog.entry(original.id)?.videoInfo, info)
+        try fixture.add("Movie.mp4", data: Data([1, 2]))
+        try fixture.scan()
+        try await fixture.catalog.storeVideoInfo(info, for: original)
+        XCTAssertNil(try fixture.catalog.entry(original.id)?.videoInfo)
+    }
+
+    func testRenameKeepsSharedAndLinkedLibraryEntriesAcrossScans() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        let original = try fixture.add("Scene.MOV")
+        let catalog = fixture.catalog
+        let second = try catalog.createLibrary(name: "Second")
+        let link = fixture.base.appendingPathComponent("Linked folder")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.media)
+        let secondSource = try catalog.addSource(libraryID: second.id, url: link)
+        let scanner = CatalogScanner(catalog: catalog)
+        try fixture.scan()
+        try scanner.scan(source: secondSource)
+        let firstEntry = try XCTUnwrap(catalog.entries(libraryID: fixture.library.id).first)
+        let secondEntry = try XCTUnwrap(catalog.entries(libraryID: second.id).first)
+        try catalog.setFavorite(entryID: firstEntry.id, value: true)
+        let session = try catalog.beginSession(entryID: secondEntry.id)
+        try catalog.recordInterval(sessionID: session, start: 7, end: 20)
+
+        try catalog.renameFile(firstEntry, basename: "New scene")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.media.appendingPathComponent("New scene.MOV")), Data([0,1,2,3]))
+        try fixture.scan()
+        try scanner.scan(source: secondSource)
+        XCTAssertEqual(try catalog.entries(libraryID: fixture.library.id).map(\.id), [firstEntry.id])
+        XCTAssertEqual(try catalog.entries(libraryID: second.id).map(\.id), [secondEntry.id])
+        let renamed = try XCTUnwrap(catalog.entry(firstEntry.id))
+        XCTAssertTrue(renamed.favorite)
+        XCTAssertEqual(renamed.playCount, 0)
+        XCTAssertEqual(try catalog.entry(secondEntry.id)?.path, link.appendingPathComponent("New scene.MOV").standardizedFileURL.path)
+        XCTAssertEqual(try catalog.entry(secondEntry.id)?.watchTime, 13)
+        XCTAssertEqual(try catalog.entry(secondEntry.id)?.favorite, false)
+        try catalog.renameFile(renamed, basename: "New Scene")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: fixture.media.path), ["New Scene.MOV"])
+    }
+
+    func testRenameRejectsInvalidNamesAndCollisionsWithoutChangingTheSource() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        let source = try fixture.add("First.mov")
+        let taken = try fixture.add("Taken.mov", data: Data([5]))
+        try fixture.scan()
+        let entry = try XCTUnwrap(fixture.catalog.entries(libraryID: fixture.library.id).first)
+        _ = try fixture.add("Unscanned.mov", data: Data([6]))
+        for name in [" ", "../Other", "Bad:Name", "Bad\0Name", "Taken", "Unscanned"] {
+            XCTAssertThrowsError(try fixture.catalog.renameFile(entry, basename: name))
+        }
+        try FileManager.default.removeItem(at: taken)
+        XCTAssertThrowsError(try fixture.catalog.renameFile(entry, basename: "Taken"))
+        XCTAssertEqual(try fixture.catalog.entry(entry.id)?.path, entry.path)
+        XCTAssertEqual(try Data(contentsOf: source), Data([0,1,2,3]))
+        try Data([7]).write(to: source)
+        XCTAssertThrowsError(try fixture.catalog.renameFile(entry, basename: "Replacement"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
     func testSiteOnlySuggestionsNeedPathEvidenceAtImport() async throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }
@@ -58,7 +137,7 @@ final class CatalogTests: XCTestCase {
                 }]
             } else {
                 XCTAssertEqual(url.path, "/videos")
-                body = ["items": []]
+                body = ["items": [], "totalCount": 0]
             }
             return (try JSONSerialization.data(withJSONObject: body),
                     try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
@@ -104,6 +183,10 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(try upgraded.entry(2)?.studio, "Silver Lake")
         let manual = try XCTUnwrap(upgraded.entry(3))
         XCTAssertEqual(manual.studio, "Chosen")
+        let options = try upgraded.database.read { try Catalog.studioOptions($0, libraryID: 1) }
+        XCTAssertEqual(options.filter(\.isCustom).map(\.name), ["Chosen"])
+        XCTAssertTrue(options.contains { $0.name == "Black" && !$0.isCustom })
+        XCTAssertTrue(options.contains { $0.name == "Cedar Grove" && !$0.isCustom })
         XCTAssertTrue(manual.favorite)
         XCTAssertNil(manual.detectedStudio)
         let confirmed = try XCTUnwrap(upgraded.entry(4))
@@ -112,6 +195,144 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(confirmed.confirmed)
         XCTAssertEqual(try upgraded.entry(5)?.studio, "Cedar Grove")
         XCTAssertFalse(try upgraded.entries(libraryID: 1).contains(where: \.needsLookup))
+    }
+
+    func testStudioFavoritesSurviveMigrationRenameAndDirectoryResolutionWithinTheirLibrary() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let previous = try DatabaseQueue(path: root.path)
+            try Catalog.migrator.migrate(previous, upTo: "creator-accounts-v11")
+            try await previous.write { db in
+                try db.execute(sql: "INSERT INTO library(id,name) VALUES (1,'First'),(2,'Second')")
+                try db.execute(sql: "INSERT INTO customStudio(libraryID,name) VALUES (1,'Local'),(2,'Local')")
+            }
+        }
+        let catalog = try Catalog(path: root.path)
+        let local = StudioOption(name: "Local", isCustom: true)
+        let initial = try await catalog.snapshot(libraryID: 1)
+        XCTAssertTrue(initial.favoriteStudioIDs.isEmpty)
+        XCTAssertEqual(initial.studioOptions, [local])
+        for id: Int64 in [1, 2] { try catalog.setStudioFavorite(libraryID: id, studio: local, favorite: true) }
+        try catalog.renameCustomStudio(libraryID: 1, name: "local", to: "Archive")
+        let renamed = try await Catalog(path: root.path).snapshot(libraryID: 1)
+        XCTAssertEqual(renamed.favoriteStudioIDs, [StudioOption(name: "Archive", isCustom: true).id])
+        try catalog.deleteCustomStudio(libraryID: 1, name: "archive")
+        try catalog.createStudio(libraryID: 1, name: "Archive")
+        let recreated = try await catalog.snapshot(libraryID: 1)
+        XCTAssertTrue(recreated.favoriteStudioIDs.isEmpty)
+        try catalog.saveStudios([.init(id: "site-a", name: "Local")])
+        let resolved = try await catalog.snapshot(libraryID: 2)
+        let site = try XCTUnwrap(resolved.studioOptions.first)
+        XCTAssertEqual(site.siteID, "site-a")
+        XCTAssertEqual(resolved.favoriteStudioIDs, [site.id])
+        try catalog.setStudioFavorite(libraryID: 2, studio: site, favorite: false)
+        let cleared = try await catalog.snapshot(libraryID: 2)
+        XCTAssertTrue(cleared.favoriteStudioIDs.isEmpty)
+    }
+
+    func testCustomStudiosPersistAndDeletionRestoresAutomaticAssignmentsInOneLibrary() async throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        let catalog = f.catalog, library = f.library.id
+        let other = try catalog.createLibrary(name: "Other").id
+        try catalog.createStudio(libraryID: library, name: "  Étude  ")
+        try catalog.createStudio(libraryID: other, name: "Étude")
+        XCTAssertThrowsError(try catalog.createStudio(libraryID: library, name: "étude"))
+        XCTAssertThrowsError(try catalog.createStudio(libraryID: library, name: " "))
+        XCTAssertThrowsError(try catalog.createStudio(libraryID: library, name: "Unknown Studio"))
+        let reopened = try Catalog(path: f.databasePath)
+        let initial = try await reopened.snapshot(libraryID: library)
+        XCTAssertEqual(initial.studioOptions.filter(\.isCustom).map(\.name), ["Étude"])
+        try f.add("Workshop.mp4")
+        try f.scan()
+        let entry = try XCTUnwrap(catalog.entries(libraryID: library).first)
+        try catalog.confirmMatch(entryID: entry.id, title: .init(id: "title", title: "Workshop", studio: .init(id: "s", name: "Field Notes")))
+        try catalog.setManualStudio(entryID: entry.id, name: "étude")
+        XCTAssertEqual(try catalog.entry(entry.id)?.manualStudio, "Étude")
+        try catalog.deleteCustomStudio(libraryID: library, name: "ÉTUDE")
+        XCTAssertEqual(try catalog.entry(entry.id)?.studio, "Field Notes")
+        XCTAssertThrowsError(try catalog.deleteCustomStudio(libraryID: library, name: "field notes"))
+        let untouched = try await reopened.snapshot(libraryID: other)
+        XCTAssertEqual(untouched.studioOptions.filter(\.isCustom).map(\.name), ["Étude"])
+        try catalog.setManualStudio(entryID: entry.id, name: "Personal")
+        try catalog.saveStudios([.init(id: "import", name: "PERSONAL")])
+        XCTAssertThrowsError(try catalog.deleteCustomStudio(libraryID: library, name: "Personal"))
+        let refreshed = try await catalog.snapshot(libraryID: library)
+        XCTAssertEqual(refreshed.studioOptions.map(\.name), ["Field Notes", "PERSONAL"])
+        XCTAssertFalse(refreshed.studioOptions.contains(where: \.isCustom))
+    }
+
+    func testRenamingStudiosPreservesAssignmentsAndProtectsOtherNames() async throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        try f.add("One.mp4")
+        try f.add("Two.mp4")
+        try f.scan()
+        let catalog = f.catalog, library = f.library.id
+        let other = try catalog.createLibrary(name: "Other").id
+        let otherSource = try catalog.addSource(libraryID: other, url: f.media)
+        try CatalogScanner(catalog: catalog).scan(source: otherSource)
+        for id in [library, other] {
+            for entry in try catalog.entries(libraryID: id) {
+                try catalog.setManualStudio(entryID: entry.id, name: "Étude")
+            }
+        }
+        try catalog.createStudio(libraryID: library, name: "Empty")
+        try catalog.renameCustomStudio(libraryID: library, name: "Empty", to: "Spare")
+        try catalog.saveStudios([.init(id: "s", name: "Imported")])
+        for invalid in ["spare", "IMPORTED", "  ", "unknown studio"] {
+            XCTAssertThrowsError(try catalog.renameCustomStudio(libraryID: library, name: "Étude", to: invalid))
+        }
+        XCTAssertThrowsError(try catalog.renameCustomStudio(libraryID: library, name: "Imported", to: "Other Name"))
+        XCTAssertThrowsError(try catalog.renameCustomStudio(libraryID: library, name: "Missing", to: "Other Name"))
+        XCTAssertEqual(try catalog.entries(libraryID: library).compactMap(\.manualStudio), ["Étude", "Étude"])
+        try catalog.renameCustomStudio(libraryID: library, name: "étude", to: "  ÉTUDE ")
+        XCTAssertEqual(try catalog.entries(libraryID: library).compactMap(\.manualStudio), ["ÉTUDE", "ÉTUDE"])
+        try catalog.renameCustomStudio(libraryID: library, name: "ÉTUDE", to: "Night Archive")
+        let reopened = try Catalog(path: f.databasePath)
+        let updated = try await reopened.snapshot(libraryID: library)
+        XCTAssertEqual(updated.entries.compactMap(\.studio), ["Night Archive", "Night Archive"])
+        XCTAssertEqual(updated.studioOptions.filter(\.isCustom).map(\.name), ["Night Archive", "Spare"])
+        XCTAssertEqual(try reopened.entries(libraryID: other).compactMap(\.manualStudio), ["Étude", "Étude"])
+        try catalog.saveStudios([.init(id: "late", name: "NIGHT ARCHIVE")])
+        XCTAssertThrowsError(try catalog.renameCustomStudio(libraryID: library, name: "Night Archive", to: "New Name"))
+    }
+
+    func testCreatorProfilesKeepTheirSiteIdentityAcrossOverridesAndRefresh() async throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        try f.add("Sample.mp4")
+        try f.scan()
+        let catalog = f.catalog
+        let entry = try XCTUnwrap(catalog.entries(libraryID: f.library.id).first)
+        let first = PRDBStudio(id: "a", name: "Workshop", creator: CreatorAccount(platformID: "of", key: "onlyfans",
+                                                                                   title: "OnlyFans", handle: "workshop"))
+        let second = PRDBStudio(id: "b", name: "Workshop", creator: CreatorAccount(platformID: "f", key: "fansly",
+                                                                                    title: "Fansly", handle: "workshop.films"))
+        try catalog.confirmMatch(entryID: entry.id, title: .init(id: "t", title: "Sample", studio: first))
+        try catalog.saveStudios([first, second])
+        let reopened = try Catalog(path: f.databasePath)
+        let snapshot = try await reopened.snapshot(libraryID: f.library.id)
+        let directory = StudioDirectory(snapshot.studioOptions)
+        XCTAssertEqual(snapshot.studioOptions.count, 2)
+        XCTAssertEqual(directory.studio(for: try XCTUnwrap(reopened.entry(entry.id))).creator, first.creator)
+        try catalog.setManualStudio(entryID: entry.id, name: second.name, siteID: second.id)
+        XCTAssertEqual(directory.studio(for: try XCTUnwrap(reopened.entry(entry.id))).creator?.profileURL?.absoluteString,
+                       "https://fansly.com/workshop.films")
+        try catalog.setManualStudio(entryID: entry.id, name: "Workshop")
+        XCTAssertNil(directory.studio(for: try XCTUnwrap(reopened.entry(entry.id))).creator)
+        try catalog.setManualStudio(entryID: entry.id, name: "Local Only")
+        XCTAssertNil(directory.studio(for: try XCTUnwrap(reopened.entry(entry.id))).creator)
+        try catalog.setManualStudio(entryID: entry.id, name: nil)
+        XCTAssertEqual(directory.studio(for: try XCTUnwrap(reopened.entry(entry.id))).siteID, first.id)
+        try catalog.saveStudios([PRDBStudio(id: first.id, name: first.name)])
+        let refresh = try await reopened.snapshot(libraryID: f.library.id)
+        XCTAssertNil(StudioDirectory(refresh.studioOptions).studio(for: try XCTUnwrap(refresh.entries.first)).creator)
+        for handle in [nil, "", "..", "x/y", "a?b", "https://example.org"] {
+            XCTAssertNil(CreatorAccount(platformID: nil, key: "fansly", title: nil, handle: handle)?.profileURL)
+        }
+        XCTAssertNil(CreatorAccount(platformID: nil, key: "other", title: "OnlyFans", handle: "workshop")?.profileURL)
     }
 
     func testSymlinkedSourceKeepsItsSelectedPathAcrossScans() throws {
@@ -155,6 +376,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(try c.playlists(libraryID: fixture.library.id).first?.videoCount, 1)
         XCTAssertThrowsError(try c.addToPlaylist(-1, entryID: first.id))
         XCTAssertThrowsError(try c.addToPlaylist(playlist.id, entryID: other.id))
+        try c.renamePlaylist(playlist.id, to: "  Watch later  ")
+        XCTAssertThrowsError(try c.renamePlaylist(playlist.id, to: "  "))
         let auto = PRDBTitle(id: "automatic", title: "First match")
         try c.applyMatch(entryID: first.id, result: .init(autoTitle: auto), fileSize: first.fileSize, modified: first.modified)
         let corrected = PRDBTitle(id: "manual", title: "Corrected match")
@@ -175,12 +398,110 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(entry.playCount, 1)
         XCTAssertEqual(entry.watchTime, 15)
         XCTAssertEqual(entry.resume, 15)
+        XCTAssertEqual(try reopened.playlists(libraryID: fixture.library.id).map(\.name), ["Watch later"])
         XCTAssertEqual(try reopened.playlistEntries(playlist.id).map(\.id), [first.id])
         XCTAssertEqual(try reopened.entry(other.id), other)
         try reopened.deleteLibrary(fixture.library.id)
         XCTAssertNil(try reopened.entry(first.id))
         XCTAssertEqual(try reopened.entry(other.id), other)
         XCTAssertTrue(FileManager.default.fileExists(atPath: media.path))
+    }
+
+    func testBulkHistoryRemovalKeepsResumeAndUndoMergesWithNewPlayback() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        try f.add("First.mp4")
+        try f.add("Second.mp4")
+        try f.scan()
+        let c = f.catalog
+        let entries = try c.entries(libraryID: f.library.id)
+        let ids = entries.map(\.id)
+        let first = try XCTUnwrap(ids.first)
+        let second = try XCTUnwrap(ids.last)
+        let other = try c.createLibrary(name: "Separate")
+        let source = try c.addSource(libraryID: other.id, url: f.media)
+        try CatalogScanner(catalog: c).scan(source: source)
+        let foreign = try XCTUnwrap(c.entries(libraryID: other.id).first?.id)
+        for id in ids + [foreign] {
+            let session = try c.beginSession(entryID: id)
+            try c.recordInterval(sessionID: session, start: 3, end: 20)
+            try c.recordInterval(sessionID: session, start: 10, end: 24)
+            try c.setResume(entryID: id, seconds: 24)
+        }
+        let original = try c.playbackStats(entryID: first)
+        let shortSession = try c.beginSession(entryID: first)
+        try c.recordInterval(sessionID: shortSession, start: 0, end: 4)
+        XCTAssertThrowsError(try c.editVideos(in: f.library.id, entryIDs: [first, foreign], edit: .removeHistory))
+        XCTAssertEqual(try c.playbackStats(entryID: first), original)
+
+        let receipt = try c.editVideos(in: f.library.id, entryIDs: ids, edit: .removeHistory)
+        XCTAssertEqual(receipt.changedCount, 2)
+        let reopened = try Catalog(path: f.databasePath)
+        for id in ids {
+            XCTAssertEqual(try reopened.playbackStats(entryID: id), PlaybackStats(playCount: 0, watchTime: 0, segments: []))
+            XCTAssertEqual(try reopened.entry(id)?.weightedPlays, 0)
+            XCTAssertEqual(try reopened.entry(id)?.resume, 24)
+        }
+        XCTAssertEqual(try reopened.playbackStats(entryID: foreign), original)
+        XCTAssertEqual(try reopened.editVideos(in: f.library.id, entryIDs: ids, edit: .removeHistory).changedCount, 0)
+
+        let newer = try reopened.beginSession(entryID: second)
+        try reopened.recordInterval(sessionID: newer, start: 40, end: 55)
+        try reopened.setResume(entryID: second, seconds: 55)
+        try reopened.undoVideoEdit(receipt)
+        try reopened.undoVideoEdit(receipt)
+        XCTAssertEqual(try reopened.playbackStats(entryID: first), original)
+        XCTAssertEqual(try reopened.playbackStats(entryID: second).playCount, original.playCount + 1)
+        XCTAssertEqual(try reopened.playbackStats(entryID: second).watchTime, original.watchTime + 15)
+        XCTAssertEqual(try reopened.entry(second)?.resume, 55)
+        // Even a session that was too short to count gets its original identity and intervals back.
+        try reopened.recordInterval(sessionID: shortSession, start: 4, end: 10)
+        XCTAssertEqual(try reopened.playbackStats(entryID: first).watchTime, original.watchTime + 10)
+    }
+
+    func testRemovedTitleStaysUnmatchedUntilAnotherManualChoice() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        try f.add("Workshop.mp4")
+        try f.scan()
+        let catalog = f.catalog
+        let entry = try XCTUnwrap(catalog.entries(libraryID: f.library.id).first)
+        let automatic = PRDBTitle(id: "auto", title: "First title")
+        let manual = PRDBTitle(id: "chosen", title: "Selected title")
+        let result = PRDBMatch(autoTitle: automatic, candidates: [manual])
+        try catalog.applyMatch(entryID: entry.id, result: result, fileSize: entry.fileSize, modified: entry.modified)
+        try catalog.setFavorite(entryID: entry.id, value: true)
+        try catalog.setTags(entryID: entry.id, tags: ["Keep"])
+        try catalog.setResume(entryID: entry.id, seconds: 12)
+        let playlist = try catalog.createPlaylist(libraryID: f.library.id, name: "Weekend")
+        try catalog.addToPlaylist(playlist.id, entryID: entry.id)
+
+        for title in [automatic, manual] {
+            XCTAssertEqual(try catalog.entry(entry.id)?.match, title)
+            try catalog.confirmMatch(entryID: entry.id, title: nil)
+            try catalog.applyMatch(entryID: entry.id, result: result, fileSize: entry.fileSize, modified: entry.modified)
+            let cleared = try XCTUnwrap(catalog.entry(entry.id))
+            XCTAssertTrue(cleared.confirmed)
+            XCTAssertFalse(cleared.needsLookup)
+            XCTAssertNil(cleared.match)
+            XCTAssertEqual(cleared.title, "Workshop")
+            XCTAssertEqual(cleared.candidates, [manual])
+            XCTAssertEqual(cleared.tags, ["Keep"])
+            XCTAssertTrue(cleared.favorite)
+            XCTAssertEqual(cleared.resume, 12)
+            XCTAssertEqual(try catalog.playlistEntryIDs(playlist.id), [entry.id])
+            if title == automatic { try catalog.confirmMatch(entryID: entry.id, title: manual) }
+        }
+
+        try f.add("Workshop.mp4", data: Data(repeating: 0, count: 12))
+        try f.scan()
+        let reopened = try Catalog(path: f.databasePath)
+        let rescanned = try XCTUnwrap(reopened.entry(entry.id))
+        XCTAssertTrue(rescanned.confirmed)
+        XCTAssertFalse(rescanned.needsLookup)
+        XCTAssertNil(rescanned.match)
+        try reopened.confirmMatch(entryID: entry.id, title: manual)
+        XCTAssertEqual(try reopened.entry(entry.id)?.match, manual)
     }
 
     func testSuggestionsRankPlayableNeighborsFromTheSameLibrary() throws {

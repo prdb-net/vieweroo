@@ -143,7 +143,7 @@ struct PRDBTests {
             }
             #expect(url.path == "/videos")
             #expect(query.contains(.init(name: "Search", value: "Blue & Gold")))
-            return reply(#"{"items":[{"id":"v","title":"Blue & Gold","siteId":"s","siteTitle":"Sky","actors":[{"id":"a","name":"Alex"}]}]}"#, request)
+            return reply(#"{"totalCount":1,"items":[{"id":"v","title":"Blue & Gold","siteId":"s","siteTitle":"Sky","actors":[{"id":"a","name":"Alex"}]}]}"#, request)
         }
         #expect(try await client.search(" Blue & Gold ", key: "key").first?.performers.first?.name == "Alex")
         #expect(try await client.studios(key: "key").map(\.name) == ["Sky", "Hill"])

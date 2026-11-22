@@ -6,23 +6,23 @@ Vieweroo is a native, open-source macOS app written in Swift. It brings an adult
 
 To use Vieweroo, validate your personal PRDB API key during setup. One key covers all your libraries. Vieweroo saves it in a separate local settings database so routine launches and updates can open your collection without a Keychain prompt. Once set up, you can browse and play available videos while PRDB is unreachable. Pending lookups resume when the connection returns. If PRDB reports that the key is invalid, Vieweroo asks for a valid replacement.
 
-You can create multiple libraries, each with its own set of folders on local disks or mounted network drives. Use the title bar to switch libraries or create one. The active library’s **Library Settings** in the sidebar brings together its name, source folders, and deletion. Adding a folder scans it and its subfolders and catalogs each video's file path and metadata in a local database. The files stay where they are. Opening a library checks which folders are available. Choose **Refresh Library** to pick up changes. When a network drive is temporarily disconnected, its titles, your ratings, and your playback positions stay in the library.
+You can create multiple libraries, each with its own set of folders on local disks or mounted network drives. Use the title bar to switch libraries or create one. The active library’s **Settings** in the sidebar brings together its name, source folders, and deletion. Adding a folder scans it and its subfolders and catalogs each video's file path and metadata in a local database. The files stay in their folders. The video page shows the local resolution tier, such as 720p, 1080p, or 4K. In Library Details you can inspect the video encoding, reveal the file in Finder, add or reuse library tags, and rename the file on disk while keeping its library history. Opening a library checks which folders are available. Choose **Refresh Library** to pick up changes. When a network drive is temporarily disconnected, its titles, your ratings, and your playback positions stay in the library.
 
 Each library keeps its own tags, playlists, favorites, ratings, and viewing history. If the same video appears in two libraries, you can rate it differently in each and resume from the point where you last watched it in that library. If a file goes missing from a reachable folder, its entry is marked as missing. You keep its history and its place in your playlists until you choose to remove it.
 
 The MVP catalogs MP4, M4V, and MOV files. If a file uses an unsupported codec, its entry explains why playback is unavailable. Removing a folder shows how many entries would lose their source and lets you keep or remove them. Removing folders or deleting a library leaves your original videos on disk.
 
-Vieweroo automatically links a video to its PRDB title when its file hash produces a unique match through the public prdb.net API. Otherwise, it suggests titles for you to confirm. Vieweroo remembers your choice on the next scan. You can correct a match and keep your rating and viewing history. You can also play, tag, and add unmatched videos to playlists.
+Vieweroo automatically links a video to its PRDB title when its file hash produces a unique match through the public prdb.net API. Otherwise, it suggests titles for you to confirm. Vieweroo remembers your choice on the next scan. You can search PRDB by title, studio or performer and correct a match while keeping your rating and viewing history. You can remove a linked title and leave the video unmatched across rescans until you choose another title. You can also play, tag, and add unmatched videos to playlists.
 
 ## Exploring by studio and performer
 
-Vieweroo opens the last-used library in its studio overview. Open a studio to see its videos from across the library's folders, or choose **Unknown Studio** for videos still awaiting identification of their studio. Search the active library by title, filename, studio, performer, or tag. The sidebar gives you direct access to favorites, frequently watched videos, and a playlist overview. It also remembers the five most recently opened playlists in each library.
+Vieweroo opens the last-used library in its studio overview. Open a studio to see its videos from across the library's folders, or choose **Unknown Studio** for videos still awaiting identification of their studio. Search or filter the open collection in place. During a library session, return to any collection with its applied filters, search and place intact. Find studios by name, platform or account handle, and mark favorite studios within each library. The Favorites shelf contains saved videos. Video collections search their own titles, filenames, studios, performers and tags. Combine the search with multiple local quality tiers, studios and tags, and see the matching video count before applying the selection. The sidebar gives you direct access to Favorites, Watch History and Playlists. It also remembers the five most recently opened playlists in each library.
 
 For each matched video, the detail view shows the PRDB title, studio, and cast, with performer portraits where PRDB provides them. Select a portrait to see other videos in your library featuring that performer. Use Back to retrace your steps through videos, performers, studios and search results. Returning to a collection restores your place and highlights the tile you opened.
 
 Even a video with no PRDB title match can appear under its studio. Vieweroo recognizes studio folders inside a selected source, including the source folder itself. In a filename it looks for a distinctive studio name at the beginning, followed by a separator. Common words such as “Black” and mentions in the middle of a title provide too little evidence for an automatic assignment.
 
-You can correct the studio directly on the video. Vieweroo keeps your choice across scans until you select **Use Automatic Studio**.
+From the studio overview, you can create a named studio in the active library before assigning any videos to it. You can rename your own studios there, including studios with videos already assigned. If you delete one, its videos return to automatic studio assignment. PRDB studios stay available for selection. Creator accounts appear under their publishing platform. Choose a linked OnlyFans or Fansly handle to open the public profile. On a video, choose one studio from the list or create one as you assign it. Vieweroo keeps your choice across scans until you remove the studio chip to restore automatic assignment.
 
 The interface should feel familiar on a Mac and invite you to browse. Large thumbnails and legible titles help you choose what to watch. After playback, you return to your previous place in the studio view, search results, or playlist.
 
@@ -46,7 +46,9 @@ Watching the same minute five times in a loop counts as one session, five minute
 
 Short confirmations appear at the lower right when you save changes. Playback problems and library availability stay visible where you can address them.
 
-Alongside your viewing history, you can make your own selections. Save a video to Favorites for quick access. Independently, give it a thumbs up or thumbs down to record whether you liked it. Custom tags let you search the collection using your own vocabulary. Playlists let you arrange videos from different studios in the order you want to watch them.
+Alongside your viewing history, you can make your own selections. Save a video to Favorites for quick access. Independently, give it a thumbs up or thumbs down to record whether you liked it. Custom tags let you search the collection using your own vocabulary. Playlists let you arrange videos from different studios in the order you want to watch them. Open the settings gear in the playlist overview to create, rename or delete playlists.
+
+In Favorites and Liked, select multiple videos to remove the current mark, apply the other mark, add tags or append to a playlist. In Watch History, select videos to favorite, like, tag or append to a playlist. You can also clear their viewing history while keeping their resume positions. Select all matches in a filtered collection and undo a batch in one step.
 
 How you find something again depends on what you remember. A title you saved is in Favorites. Videos you liked can be viewed together. A scene you often replay is accessible through your viewing history, even if you never marked it.
 
@@ -77,7 +79,7 @@ These ideas are planned for after the minimum viable product (MVP). During devel
 
 ### Maintaining the collection
 
-8. **Reconnect moved files.** When you rename a video or move its folder, Vieweroo reconnects the file to its existing library entry so its bookmarks, ratings, and history follow it.
+8. **Reconnect moved files.** When you rename a video outside Vieweroo or move its folder, Vieweroo reconnects the file to its existing library entry so its bookmarks, ratings, and history follow it.
 9. **Multiple versions of a title.** Choose between versions such as 1080p and 4K from a single title entry. If the 4K copy is on a disconnected drive, you can play an available local copy.
 10. **PRDB match review.** Review uncertain matches together, with the filename, thumbnail, and suggested PRDB title side by side. You can also revisit a previously matched video to correct its assignment.
 11. **Library backup and restore.** Back up tags, playlists, ratings, bookmarks, and viewing history. When moving to another Mac, restore the library and reconnect it to your existing video folders.
@@ -85,7 +87,7 @@ These ideas are planned for after the minimum viable product (MVP). During devel
 ### Control over viewing data and access
 
 12. **Private playback sessions.** Pause recording for a session. Playback during that session leaves viewing history, watch statistics, and previously saved playback positions untouched.
-13. **Selective history deletion.** Clear viewing data for a particular video or time period while keeping the bookmarks, tags, and playlists you created.
+13. **History deletion by time period.** Clear viewing data for a chosen time period while keeping the bookmarks, tags, and playlists you created.
 14. **Automatic locking.** With PIN protection enabled, you can have Vieweroo lock when you lock your Mac or after an inactivity interval you choose. Active playback counts as use for the inactivity timer.
 
 ### Contributing to PRDB

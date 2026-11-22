@@ -75,8 +75,8 @@ private struct LibraryActivityView: View {
                         if pending > 0 { Text("\(pending) awaiting lookup").foregroundStyle(.secondary) }
                         if model.subscriptionRequired {
                             HStack {
-                                Button("Retry PRDB", action: model.retrySubscription)
-                                Button("Settings…", action: openSettings)
+                                IconActionButton(.refresh, "Retry PRDB", action: model.retrySubscription)
+                                IconActionButton(.manage, "Settings…", action: openSettings)
                             }
                         }
                     }

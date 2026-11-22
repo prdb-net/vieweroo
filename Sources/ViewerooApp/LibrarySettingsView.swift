@@ -10,14 +10,14 @@ struct LibrarySettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
-                Text("Library Settings").font(.largeTitle.bold())
+                Text("Settings").font(.largeTitle.bold())
                 HStack(spacing: VSpace.group) {
                     VStack(alignment: .leading, spacing: VSpace.unit) {
                         Text("Library name").font(.headline)
                         Text(library.name).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Rename…") { renaming = true }
+                    IconActionButton(.edit, "Rename Library…", targetLabel: "Rename Library “\(library.name)”") { renaming = true }
                 }
                 Divider()
                 HStack(spacing: VSpace.group) {
@@ -27,7 +27,7 @@ struct LibrarySettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Manage Folders") { model.browse(.sources) }
+                    IconActionButton(.manage, "Manage Folders") { model.browse(.sources) }
                 }
                 Divider()
                 Button("Delete Library…", role: .destructive) { deleting = true }
@@ -35,6 +35,7 @@ struct LibrarySettingsView: View {
             .frame(maxWidth: 640, alignment: .leading)
             .padding(VSpace.section)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(BrowseScrollAnchor(position: model.visit.scroll))
         }
         .sheet(isPresented: $renaming) {
             NameForm(title: "Rename Library", action: "Rename", name: library.name) { name, onFailure in

@@ -146,6 +146,35 @@ extension Catalog {
                 after = last["id"]
             }
         }
+        migrator.registerMigration("local-video-info-v9") { db in
+            try db.execute(sql: "ALTER TABLE entry ADD COLUMN videoInfo BLOB")
+        }
+        migrator.registerMigration("custom-studios-v10", migrate: migrateStudioNames)
+        migrator.registerMigration("creator-accounts-v11") { db in
+            try db.execute(sql: """
+                ALTER TABLE studio ADD COLUMN creatorData BLOB;
+                ALTER TABLE entry ADD COLUMN manualSiteID TEXT;
+                """)
+            let rows = try Row.fetchCursor(db, sql: "SELECT matchData, candidateData FROM entry WHERE matchData IS NOT NULL OR candidateData IS NOT NULL")
+            let decoder = JSONDecoder()
+            while let row = try rows.next() {
+                if let data: Data = row["matchData"] {
+                    try rememberSite(db, decoder.decode(PRDBTitle.self, from: data).studio)
+                }
+                if let data: Data = row["candidateData"] {
+                    for title in try decoder.decode([PRDBTitle].self, from: data) { try rememberSite(db, title.studio) }
+                }
+            }
+        }
+        migrator.registerMigration("studio-favorites-v12") { db in
+            try db.execute(sql: """
+                CREATE TABLE studioFavorite (
+                    libraryID INTEGER NOT NULL REFERENCES library ON DELETE CASCADE,
+                    studioID TEXT NOT NULL,
+                    PRIMARY KEY(libraryID, studioID)
+                )
+                """)
+        }
         return migrator
     }
 }

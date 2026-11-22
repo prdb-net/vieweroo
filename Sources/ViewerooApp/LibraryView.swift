@@ -2,21 +2,22 @@ import SwiftUI
 import ViewerooCore
 
 private enum EditSheet: String, Identifiable {
-    case library, playlist, settings
+    case library, playlists, settings, studios, videoFilters
     var id: Self { self }
 }
 
 extension FocusedValues {
-    @Entry var showAppSettings: Binding<Bool>?
     @Entry var librarySearch: Binding<Bool>?
+    @Entry var showAppSettings: Binding<Bool>?
 }
 
 struct LibraryView: View {
     @Bindable var model: LibraryModel
     @StateObject private var playerWindow = PlayerWindow()
+    @State private var bulkSelection: Set<Int64>?
+    @State private var searchFocused = false
     @State private var sheet: EditSheet?
     @State private var columns = NavigationSplitViewVisibility.automatic
-    @State private var searchPresented = false
 
     var body: some View {
         ZStack {
@@ -41,13 +42,14 @@ struct LibraryView: View {
         .sheet(item: $sheet) { kind in
             switch kind {
             case .settings: GeneralSettingsView(model: model)
-            case .library, .playlist:
-                NameForm(title: kind == .library ? "New Library" : "New Playlist") { name, onFailure in
-                    if kind == .library { return model.createLibrary(name, onFailure: onFailure) }
-                    guard let id = model.libraryID else { return false }
-                    return model.change("Playlist created", onFailure: onFailure) { db in
-                        model.browse(.playlist(try db.createPlaylist(libraryID: id, name: name).id))
-                    }
+            case .videoFilters: VideoFilterSheet(model: model)
+            case .studios:
+                if let id = model.libraryID { StudioDirectoryView(model: model, libraryID: id) }
+            case .playlists:
+                if let id = model.libraryID { PlaylistManagerView(model: model, libraryID: id) }
+            case .library:
+                NameForm(title: "New Library") { name, onFailure in
+                    model.createLibrary(name, onFailure: onFailure)
                 }
             }
         }
@@ -67,38 +69,50 @@ struct LibraryView: View {
                 ProgressView("Opening library…")
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Button(action: model.goBack) {
-                        Label("Back", systemImage: "chevron.left")
-                    }
-                    .keyboardShortcut("[", modifiers: .command, localization: .custom)
-                    .background {
-                        if model.detailID != nil {
-                            // SwiftUI assigns one shortcut per button. Keep Escape available on detail pages.
-                            Button("Back", action: model.goBack)
-                                .keyboardShortcut(.escape, modifiers: [])
-                                .focusable(false)
-                                .opacity(0)
-                                .accessibilityHidden(true)
-                                .allowsHitTesting(false)
+                    HStack(spacing: VSpace.tight) {
+                        backButton
+                        Spacer()
+                        if model.detailID == nil, let prompt = model.shelf.searchPrompt {
+                            CollectionSearchField(prompt: prompt, text: Binding(get: { model.query }, set: model.search),
+                                                  focusChanged: { searchFocused = $0 })
+                                .frame(maxWidth: 230)
+                            if model.shelf.isVideoCollection {
+                                FiltersButton(active: !model.visit.filters.isEmpty) { sheet = .videoFilters }
+                            } else {
+                                CollectionFilterButton(shelf: model.shelf, platforms: model.shelf == .studios ? model.studioPlatforms : [],
+                                                       filters: model.filterBinding)
+                                    .id(model.shelf)
+                            }
+                            if [.favorites, .liked, .frequent].contains(model.shelf), bulkSelection == nil {
+                                IconActionButton(.edit, "Edit \(model.collectionTitle)") {
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    bulkSelection = []
+                                }
+                                .disabled(model.visibleVideos.isEmpty)
+                            }
+                            if model.shelf == .studios {
+                                manageButton("Manage Studios", sheet: .studios)
+                            } else if model.shelf == .playlists {
+                                manageButton("Manage Playlists", sheet: .playlists)
+                            }
                         }
                     }
-                    .help("Go Back (⌘[)")
-                    .disabled(!model.canGoBack)
-                    .padding(.leading, VSpace.section)
-                    .padding(.top, VSpace.section)
+                    .padding(.horizontal, VSpace.section)
+                    .padding(.top, VSpace.control)
 
                     Group {
                         if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
                             EntryView(model: model, entry: entry, window: playerWindow)
-                        } else if model.shelf == .playlists && model.query.isEmpty {
-                            PlaylistsView(model: model) { sheet = .playlist }
-                        } else if model.shelf == .settings && model.query.isEmpty,
+                        } else if model.shelf == .playlists {
+                            PlaylistsView(model: model)
+                        } else if model.shelf == .settings,
                                   let library = model.libraries.first(where: { $0.id == model.libraryID }) {
                             LibrarySettingsView(model: model, library: library)
-                        } else if model.shelf == .sources && model.query.isEmpty {
+                        } else if model.shelf == .sources {
                             SourcesView(model: model)
                         } else {
-                            BrowserView(model: model)
+                            BrowserView(model: model, selection: $bulkSelection,
+                                        selectionShortcuts: !searchFocused && sheet == nil)
                         }
                     }
                     .id(model.visit.id)
@@ -107,16 +121,40 @@ struct LibraryView: View {
             }
         }
         .overlay(alignment: .top) { Divider().allowsHitTesting(false).accessibilityHidden(true) }
-        .searchable(text: Binding(get: { model.query }, set: { model.search($0) }),
-                    isPresented: $searchPresented, placement: .sidebar, prompt: "Search library")
-        .focusedSceneValue(\.librarySearch, Binding(get: { searchPresented }, set: { present in
-            if present { columns = .all }
-            searchPresented = present
-        }))
-        .onChange(of: model.libraryID) { sheet = nil }
+        .onChange(of: model.shelf) {
+            bulkSelection = nil
+            if sheet == .videoFilters { sheet = nil }
+        }
+        .onChange(of: model.detailID) { bulkSelection = nil }
+        .onChange(of: model.libraryID) { sheet = nil; bulkSelection = nil }
         .toolbar {
             ToolbarItem(placement: .navigation) { libraryMenu }
         }
+    }
+
+    private func manageButton(_ title: String, sheet destination: EditSheet) -> some View {
+        IconActionButton(.manage, title) { sheet = destination }
+    }
+
+    private var backButton: some View {
+        Button(action: model.goBack) {
+            Label("Back", systemImage: "chevron.left")
+        }
+        .labelStyle(.iconOnly)
+        .keyboardShortcut("[", modifiers: .command, localization: .custom)
+        .background {
+            if model.detailID != nil {
+                // SwiftUI assigns one shortcut per button. Keep Escape available on detail pages.
+                Button("Back", action: model.goBack)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .focusable(false)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+            }
+        }
+        .help("Go Back (⌘[)")
+        .disabled(!model.canGoBack)
     }
 
     private var libraryMenu: some View {
@@ -147,9 +185,9 @@ struct LibraryView: View {
                     Label("All Videos", systemImage: "film.stack").tag(Shelf.all)
                     Label("Favorites", systemImage: "heart").tag(Shelf.favorites)
                     Label("Liked", systemImage: "hand.thumbsup").tag(Shelf.liked)
-                    Label("Frequently Watched", systemImage: "clock.arrow.circlepath").tag(Shelf.frequent)
+                    Label("Watch History", systemImage: "clock.arrow.circlepath").tag(Shelf.frequent)
                     Label("Playlists", systemImage: "list.and.film").tag(Shelf.playlists)
-                    Label("Library Settings", systemImage: "gearshape").tag(Shelf.settings)
+                    Label("Settings", systemImage: "gearshape").tag(Shelf.settings)
                 }
                 if !model.recentPlaylists.isEmpty {
                     Section("Recent Playlists") {
@@ -170,8 +208,8 @@ struct LibraryView: View {
                     Button { model.lock() } label: { Label("Lock Vieweroo", systemImage: "lock").labelStyle(.iconOnly) }
                         .buttonStyle(.plain).help("Lock Vieweroo (⇧⌘L)")
                 }
-                Button { model.refresh() } label: { Label("Refresh Library", systemImage: "arrow.clockwise").labelStyle(.iconOnly) }
-                    .buttonStyle(.plain).disabled(model.libraryID == nil || model.scanBusy).help("Refresh Library")
+                IconActionButton(.refresh, "Refresh Library") { model.refresh() }
+                    .buttonStyle(.plain).disabled(model.libraryID == nil || model.scanBusy)
             }.padding(VSpace.group)
         }
     }

@@ -110,6 +110,11 @@ def generate(root):
             directory = root / "Media" / studio
             directory.mkdir(parents=True, exist_ok=True)
             site = {"id": identifier("studios", studio), "title": studio}
+            platforms = {"Copper Finch": ("OnlyFans", "vieweroo_demo_finch"), "Aster Relay": ("Fansly", "vieweroo_demo_aster")}
+            if studio in platforms:
+                platform, handle = platforms[studio]
+                site.update(platformId=identifier("platforms", platform), platformKey=platform.lower(),
+                            platformTitle=platform, accountHandle=handle)
             for slot, title in enumerate(titles):
                 index = 5 * studio_index + slot
                 suffix = ["mp4", "mp4", "mov", "mp4", "m4v"][slot]

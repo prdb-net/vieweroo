@@ -1,7 +1,24 @@
 import SwiftUI
+import ViewerooCore
+
+// API labels and portraits may change between two links to the same collection.
+enum CollectionKey: Hashable {
+    case shelf(Shelf), studio(String), performer(String)
+
+    init(_ shelf: Shelf) {
+        switch shelf {
+        case let .studio(name, siteID):
+            self = .studio(StudioOption(name: name, isCustom: false, siteID: siteID).id)
+        case let .performer(person):
+            self = .performer(person.id)
+        default:
+            self = .shelf(shelf)
+        }
+    }
+}
 
 enum BrowseTile: Hashable {
-    case studio(String), video(Int64), performer(String), playlist(Int64)
+    case studio(String, siteID: String? = nil), video(Int64), performer(String), playlist(Int64)
 }
 
 @MainActor
@@ -9,11 +26,30 @@ struct BrowseVisit: Identifiable {
     let id = UUID()
     var shelf: Shelf = .studios
     var query = ""
+    var filters = CollectionFilters()
     var detailID: Int64?
     var selectedTile: BrowseTile?
-    var detailsExpanded = false
     let castScroll = BrowseScrollPosition()
-    let scroll = BrowseScrollPosition()
+    private(set) var scroll = BrowseScrollPosition()
+
+    // A direct revisit starts a new history entry with its own scroll attachment.
+    func reopened(on destination: Shelf) -> BrowseVisit {
+        BrowseVisit(shelf: destination, query: query, filters: filters, selectedTile: selectedTile,
+                    scroll: BrowseScrollPosition(origin: scroll.origin))
+    }
+
+    mutating func renameStudio(_ name: String, to newName: String) {
+        let oldID = StudioOption(name: name, isCustom: true).id
+        if filters.studios.removeValue(forKey: oldID) != nil {
+            filters.studios[StudioOption(name: newName, isCustom: true).id] = newName
+        }
+        if case let .studio(current, nil) = shelf, current.caseInsensitiveCompare(name) == .orderedSame {
+            shelf = .studio(newName)
+        }
+        if case let .studio(current, nil) = selectedTile, current.caseInsensitiveCompare(name) == .orderedSame {
+            selectedTile = .studio(newName)
+        }
+    }
 }
 
 // ScrollViewReader can reveal a tile, but a tall row may be partly offscreen.
@@ -21,7 +57,9 @@ struct BrowseVisit: Identifiable {
 @MainActor
 final class BrowseScrollPosition {
     weak var view: NSScrollView?
-    private(set) var origin = NSPoint.zero
+    private(set) var origin: NSPoint
+
+    init(origin: NSPoint = .zero) { self.origin = origin }
 
     func save() {
         if let view { origin = view.contentView.bounds.origin }
@@ -57,7 +95,9 @@ private struct ScrollAttachment: NSViewRepresentable {
                 guard let self, let scroll = enclosingScrollView, window != nil else { return }
                 position.view = scroll
                 if position.origin != .zero {
-                    scroll.contentView.scroll(to: position.origin)
+                    let clip = scroll.contentView
+                    let target = NSRect(origin: position.origin, size: clip.bounds.size)
+                    clip.scroll(to: clip.constrainBoundsRect(target).origin)
                     scroll.reflectScrolledClipView(scroll.contentView)
                 }
             }

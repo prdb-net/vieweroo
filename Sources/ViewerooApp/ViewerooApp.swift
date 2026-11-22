@@ -41,7 +41,7 @@ struct ViewerooApp: App {
                     .disabled(model.phase != .ready || showAppSettings == nil)
             }
             CommandGroup(after: .sidebar) {
-                Button("Search Library") { librarySearch = true }
+                Button("Find in Collection") { librarySearch = true }
                     .keyboardShortcut("f")
                     .disabled(model.phase != .ready || model.libraryID == nil || librarySearch == nil)
             }
@@ -123,7 +123,7 @@ struct RootView: View {
                 LibraryView(model: model)
                     .overlay(alignment: .bottomTrailing) {
                         if let notice = model.notice {
-                            ActionNoticeView(notice: notice) {
+                            ActionNoticeView(notice: notice, onUndo: { model.undoBulkEdit(notice) }) {
                                 if model.notice?.id == notice.id { model.notice = nil }
                             }
                             .id(notice.id)

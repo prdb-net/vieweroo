@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 public struct CatalogLibrary: Identifiable, Hashable, Sendable {
     public let id: Int64
@@ -44,8 +45,13 @@ public enum CatalogAvailability: String, Sendable {
 public enum CatalogError: LocalizedError {
     case staleScan, invalidPlaylistOrder, invalidValue, unavailableFolder
 
+    case duplicateStudio, invalidStudioName, studioUnavailable
+
     public var errorDescription: String? {
         switch self {
+        case .duplicateStudio: "A studio with this name already exists."
+        case .invalidStudioName: "Enter a studio name other than Unknown Studio."
+        case .studioUnavailable: "Only your own studios can be changed."
         case .staleScan: "This scan was superseded."
         case .invalidPlaylistOrder: "The playlist changed. Reopen it and try again."
         case .invalidValue: "The supplied value is invalid."
@@ -56,6 +62,7 @@ public enum CatalogError: LocalizedError {
 
 public final class Catalog: Sendable {
     let database: DatabaseQueue
+    let activeScans = OSAllocatedUnfairLock(initialState: 0)
 
     public init(path: String) throws {
         database = try DatabaseQueue(path: path)
@@ -188,13 +195,6 @@ public final class Catalog: Sendable {
     public func setFavorite(entryID: Int64, value: Bool) throws {
         try database.write { db in
             try db.execute(sql: "UPDATE entry SET favorite = ? WHERE id = ?", arguments: [value, entryID])
-        }
-    }
-
-    public func setManualStudio(entryID: Int64, name: String?) throws {
-        let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        try database.write { db in
-            try db.execute(sql: "UPDATE entry SET manualStudio = NULLIF(?, '') WHERE id = ?", arguments: [name, entryID])
         }
     }
 

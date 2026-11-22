@@ -41,13 +41,21 @@ struct ReactionButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activation = 0
 
+    private var helpText: String {
+        switch reaction {
+        case .favorite: isSelected ? "Remove from Favorites" : "Add to Favorites"
+        case .like: isSelected ? "Clear Like" : "Like Video"
+        case .dislike: isSelected ? "Clear Dislike" : "Dislike Video"
+        }
+    }
+
     var body: some View {
         let tint = reaction.tint(in: scheme)
         Button {
             let selecting = !isSelected
             if save(), selecting, !reduceMotion { activation += 1 }
         } label: {
-            HStack(spacing: 5) {
+            Group {
                 let glyph = Image(systemName: reaction.symbol + (isSelected ? ".fill" : ""))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(isSelected ? tint : Color.primary)
@@ -78,13 +86,13 @@ struct ReactionButton: View {
                         }
                     }
                 }
-                Text(reaction.rawValue)
             }
             .padding(.horizontal, VSpace.tight)
             .frame(minHeight: 26)
             .contentShape(.rect)
         }
         .buttonStyle(ReactionButtonStyle(tint: isSelected ? tint : nil))
+        .help(helpText)
         .accessibilityLabel(reaction.rawValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

@@ -9,9 +9,11 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let modified: Double
     public let hash: String?
     public let needsLookup: Bool
+    /// A manual title decision, including an explicit choice to leave the entry unmatched.
     public let confirmed: Bool
     public let match: PRDBTitle?
     public let candidates: [PRDBTitle]
+    public let manualSiteID: String?
     public let manualStudio: String?
     public let detectedStudio: String?
     public let favorite: Bool
@@ -21,6 +23,7 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let playCount: Int
     public let watchTime: Double
     public let duration: Double?
+    public let videoInfo: VideoInfo?
     public let weightedPlays: Double
     public let availability: CatalogAvailability
     public let playbackFailure: String?
@@ -39,6 +42,7 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         hash = row["hash"]
         favorite = row["favorite"]
         rating = row["rating"]
+        manualSiteID = row["manualSiteID"]
         manualStudio = row["manualStudio"]
         detectedStudio = row["detectedStudio"]
         resume = row["resume"]
@@ -51,6 +55,8 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         availability = CatalogAvailability(rawValue: row["availability"]) ?? .missing
         playbackFailure = row["playbackFailure"]
         let decoder = JSONDecoder()
+        let infoData: Data? = row["videoInfo"]
+        videoInfo = try infoData.map { try decoder.decode(VideoInfo.self, from: $0) }
         let titleData: Data? = row["matchData"]
         match = try titleData.map { try decoder.decode(PRDBTitle.self, from: $0) }
         let candidateData: Data? = row["candidateData"]
@@ -64,6 +70,8 @@ public struct LibrarySnapshot: Sendable {
     public let libraries: [CatalogLibrary]
     public let sources: [CatalogSource]
     public let entries: [CatalogEntry]
+    public let favoriteStudioIDs: Set<String>
+    public let studioOptions: [StudioOption]
     public let playlists: [CatalogPlaylist]
 }
 
@@ -105,10 +113,25 @@ extension Catalog {
     /// Read a consistent browsing snapshot on the database queue, including metadata decoding.
     public func snapshot(libraryID: Int64?) async throws -> LibrarySnapshot {
         try await database.read { db in
-            try LibrarySnapshot(libraries: Self.fetchLibraries(db),
+            let options = try libraryID.map { try Self.studioOptions(db, libraryID: $0) } ?? []
+            return try LibrarySnapshot(libraries: Self.fetchLibraries(db),
                                 sources: libraryID.map { try Self.fetchSources(db, libraryID: $0) } ?? [],
                                 entries: libraryID.map { try Self.fetchEntries(db, libraryID: $0) } ?? [],
+                                favoriteStudioIDs: libraryID.map {
+                                    try Self.favoriteStudioIDs(db, libraryID: $0, options: options)
+                                } ?? [],
+                                studioOptions: options,
                                 playlists: libraryID.map { try Self.fetchPlaylists(db, libraryID: $0) } ?? [])
+        }
+    }
+
+    public func storeVideoInfo(_ info: VideoInfo, for entry: CatalogEntry) async throws {
+        let data = try JSONEncoder().encode(info)
+        try await database.write { db in
+            try Task.checkCancellation()
+            try db.execute(sql: """
+                UPDATE entry SET videoInfo = ? WHERE id = ? AND path = ? AND fileSize = ? AND modified = ?
+                """, arguments: [data, entry.id, entry.path, entry.fileSize, entry.modified])
         }
     }
 
@@ -126,6 +149,7 @@ extension Catalog {
             try db.execute(sql: """
                 UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ? AND needsLookup
                 """, arguments: [name, entryID, fileSize, modified])
+            if db.changesCount > 0 { try Self.rememberStudio(db, name) }
         }
     }
 
@@ -151,25 +175,48 @@ extension Catalog {
                 UPDATE entry SET matchData = ?, candidateData = ?, detectedStudio = ?, needsLookup = 0
                 WHERE id = ? AND fileSize = ? AND modified = ? AND NOT confirmed
                 """, arguments: [matchData, candidateData, result.studio?.name, entryID, fileSize, modified])
+            if db.changesCount > 0 {
+                try Self.rememberStudio(db, result.studio?.name)
+                try Self.rememberSite(db, result.autoTitle?.studio)
+                for title in result.candidates { try Self.rememberSite(db, title.studio) }
+            }
         }
     }
 
-    public func confirmMatch(entryID: Int64, title: PRDBTitle) throws {
-        let data = try JSONEncoder().encode(title)
+    public func confirmMatch(entryID: Int64, title: PRDBTitle?) throws {
+        let data = try title.map { try JSONEncoder().encode($0) }
         try database.write { db in
             try db.execute(sql: "UPDATE entry SET matchData = ?, confirmed = 1, needsLookup = 0 WHERE id = ?",
                            arguments: [data, entryID])
+            guard db.changesCount == 1 else { throw CatalogError.invalidValue }
+            try Self.rememberSite(db, title?.studio)
         }
     }
 
     public func saveStudios(_ studios: [PRDBStudio]) throws {
         try database.write { db in
             for studio in studios {
-                try db.execute(sql: """
-                    INSERT INTO studio(id,name) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name
-                    """, arguments: [studio.id, studio.name])
+                try Self.saveSite(db, studio)
             }
         }
+    }
+
+    static func rememberSite(_ db: Database, _ studio: PRDBStudio?) throws {
+        guard let studio else { return }
+        try rememberStudio(db, studio.name)
+        if studio.creator != nil { try saveSite(db, studio) }
+        else {
+            // A compact identify response can omit the platform of a known account.
+            try db.execute(sql: "INSERT OR IGNORE INTO studio(id,name) VALUES (?,?)", arguments: [studio.id, studio.name])
+        }
+    }
+
+    private static func saveSite(_ db: Database, _ studio: PRDBStudio) throws {
+        let data = try studio.creator.map { try JSONEncoder().encode($0) }
+        try db.execute(sql: """
+            INSERT INTO studio(id,name,creatorData) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name, creatorData = excluded.creatorData
+            """, arguments: [studio.id, studio.name, data])
     }
 
     public func studios() throws -> [PRDBStudio] {
@@ -183,7 +230,11 @@ extension Catalog {
         """
 
     static func fetchStudios(_ db: Database) throws -> [PRDBStudio] {
-        try Row.fetchAll(db, sql: "SELECT id,name FROM studio ORDER BY name COLLATE NOCASE")
-            .map { PRDBStudio(id: $0["id"], name: $0["name"]) }
+        try Row.fetchAll(db, sql: "SELECT * FROM studio ORDER BY name COLLATE NOCASE").map { row in
+            // The v8 migration reads the directory before creatorData is introduced.
+            let data: Data? = row.hasColumn("creatorData") ? row["creatorData"] : nil
+            return try PRDBStudio(id: row["id"], name: row["name"],
+                                  creator: data.map { try JSONDecoder().decode(CreatorAccount.self, from: $0) })
+        }
     }
 }

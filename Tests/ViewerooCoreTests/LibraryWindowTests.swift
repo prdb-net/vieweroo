@@ -53,7 +53,7 @@ import Testing
 
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 500),
                           styleMask: [.borderless], backing: .buffered, defer: false)
-    window.contentView = NSHostingView(rootView: BrowserView(model: model))
+    window.contentView = NSHostingView(rootView: BrowserView(model: model, selection: .constant(nil), selectionShortcuts: false))
     window.orderBack(nil)
     defer { window.orderOut(nil) }
     let deadline = ContinuousClock.now + .seconds(3)

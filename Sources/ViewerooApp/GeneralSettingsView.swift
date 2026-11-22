@@ -15,15 +15,15 @@ struct GeneralSettingsView: View {
             Text("Settings").font(.title2.bold())
             LabeledContent("PIN protection") {
                 Text(model.pinEnabled ? "On" : "Off").foregroundStyle(.secondary)
-                Button(model.pinEnabled ? "Manage PIN…" : "Set PIN…") { editor = .pin }
+                IconActionButton(.edit, model.pinEnabled ? "Manage PIN…" : "Set PIN…") { editor = .pin }
             }
             Divider()
-            LabeledContent("PRDB access") {
-                Button("Change API Key…") { editor = .key }
+            LabeledContent("PRDB API key") {
+                IconActionButton(.edit, "Change API Key…") { editor = .key }
             }
             if let status = model.networkStatus {
                 Text(status).font(.callout).foregroundStyle(.secondary)
-                if model.subscriptionRequired { Button("Retry PRDB", action: model.retrySubscription) }
+                if model.subscriptionRequired { IconActionButton(.refresh, "Retry PRDB", action: model.retrySubscription) }
             }
             HStack {
                 Spacer()

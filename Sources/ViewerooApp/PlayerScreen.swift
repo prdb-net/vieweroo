@@ -98,6 +98,7 @@ struct PlayerScreen: View {
                 window.leavePlayer()
                 model.goBack()
             } label: { Label("Back", systemImage: "chevron.left") }
+            .labelStyle(.iconOnly)
             .help("Return to the library")
             Text(model.playback.title)
                 .font(.headline).lineLimit(1).truncationMode(.tail)

@@ -34,7 +34,8 @@ final class PlayerController: ObservableObject {
     private let makeMediaServer: (URL) throws -> AirPlayMediaServer
     private var seekID: UUID?
     @Published private(set) var wantsPlayback = false
-    private var ready = false
+    private(set) var ready = false
+    let recordedInterval = PassthroughSubject<Int64, Never>()
     private var audibleVolume: Float = 1
 
     init(makeMediaServer: @escaping (URL) throws -> AirPlayMediaServer = { try AirPlayMediaServer(movie: $0) }) {
@@ -49,7 +50,10 @@ final class PlayerController: ObservableObject {
                 try catalog.setDuration(duration, for: entry)
             }
             return try catalog.beginSession(entryID: id)
-        }, append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
+        }, append: { [weak self] session, start, end in
+            try catalog.recordInterval(sessionID: session, start: start, end: end)
+            self?.recordedInterval.send(id)
+        },
            resume: { try catalog.setResume(entryID: id, seconds: $0) })
         open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory, history: history)
         reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
@@ -70,6 +74,18 @@ final class PlayerController: ObservableObject {
             }
         }
         installItem(url: url, startAt: startAt)
+    }
+
+    func sourceRenamed(from oldURL: URL, to entry: CatalogEntry, previewDirectory: URL) {
+        guard sourceURL == oldURL else { return }
+        sourceURL = entry.url
+        title = entry.title
+        self.previewDirectory = previewDirectory
+        // The active HTTP stream holds its own open file descriptor.
+        if mediaServer == nil {
+            sample(playing: false)
+            installItem(url: entry.url, startAt: handoffPosition)
+        }
     }
 
     func externalPlaybackDidEnd() {
