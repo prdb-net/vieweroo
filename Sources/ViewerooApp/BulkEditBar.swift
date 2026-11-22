@@ -19,11 +19,11 @@ struct BulkEditBar: View {
                 HStack(spacing: VSpace.tight) {
                     selectionControls(count: ids.count)
                     Spacer()
-                    editActions(ids).fixedSize()
+                    HStack(spacing: VSpace.tight) { editActions(ids) }.fixedSize()
                 }
                 VStack(alignment: .leading, spacing: VSpace.tight) {
                     HStack { selectionControls(count: ids.count); Spacer() }
-                    editActions(ids)
+                    ChipRows { editActions(ids) }
                 }
             }
             .padding(.horizontal, VSpace.section)
@@ -59,9 +59,12 @@ struct BulkEditBar: View {
         .fixedSize()
     }
 
+    @ViewBuilder
     private func editActions(_ ids: [Int64]) -> some View {
-        HStack(spacing: VSpace.tight) {
-            Group {
+        Group {
+            if model.shelf == .all {
+                additionalActions(ids)
+            } else {
                 switch model.shelf {
                 case .favorites:
                     Button("Remove from Favorites") {
@@ -76,27 +79,33 @@ struct BulkEditBar: View {
                 default:
                     EmptyView()
                 }
+                Menu("More") { additionalActions(ids) }
+                    .fixedSize()
             }
-            .disabled(ids.isEmpty)
-            Menu("More") {
-                if model.shelf != .favorites {
-                    Button("Add to Favorites") { apply(.favorite(true), to: ids) }
-                }
-                if model.shelf != .liked {
-                    Button("Like Videos") { apply(.rating(1), to: ids) }
-                }
-                Menu("Add to Playlist") {
-                    ForEach(model.playlists) { playlist in
-                        Button(playlist.name) { apply(.addToPlaylist(playlist.id), to: ids) }
-                    }
-                }
-                .disabled(model.playlists.isEmpty)
-                Button("Add Tags…") { editingTags = true }
-            }
-            .fixedSize()
-            .disabled(ids.isEmpty)
-            Button("Done") { selection = nil }
         }
+        .disabled(ids.isEmpty)
+        Button("Done") { selection = nil }
+    }
+
+    @ViewBuilder
+    private func additionalActions(_ ids: [Int64]) -> some View {
+        if model.shelf != .favorites {
+            Button("Add to Favorites") { apply(.favorite(true), to: ids) }
+        }
+        if model.shelf != .liked {
+            Button("Like Videos") { apply(.rating(1), to: ids) }
+        }
+        if model.shelf == .all {
+            Button("Dislike Videos") { apply(.rating(-1), to: ids) }
+        }
+        Menu("Add to Playlist") {
+            ForEach(model.playlists) { playlist in
+                Button(playlist.name) { apply(.addToPlaylist(playlist.id), to: ids) }
+            }
+        }
+        .fixedSize()
+        .disabled(model.playlists.isEmpty)
+        Button("Add Tags…") { editingTags = true }
     }
 
     @discardableResult
@@ -112,6 +121,7 @@ struct BulkEditBar: View {
         case .favorite(true): text = count > 0 ? "Added \(videos) to Favorites" : "Already in Favorites"
         case .favorite(false): text = "Removed \(videos) from Favorites"
         case .rating(0): text = "Cleared like on \(videos)"
+        case .rating(-1): text = count > 0 ? "Disliked \(videos)" : "Already disliked"
         case .rating: text = count > 0 ? "Liked \(videos)" : "Already liked"
         case .addToPlaylist: text = count > 0 ? "Added \(videos) to playlist" : "Already in playlist"
         case .removeHistory: text = "Removed \(videos) from Watch History"

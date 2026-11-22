@@ -83,7 +83,7 @@ struct LibraryView: View {
                                                        filters: model.filterBinding)
                                     .id(model.shelf)
                             }
-                            if [.favorites, .liked, .frequent].contains(model.shelf), bulkSelection == nil {
+                            if [.all, .favorites, .liked, .frequent].contains(model.shelf), bulkSelection == nil {
                                 IconActionButton(.edit, "Edit \(model.collectionTitle)") {
                                     NSApp.keyWindow?.makeFirstResponder(nil)
                                     bulkSelection = []

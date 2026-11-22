@@ -48,7 +48,7 @@ Short confirmations appear at the lower right when you save changes. Playback pr
 
 Alongside your viewing history, you can make your own selections. Save a video to Favorites for quick access. Independently, give it a thumbs up or thumbs down to record whether you liked it. Custom tags let you search the collection using your own vocabulary. Playlists let you arrange videos from different studios in the order you want to watch them. Open the settings gear in the playlist overview to create, rename or delete playlists.
 
-In Favorites and Liked, select multiple videos to remove the current mark, apply the other mark, add tags or append to a playlist. In Watch History, select videos to favorite, like, tag or append to a playlist. You can also clear their viewing history while keeping their resume positions. Select all matches in a filtered collection and undo a batch in one step.
+In All Videos, select multiple videos to favorite, like, dislike, tag or append them to a playlist. In Favorites and Liked, select multiple videos to remove the current mark, apply the other mark, add tags or append to a playlist. In Watch History, select videos to favorite, like, tag or append to a playlist. You can also clear their viewing history while keeping their resume positions. Select all matches in a filtered collection and undo a batch in one step.
 
 How you find something again depends on what you remember. A title you saved is in Favorites. Videos you liked can be viewed together. A scene you often replay is accessible through your viewing history, even if you never marked it.
 
