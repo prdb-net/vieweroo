@@ -74,7 +74,8 @@ struct LibraryView: View {
                         backButton
                         Spacer()
                         if model.detailID == nil, let prompt = model.shelf.searchPrompt {
-                            CollectionSearchField(prompt: prompt, text: Binding(get: { model.query }, set: model.search),
+                            // An explicit setter avoids a Swift 6.1 compiler crash in release builds.
+                            CollectionSearchField(prompt: prompt, text: Binding(get: { model.query }, set: { model.search($0) }),
                                                   focusChanged: { searchFocused = $0 })
                                 .frame(maxWidth: 230)
                             if model.shelf.isVideoCollection {
