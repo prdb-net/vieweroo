@@ -97,6 +97,7 @@ final class LibraryModel {
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var playbackRefresh: Task<Void, Never>?
     @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
+    @ObservationIgnored private var studioCache: StudioOptionsCache?
     @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
@@ -273,7 +274,7 @@ final class LibraryModel {
         phase = gate
         message = nil; libraryID = nil
         resetNavigation()
-        libraries = []; sources = []; entries = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); orderedIDs = []
+        libraries = []; sources = []; entries = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); studioCache = nil; orderedIDs = []
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }
         }
@@ -310,7 +311,7 @@ final class LibraryModel {
         stopWork()
         libraryID = id
         loadingLibrary = id != nil
-        entries = []; sources = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); orderedIDs = []
+        entries = []; sources = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); studioCache = nil; orderedIDs = []
         resetNavigation()
         if let id { preferences.set(id, forKey: lastLibrary) }
         let initialLoad = reload()
@@ -476,9 +477,10 @@ final class LibraryModel {
                 let revision = editRevision
                 snapshotRequested = false
                 do {
-                    let snapshot = try await catalog.snapshot(libraryID: id)
+                    let snapshot = try await catalog.snapshot(libraryID: id, studios: studioCache)
                     guard session == stamp, !Task.isCancelled else { return }
                     if revision != editRevision { continue }
+                    studioCache = snapshot.studios
                     loadingLibrary = false
                     libraries = snapshot.libraries
                     sources = snapshot.sources
@@ -489,7 +491,7 @@ final class LibraryModel {
                     if availabilityChanged { generatePreviews() }
                     studioCovers = snapshot.studioCovers
                     favoriteStudioIDs = snapshot.favoriteStudioIDs
-                    studioDirectory = StudioDirectory(snapshot.studioOptions)
+                    if snapshot.studioOptionsChanged { studioDirectory = StudioDirectory(snapshot.studioOptions) }
                     tags = snapshot.tags
                     let tagIDs = Set(tags.map(\.id))
                     playlists = snapshot.playlists
@@ -919,7 +921,8 @@ final class LibraryModel {
                         lookupActivity = "Updating studio directory…"
                         let directory = try await client.studios(key: key)
                         try Task.checkCancellation()
-                        try catalog.saveStudios(directory)
+                        // Thousands of sites in one transaction. Keep the main thread free.
+                        try await Task.detached(priority: .utility) { try catalog.saveStudios(directory) }.value
                         directoryUpdated = Date()
                         try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
                         try Task.checkCancellation()

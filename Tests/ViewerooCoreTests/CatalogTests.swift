@@ -232,6 +232,35 @@ final class CatalogTests: XCTestCase {
         XCTAssertNil(damaged.videoInfo)
     }
 
+    func testSnapshotsReuseStudioChoicesUntilTheDirectoryChanges() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        let catalog = fixture.catalog, library = fixture.library.id
+        try catalog.saveStudios([PRDBStudio(id: "site-1", name: "Harbor Lights")])
+        let first = try await catalog.snapshot(libraryID: library)
+        XCTAssertTrue(first.studioOptionsChanged)
+        XCTAssertEqual(first.studioOptions.map(\.name), ["Harbor Lights"])
+
+        let unchanged = try await catalog.snapshot(libraryID: library, studios: first.studios)
+        XCTAssertFalse(unchanged.studioOptionsChanged)
+        XCTAssertEqual(unchanged.studioOptions.map(\.name), ["Harbor Lights"])
+
+        try catalog.createStudio(libraryID: library, name: "Quiet Pier")
+        let custom = try await catalog.snapshot(libraryID: library, studios: unchanged.studios)
+        XCTAssertTrue(custom.studioOptionsChanged)
+        XCTAssertEqual(Set(custom.studioOptions.map(\.name)), ["Harbor Lights", "Quiet Pier"])
+
+        try catalog.saveStudios([PRDBStudio(id: "site-1", name: "Harbor Lights East")])
+        let renamed = try await catalog.snapshot(libraryID: library, studios: custom.studios)
+        XCTAssertTrue(renamed.studioOptionsChanged)
+        XCTAssertTrue(renamed.studioOptions.contains { $0.name == "Harbor Lights East" })
+
+        let other = try catalog.createLibrary(name: "Other")
+        let switched = try await catalog.snapshot(libraryID: other.id, studios: renamed.studios)
+        XCTAssertTrue(switched.studioOptionsChanged)
+        XCTAssertFalse(switched.studioOptions.contains { $0.name == "Quiet Pier" })
+    }
+
     func testPendingMigrationsKeepABackupOfTheCatalog() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

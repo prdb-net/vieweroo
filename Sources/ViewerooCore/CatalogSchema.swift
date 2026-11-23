@@ -212,6 +212,31 @@ extension Catalog {
             // Deleting an entry cascades to its playlist items.
             try db.execute(sql: "CREATE INDEX playlist_item_by_entry ON playlistItem(entryID)")
         }
+        migrator.registerMigration("studio-revision-v18") { db in
+            // Snapshots reuse the studio choices of a library until the directory changes.
+            try db.execute(sql: """
+                CREATE TABLE studioRevision (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL);
+                INSERT INTO studioRevision(id, value) VALUES (1, 0);
+                CREATE TRIGGER studio_insert_revision AFTER INSERT ON studio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER studio_update_revision AFTER UPDATE ON studio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER studio_delete_revision AFTER DELETE ON studio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER metadataStudio_insert_revision AFTER INSERT ON metadataStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER metadataStudio_update_revision AFTER UPDATE ON metadataStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER metadataStudio_delete_revision AFTER DELETE ON metadataStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER customStudio_insert_revision AFTER INSERT ON customStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER customStudio_update_revision AFTER UPDATE ON customStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                CREATE TRIGGER customStudio_delete_revision AFTER DELETE ON customStudio
+                    BEGIN UPDATE studioRevision SET value = value + 1; END;
+                """)
+        }
         return migrator
     }
 }

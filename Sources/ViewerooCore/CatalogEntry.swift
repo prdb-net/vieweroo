@@ -90,8 +90,20 @@ public struct LibrarySnapshot: Sendable {
     public let studioCovers: [String: CatalogCover]
     public let favoriteStudioIDs: Set<String>
     public let studioOptions: [StudioOption]
+    /// The studio choices this snapshot was read with, to pass to the next snapshot.
+    public let studios: StudioOptionsCache?
+    /// False when `studioOptions` came unchanged from the cache passed to `snapshot`.
+    public let studioOptionsChanged: Bool
     public let tags: [CatalogTag]
     public let playlists: [CatalogPlaylist]
+}
+
+/// Studio choices of one library at a directory revision. Reading every PRDB site for
+/// each snapshot is expensive, and the directory changes rarely.
+public struct StudioOptionsCache: Sendable {
+    let libraryID: Int64
+    let revision: Int64
+    let options: [StudioOption]
 }
 
 extension Catalog {
@@ -130,9 +142,21 @@ extension Catalog {
     }
 
     /// Read a consistent browsing snapshot on the database queue, including metadata decoding.
-    public func snapshot(libraryID: Int64?) async throws -> LibrarySnapshot {
+    public func snapshot(libraryID: Int64?, studios cached: StudioOptionsCache? = nil) async throws -> LibrarySnapshot {
         try await database.read { db in
-            let options = try libraryID.map { try Self.studioOptions(db, libraryID: $0) } ?? []
+            var studios: StudioOptionsCache?
+            var changed = true
+            if let libraryID {
+                let revision = try Int64.fetchOne(db, sql: "SELECT value FROM studioRevision") ?? 0
+                if let cached, cached.libraryID == libraryID, cached.revision == revision {
+                    studios = cached
+                    changed = false
+                } else {
+                    studios = StudioOptionsCache(libraryID: libraryID, revision: revision,
+                                                 options: try Self.studioOptions(db, libraryID: libraryID))
+                }
+            }
+            let options = studios?.options ?? []
             return try LibrarySnapshot(libraries: Self.fetchLibraries(db),
                                 sources: libraryID.map { try Self.fetchSources(db, libraryID: $0) } ?? [],
                                 entries: libraryID.map { try Self.fetchEntries(db, libraryID: $0) } ?? [],
@@ -140,7 +164,7 @@ extension Catalog {
                                 favoriteStudioIDs: libraryID.map {
                                     try Self.favoriteStudioIDs(db, libraryID: $0, options: options)
                                 } ?? [],
-                                studioOptions: options,
+                                studioOptions: options, studios: studios, studioOptionsChanged: changed,
                                 tags: libraryID.map { try Self.fetchTags(db, libraryID: $0) } ?? [],
                                 playlists: libraryID.map { try Self.fetchPlaylists(db, libraryID: $0) } ?? [])
         }
