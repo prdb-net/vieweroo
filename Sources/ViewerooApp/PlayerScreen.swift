@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import SwiftUI
 import ViewerooCore
 
@@ -83,9 +84,12 @@ struct PlayerScreen: View {
         }
     }
 
+    /// Pointer movement arrives many times per second. Restart the idle timer at most twice
+    /// a second so the controls and Cinema suggestions are not rebuilt for every event.
     private func revealControls() {
-        idle = false
-        lastActivity = .now
+        if idle { idle = false }
+        let now = Date.now
+        if now.timeIntervalSince(lastActivity) >= 0.5 { lastActivity = now }
     }
 }
 
@@ -137,7 +141,8 @@ private struct CinemaControls: View {
                         .frame(maxWidth: 200, alignment: .leading)
                         .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
 
-                        PlayerTimeline(controller: session.playback, onEditingChanged: { adjustingSlider = $0 })
+                        PlayerTimeline(controller: session.playback, posterPrepared: model.posterPrepared,
+                               onEditingChanged: { adjustingSlider = $0 })
                             .id(entry.id)
                         PlaybackTime(controller: session.playback)
                     }
@@ -344,8 +349,10 @@ private struct AirPlayRoute: NSViewRepresentable {
 
 private struct PlayerTimeline: View {
     @ObservedObject var controller: PlayerController
+    let posterPrepared: PassthroughSubject<URL, Never>
     let onEditingChanged: (Bool) -> Void
     @State private var frames: [PreviewFrame] = []
+    @State private var framesRevision = 0
     @State private var hover: CGFloat?
     @State private var draft = 0.0
     @State private var editing = false
@@ -416,14 +423,21 @@ private struct PlayerTimeline: View {
         }
         .frame(height: 18)
         .task { trackInset = NSSliderCell().knobThickness / 2 }
-        .task(id: controller.previewDirectory) {
+        .onReceive(posterPrepared) { directory in
+            if directory == controller.previewDirectory, frames.isEmpty { framesRevision += 1 }
+        }
+        .task(id: TimelineFramesKey(directory: controller.previewDirectory, revision: framesRevision)) {
             frames = []
             guard let directory = controller.previewDirectory else { return }
+            // Previews published by the library arrive through posterPrepared. Poll slowly as
+            // well, because the player can also outlive the library's preview run.
+            var delay = Duration.seconds(2)
             while !Task.isCancelled {
                 let result = await Task.detached(priority: .utility) { PreviewCache.frames(in: directory) }.value
                 guard !Task.isCancelled else { return }
                 if !result.isEmpty { frames = result; return }
-                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                do { try await Task.sleep(for: delay) } catch { return }
+                delay = min(delay * 2, .seconds(60))
             }
         }
     }
@@ -492,7 +506,11 @@ struct TimelineStill: View {
             if let image { Image(nsImage: image).resizable().scaledToFit() }
         }
         .frame(width: 96, height: 54)
-        .task(id: url) { image = NSImage(contentsOf: url) }
+        .task(id: url) {
+            let bytes = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
+            guard !Task.isCancelled else { return }
+            image = bytes.flatMap(NSImage.init(data:))
+        }
     }
 }
 
@@ -502,4 +520,9 @@ func clockLabel(_ seconds: Double, tenths: Bool = false) -> String {
     let time = value >= 3600 ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
                              : String(format: "%d:%02d", value / 60, value % 60)
     return tenths ? "\(time).\(Int(bounded * 10) % 10)" : time
+}
+
+private struct TimelineFramesKey: Equatable {
+    let directory: URL?
+    let revision: Int
 }

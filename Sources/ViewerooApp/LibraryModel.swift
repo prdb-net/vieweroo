@@ -98,6 +98,8 @@ final class LibraryModel {
     @ObservationIgnored private var playbackRefresh: Task<Void, Never>?
     @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
     @ObservationIgnored private var studioCache: StudioOptionsCache?
+    /// Files whose video track could not be read during this session, by entry, size and date.
+    @ObservationIgnored private var unreadableVideoInfo = Set<String>()
     /// Changes whenever the inputs of `visibleVideos` other than the visit change.
     @ObservationIgnored private(set) var collectionRevision = 0
     @ObservationIgnored var visibleVideosCache: (key: VisibleVideosKey, videos: [CatalogEntry])?
@@ -309,8 +311,8 @@ final class LibraryModel {
         }
     }
 
-    func selectLibrary(_ id: Int64?) {
-        guard phase == .ready, id == nil || id != libraryID else { return }
+    func selectLibrary(_ id: Int64?, reopen: Bool = false) {
+        guard phase == .ready, reopen || id == nil || id != libraryID else { return }
         stopWork()
         libraryID = id
         loadingLibrary = id != nil
@@ -370,14 +372,19 @@ final class LibraryModel {
         navigate(to: next, from: tile)
     }
 
+    /// Show another video in the open detail visit. Back highlights the latest video.
+    private func replaceDetail(with id: Int64) {
+        visit.detailID = id
+        visit.selectedTile = .video(id)
+        if let index = backHistory.indices.last {
+            backHistory[index].selectedTile = .video(id)
+        }
+    }
+
     func openDetail(_ id: Int64) {
         guard id != detailID else { return }
         if detailID != nil {
-            visit.detailID = id
-            visit.selectedTile = .video(id)
-            if let index = backHistory.indices.last {
-                backHistory[index].selectedTile = .video(id)
-            }
+            replaceDetail(with: id)
         } else {
             let next = BrowseVisit(shelf: shelf, query: query, filters: visit.filters, detailID: id,
                                    selectedTile: .video(id), scroll: visit.scroll)
@@ -455,7 +462,8 @@ final class LibraryModel {
             try catalog.deleteCustomStudio(libraryID: libraryID, name: name)
             let key = CollectionKey(.studio(name))
             lastCollections.removeValue(forKey: key)
-            backHistory.removeAll { $0.detailID == nil && CollectionKey($0.shelf) == key }
+            // Detail visits opened from the studio would reopen over an empty collection.
+            backHistory.removeAll { CollectionKey($0.shelf) == key }
         }
     }
 
@@ -583,11 +591,15 @@ final class LibraryModel {
     }
     func deleteLibrary() {
         guard let libraryID else { return }
-        change("Library deleted") { db in
+        let deleted = change("Library deleted") { db in
             stopWork()
             try db.deleteLibrary(libraryID)
             selectLibrary(try db.libraries().first?.id)
         }
+        // Deletion stopped the library's work first. Resume it, or open the next library.
+        guard !deleted, phase == .ready, self.libraryID == libraryID, let catalog else { return }
+        let remaining = (try? catalog.libraries()) ?? libraries
+        selectLibrary(remaining.contains { $0.id == libraryID } ? libraryID : remaining.first?.id, reopen: true)
     }
     func pickSource() {
         guard phase == .ready, libraryID != nil, let window = NSApp.keyWindow, panel == nil else { return }
@@ -618,6 +630,7 @@ final class LibraryModel {
     func refresh() {
         guard phase == .ready, libraryID != nil else { return }
         availabilityTask?.cancel()
+        unreadableVideoInfo.removeAll()
         scanCurrentSources(requested: true)
     }
 
@@ -693,7 +706,9 @@ final class LibraryModel {
                 playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
             }
             secondPlayer?.playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
-            generatePreviews()
+            // The preview directory follows the path. Rebuild only this entry unless a run is active.
+            if previewTask == nil || previews.phase == .idle { generatePreviews(only: [updated]) }
+            else { generatePreviews() }
             notify("File renamed")
         }
     }
@@ -709,8 +724,13 @@ final class LibraryModel {
             var pendingReload = false
             for entry in entries where entry.videoInfo == nil {
                 guard !Task.isCancelled else { return }
+                let identity = "\(entry.id):\(entry.fileSize):\(entry.modified)"
+                guard !unreadableVideoInfo.contains(identity) else { continue }
                 do {
-                    guard let info = try await VideoInfo.read(from: entry.url) else { continue }
+                    guard let info = try await VideoInfo.read(from: entry.url) else {
+                        unreadableVideoInfo.insert(identity)
+                        continue
+                    }
                     try Task.checkCancellation()
                     try await catalog.storeVideoInfo(info, for: entry)
                     guard !Task.isCancelled else { return }
@@ -719,19 +739,23 @@ final class LibraryModel {
                         reload()
                         pendingReload = false
                     }
-                } catch { /* An unreadable file is retried on refresh or next launch. */ }
+                } catch {
+                    // Probe a failing file again after it changes, on refresh or on the next launch.
+                    if !Task.isCancelled { unreadableVideoInfo.insert(identity) }
+                }
             }
             if pendingReload && !Task.isCancelled { reload() }
         }
     }
 
-    private func generatePreviews() {
+    private func generatePreviews(only selection: [CatalogEntry]? = nil) {
         guard let catalog else { return }
         previewTask?.cancel()
         let token = UUID()
         previewToken = token
-        let pending = entries.filter { $0.availability == .available }
-        readVideoInfo(in: pending, catalog: catalog)
+        let pending = (selection ?? entries).filter { $0.availability == .available }
+        // A rename keeps the cached video info. Leave a running probe of the library alone.
+        if selection == nil { readVideoInfo(in: pending, catalog: catalog) }
         previews = PreviewProgress(phase: .checking)
         previewTask = Task(priority: .utility) {
             // Older catalogs may already have preview images but lack movie durations.
@@ -813,7 +837,7 @@ final class LibraryModel {
                 visit.scroll.save()
                 openDetail(entry.id)
             } else if detailID != entry.id {
-                visit.detailID = entry.id
+                replaceDetail(with: entry.id)
             }
             if !playing, secondPlayer?.playback.isAudible == true, !playback.muted { playback.toggleMute() }
         }

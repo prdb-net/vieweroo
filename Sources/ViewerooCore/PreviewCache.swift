@@ -63,7 +63,8 @@ public struct PreviewCache: Sendable {
                 let descriptor = open(child.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_EXLOCK | O_NONBLOCK)
                 guard descriptor >= 0 else { continue }
                 defer { close(descriptor) }
-                try files.removeItem(at: child)
+                // One folder that cannot be removed must not stop the rest of the cleanup.
+                try? files.removeItem(at: child)
             } else if name.utf8.count == 64, name.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) {
                 generations.append(child)
             }
@@ -87,8 +88,7 @@ public struct PreviewCache: Sendable {
         }
         for child in generations where unused.contains(child.lastPathComponent) {
             try Task.checkCancellation()
-            do { try files.removeItem(at: child) }
-            catch let error as CocoaError where error.code == .fileNoSuchFile { continue }
+            try? files.removeItem(at: child)
         }
     }
 

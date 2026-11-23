@@ -52,3 +52,28 @@ import Testing
     try await cache.removeOrphans(in: catalog)
     #expect(!files.fileExists(atPath: shared.path))
 }
+
+@Test func cleanupContinuesPastAFolderThatCannotBeRemoved() async throws {
+    let files = FileManager.default
+    let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+    try files.createDirectory(at: root, withIntermediateDirectories: true)
+    let cache = PreviewCache(root: root.appending(path: "Previews"))
+    let stuck = cache.root.appending(path: ".building-" + UUID().uuidString)
+    let orphan = cache.root.appending(path: String(repeating: "b", count: 64))
+    defer {
+        try? files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stuck.path)
+        try? files.removeItem(at: root)
+    }
+    let catalog = try Catalog(path: root.appending(path: "Catalog.sqlite").path)
+    for url in [stuck, orphan] { try files.createDirectory(at: url, withIntermediateDirectories: true) }
+    try Data([1]).write(to: stuck.appending(path: "frame.jpg"))
+    // A read-only folder keeps its contents, so it cannot be removed.
+    try files.setAttributes([.posixPermissions: 0o555], ofItemAtPath: stuck.path)
+    for url in [stuck, orphan] {
+        try files.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -172_800)], ofItemAtPath: url.path)
+    }
+
+    try await cache.removeOrphans(in: catalog)
+    #expect(files.fileExists(atPath: stuck.path))
+    #expect(!files.fileExists(atPath: orphan.path))
+}
