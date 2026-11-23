@@ -265,12 +265,12 @@ final class PlayerController: ObservableObject {
         catch { self.error = "Viewing history could not be saved. \(error.localizedDescription)" }
     }
 
-    private func didJump() {
-        let time = player.currentTime().seconds
+    private func didJump(to target: Double? = nil, playing: Bool? = nil) {
+        let time = target ?? player.currentTime().seconds
         guard ready, time.isFinite else { return }
         position = max(0, time)
         do {
-            try history?.jumped(to: position, playing: player.timeControlStatus == .playing,
+            try history?.jumped(to: position, playing: playing ?? (player.timeControlStatus == .playing),
                                 clock: ProcessInfo.processInfo.systemUptime)
         } catch { self.error = "The playback position could not be saved. \(error.localizedDescription)" }
     }
@@ -366,7 +366,14 @@ final class PlayerController: ObservableObject {
     }
 
     func stop() {
-        sample(playing: false)
+        if ready, seekID != nil {
+            // The seek target is already the visible position. Save it even though
+            // AVFoundation will not report the completed jump for this item.
+            seekID = nil
+            didJump(to: position, playing: false)
+        } else {
+            sample(playing: false)
+        }
         routeObservation = nil
         detachItemObservers()
         closeMediaServer()

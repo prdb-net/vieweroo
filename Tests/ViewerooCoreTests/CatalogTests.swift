@@ -211,6 +211,62 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(retry.count, 0)
     }
 
+    func testUnreadableCachedMetadataDoesNotHideTheLibrary() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Damaged.mp4")
+        try fixture.add("Intact.mp4", data: Data([9]))
+        try fixture.scan()
+        try fixture.catalog.database.write { db in
+            try db.execute(sql: """
+                UPDATE entry SET matchData = x'7b', candidateData = x'5b7b', videoInfo = x'00'
+                WHERE path LIKE '%Damaged.mp4'
+                """)
+        }
+        let entries = try fixture.catalog.entries(libraryID: fixture.library.id)
+        XCTAssertEqual(entries.map(\.filename), ["Damaged.mp4", "Intact.mp4"])
+        let damaged = try XCTUnwrap(entries.first)
+        XCTAssertNil(damaged.match)
+        XCTAssertEqual(damaged.candidates, [])
+        XCTAssertNil(damaged.videoInfo)
+    }
+
+    func testPendingMigrationsKeepABackupOfTheCatalog() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let backups = base.appendingPathComponent("Backups")
+
+        _ = try Catalog(path: base.appendingPathComponent("Fresh.sqlite").path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backups.path), "A new catalog needs no backup")
+
+        let path = base.appendingPathComponent("Catalog.sqlite").path
+        do {
+            let old = try DatabaseQueue(path: path)
+            try Catalog.migrator.migrate(old, upTo: "catalog-enrichment-v16")
+            try old.write { try $0.execute(sql: "INSERT INTO library(name) VALUES ('Kept')") }
+        }
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        for stamp in ["20000101T000000", "20000102T000000"] {
+            try Data().write(to: backups.appendingPathComponent("Catalog \(stamp) before old.sqlite"), options: [])
+        }
+        let catalog = try Catalog(path: path)
+        XCTAssertEqual(try catalog.libraries().map(\.name), ["Kept"])
+        let names = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(names.count, Catalog.retainedBackups, "\(names)")
+        let copy = try XCTUnwrap(names.first { $0.hasSuffix("before playlist-item-entry-index-v17.sqlite") })
+        XCTAssertTrue(names.contains("Catalog 20000102T000000 before old.sqlite"))
+        let backup = try DatabaseQueue(path: backups.appendingPathComponent(copy).path)
+        try backup.read { db in
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT name FROM library"), ["Kept"])
+            XCTAssertFalse(try db.indexes(on: "playlistItem").contains { $0.name == "playlist_item_by_entry" })
+        }
+
+        _ = try Catalog(path: path)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: backups.path).count, Catalog.retainedBackups,
+                       "A current catalog is not copied again")
+    }
+
     func testUpgradeRechecksCachedStudiosWithoutRepeatingTitleLookups() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

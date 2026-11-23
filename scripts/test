@@ -1,4 +1,5 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift test --arch arm64
+# Extra arguments go to swift test, for example --sanitize=thread or --filter.
+swift test --arch arm64 "$@"

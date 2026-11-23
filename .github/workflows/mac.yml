@@ -11,3 +11,9 @@ jobs:
         run: ./scripts/test
       - name: Package the release ZIP
         run: ./scripts/package
+  thread-sanitizer:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated tests with Thread Sanitizer
+        run: ./scripts/test --sanitize=thread
