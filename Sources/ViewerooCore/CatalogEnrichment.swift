@@ -6,6 +6,28 @@ import UniformTypeIdentifiers
 
 /// Only these fields leave the catalog. Keep paths, playback history and credentials private.
 struct APIEntry: Encodable {
+    let metadata: APIEntryMetadata
+    let fileSize: Int64
+    let osHash: String?
+
+    init(_ entry: CatalogEntry) throws {
+        metadata = try APIEntryMetadata(entry)
+        fileSize = entry.fileSize
+        osHash = entry.hash.flatMap { UInt64($0, radix: 16) }.map { String(format: "%016llx", $0) }
+    }
+
+    private enum FileKeys: String, CodingKey { case fileSize, osHash }
+
+    func encode(to encoder: Encoder) throws {
+        try metadata.encode(to: encoder)
+        var fields = encoder.container(keyedBy: FileKeys.self)
+        try fields.encode(fileSize, forKey: .fileSize)
+        try fields.encodeIfPresent(osHash, forKey: .osHash)
+    }
+}
+
+/// The enrichment revision covers metadata independently of background file identification.
+struct APIEntryMetadata: Encodable {
     let id, libraryID: Int64
     let filename, title: String
     let localTitle, description, studio, manualStudio, siteID, prdbTitleID, posterRevision: String?
@@ -127,10 +149,10 @@ extension Catalog {
         try database.read { try Self.apiEntry($0, library: library, id: id) }
     }
 
-    func apply(_ patch: EnrichmentPatch, library: Int64, id: Int64) throws -> APIEntry {
+    func apply(_ patch: EnrichmentPatch, library: Int64, id: Int64) throws -> APIEntryMetadata {
         try database.write { db in
             let entry = try Self.apiEntry(db, library: library, id: id)
-            guard entry.revision == patch.revision else { throw EnrichmentError.conflict }
+            guard entry.metadata.revision == patch.revision else { throw EnrichmentError.conflict }
             if case let .set(value) = patch.title {
                 try db.execute(sql: "UPDATE entry SET localTitle = ? WHERE id = ?", arguments: [value, id])
             }
@@ -153,7 +175,7 @@ extension Catalog {
                 }
                 try db.execute(sql: "UPDATE entry SET posterRevision = ? WHERE id = ?", arguments: [digest, id])
             }
-            return try Self.apiEntry(db, library: library, id: id)
+            return try Self.apiEntry(db, library: library, id: id).metadata
         }
     }
 

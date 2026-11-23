@@ -17,6 +17,12 @@ Send the key with each request in the `Authorization: Bearer <key>` header. View
 
 Every entry includes `libraryID`, `id`, `filename`, display `title`, `tags` and an opaque `revision`. Optional fields are omitted when empty. These include `localTitle`, `description`, resolved `studio`, `manualStudio`, `siteID`, `prdbTitleID` and `posterRevision`. Offline and missing videos remain discoverable and editable. Use the title and PRDB ID for research and the library and entry IDs to address updates.
 
+### Match a renamed file
+
+Both entry GET endpoints return `fileSize` as an integer number of bytes. When the catalog has an OSHash, they also return `osHash` as a 16-character lowercase hexadecimal string, including leading zeros (for example, `"000000000001ffff"`). If the hash is unavailable, the response omits `osHash` and still includes `fileSize`. Both values come from the catalog, including when the source drive is offline.
+
+To match a renamed file, page through the entries and compare both values with the file’s OSHash and byte count. If several entries match, use their `libraryID` and `id` to present the choices. These fields are read-only. Use the selected entry’s revision for metadata edits.
+
 ## Enrich an entry
 
 For POST and PATCH requests use `Content-Type: application/json` and a body with a known content length. For example, after reading entry 42 in library 3, send the following body to `PATCH /v1/libraries/3/entries/42`. Substitute the revision returned by the read.

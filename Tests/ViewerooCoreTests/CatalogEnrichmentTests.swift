@@ -30,7 +30,7 @@ import Testing
     func call(_ method: String, _ route: String, _ json: [String: Any] = [:]) throws -> CatalogResponse {
         api.respond(method: method, target: route, body: try JSONSerialization.data(withJSONObject: json))
     }
-    func revision() throws -> String { try #require(try catalog.apiEntry(library: 1, id: 1).revision) }
+    func revision() throws -> String { try #require(try catalog.apiEntry(library: 1, id: 1).metadata.revision) }
     let initial = try revision()
     try catalog.setTags(entryID: 1, tags: ["Original"])
     #expect(try call("PATCH", route, ["revision": initial, "title": "Too late"]).status == "409 Conflict")
@@ -73,4 +73,56 @@ import Testing
     let tail = try #require(JSONSerialization.jsonObject(with: last.data) as? [String: Any])
     #expect(tail["nextAfter"] == nil && (tail["entries"] as? [[String: Any]])?.count == 1)
     #expect(try call("GET", "/v1/libraries/1/entries?limit=0").status == "400 Bad Request")
+}
+
+@Test func catalogReadsReturnStoredFileIdentityBeforeHashingAndWhileOffline() throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let movie = folder.appending(path: "Sample.mov")
+    // PRDB's wraparound vector produces a hash with both leading zeros and hex letters.
+    var bytes = Data(repeating: 0, count: 131072)
+    bytes.replaceSubrange(0..<8, with: Data(repeating: 0xff, count: 8))
+    try bytes.write(to: movie)
+
+    let catalog = try Catalog(path: ":memory:")
+    let library = try catalog.createLibrary(name: "Sample library")
+    let source = try catalog.addSource(libraryID: library.id, url: folder)
+    try CatalogScanner(catalog: catalog).scan(source: source)
+    let entry = try #require(try catalog.entries(libraryID: library.id).first)
+    let api = CatalogAPI(catalog: catalog)
+    let list = "/v1/libraries/\(library.id)/entries"
+    let detail = list + "/\(entry.id)"
+
+    func checkReads(expectedHash: String?) throws -> String {
+        func get(_ route: String) throws -> [String: Any] {
+            let response = api.respond(method: "GET", target: route, body: Data())
+            #expect(response.status == "200 OK")
+            return try #require(JSONSerialization.jsonObject(with: response.data) as? [String: Any])
+        }
+        let page = try get(list)
+        let entries = try #require(page["entries"] as? [[String: Any]])
+        let single = try get(detail)
+        #expect(entries.count == 1)
+        for result in [try #require(entries.first), single] {
+            #expect(result["id"] as? Int64 == entry.id)
+            #expect(result["fileSize"] as? Int64 == 131072)
+            #expect(result.keys.contains("osHash") == (expectedHash != nil))
+            #expect(result["osHash"] as? String == expectedHash)
+        }
+        return try #require(single["revision"] as? String)
+    }
+
+    let revision = try checkReads(expectedHash: nil)
+    let hash = try #require(try OSHash.compute(url: movie))
+    try catalog.setHash(entryID: entry.id, hash: hash, fileSize: entry.fileSize, modified: entry.modified)
+    try FileManager.default.removeItem(at: folder)
+    _ = try catalog.checkSources(libraryID: library.id)
+    #expect(try catalog.entry(entry.id)?.availability == .offline)
+    #expect(try checkReads(expectedHash: "000000000001ffff") == revision)
+
+    for field in ["fileSize", "osHash"] {
+        let body = try JSONSerialization.data(withJSONObject: ["revision": revision, field: NSNull()] as [String: Any])
+        #expect(api.respond(method: "PATCH", target: detail, body: body).status == "400 Bad Request")
+    }
 }

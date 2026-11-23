@@ -66,7 +66,7 @@ struct CatalogAPI {
             }
             let rows = try catalog.apiEntries(library: library, after: after, limit: limit + 1)
             let entries = Array(rows.prefix(limit))
-            return try CatalogResponse(Page(entries: entries, nextAfter: rows.count > limit ? entries.last?.id : nil))
+            return try CatalogResponse(Page(entries: entries, nextAfter: rows.count > limit ? entries.last?.metadata.id : nil))
         case ("GET", "studios", 4):
             let studios = try catalog.database.read { db in
                 try Catalog.requireLibrary(db, library)
