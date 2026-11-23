@@ -2,7 +2,7 @@ import SwiftUI
 import ViewerooCore
 
 private enum EditSheet: String, Identifiable {
-    case library, playlists, settings, studios, videoFilters
+    case library, playlists, settings, studios, tags, videoFilters
     var id: Self { self }
 }
 
@@ -46,6 +46,8 @@ struct LibraryView: View {
             case .videoFilters: VideoFilterSheet(model: model)
             case .studios:
                 if let id = model.libraryID { StudioDirectoryView(model: model, libraryID: id) }
+            case .tags:
+                if let id = model.libraryID { TagManagerView(model: model, libraryID: id) }
             case .playlists:
                 if let id = model.libraryID { PlaylistManagerView(model: model, libraryID: id) }
             case .library:
@@ -85,7 +87,7 @@ struct LibraryView: View {
                                                        filters: model.filterBinding)
                                     .id(model.shelf)
                             }
-                            if [.all, .favorites, .liked, .frequent].contains(model.shelf), bulkSelection == nil {
+                            if model.shelf.supportsBulkEdit, bulkSelection == nil {
                                 IconActionButton(.edit, "Edit \(model.collectionTitle)") {
                                     NSApp.keyWindow?.makeFirstResponder(nil)
                                     bulkSelection = []
@@ -94,6 +96,8 @@ struct LibraryView: View {
                             }
                             if model.shelf == .studios {
                                 manageButton("Manage Studios", sheet: .studios)
+                            } else if model.shelf == .tags {
+                                manageButton("Manage Tags", sheet: .tags)
                             } else if model.shelf == .playlists {
                                 manageButton("Manage Playlists", sheet: .playlists)
                             }
@@ -187,6 +191,7 @@ struct LibraryView: View {
                     Label("All Videos", systemImage: "film.stack").tag(Shelf.all)
                     Label("Favorites", systemImage: "heart").tag(Shelf.favorites)
                     Label("Liked", systemImage: "hand.thumbsup").tag(Shelf.liked)
+                    Label("Tags", systemImage: "tag").tag(Shelf.tags)
                     Label("Watch History", systemImage: "clock.arrow.circlepath").tag(Shelf.frequent)
                     Label("Playlists", systemImage: "list.and.film").tag(Shelf.playlists)
                     Label("Settings", systemImage: "gearshape").tag(Shelf.settings)

@@ -45,10 +45,11 @@ public enum CatalogAvailability: String, Sendable {
 public enum CatalogError: LocalizedError {
     case staleScan, invalidPlaylistOrder, invalidValue, unavailableFolder
 
-    case duplicateStudio, invalidStudioName, studioUnavailable
+    case duplicateTag, duplicateStudio, invalidStudioName, studioUnavailable
 
     public var errorDescription: String? {
         switch self {
+        case .duplicateTag: "A tag with this name already exists."
         case .duplicateStudio: "A studio with this name already exists."
         case .invalidStudioName: "Enter a studio name other than Unknown Studio."
         case .studioUnavailable: "Only your own studios can be changed."
@@ -200,13 +201,20 @@ public final class Catalog: Sendable {
 
     public func setTags(entryID: Int64, tags: [String]) throws {
         try database.write { db in
-            try db.execute(sql: "DELETE FROM entryTag WHERE entryID = ?", arguments: [entryID])
-            for tag in tags {
-                let clean = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !clean.isEmpty {
-                    try db.execute(sql: "INSERT OR IGNORE INTO entryTag(entryID, name) VALUES (?, ?)", arguments: [entryID, clean])
+            guard let library = try Int64.fetchOne(db, sql: "SELECT libraryID FROM entry WHERE id = ?", arguments: [entryID]) else {
+                throw CatalogError.invalidValue
+            }
+            let names = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let existing = try Row.fetchAll(db, sql: """
+                SELECT t.id, t.name FROM tagItem i JOIN tag t ON t.id = i.tagID WHERE i.entryID = ?
+                """, arguments: [entryID])
+            for row in existing {
+                let name: String = row["name"]
+                if !names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                    try db.execute(sql: "DELETE FROM tagItem WHERE tagID = ? AND entryID = ?", arguments: [row["id"] as Int64, entryID])
                 }
             }
+            for name in names { _ = try Self.assignTag(db, name: name, entryID: entryID, libraryID: library) }
         }
     }
 }

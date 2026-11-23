@@ -175,6 +175,7 @@ extension Catalog {
                 )
                 """)
         }
+        migrator.registerMigration("library-tags-v13", migrate: migrateTags)
         return migrator
     }
 }

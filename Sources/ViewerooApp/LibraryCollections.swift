@@ -11,6 +11,8 @@ struct StudioTile: Identifiable {
 extension LibraryModel {
     var collectionTitle: String {
         switch shelf {
+        case .tags: return "Tags"
+        case let .tag(id): return tags.first { $0.id == id }?.name ?? "Tag"
         case .studios: return "Studios"
         case .all: return "All Videos"
         case .favorites: return "Favorites"
@@ -48,6 +50,10 @@ extension LibraryModel {
 
     var videosInCollection: [CatalogEntry] {
         switch shelf {
+        case let .tag(id):
+            guard let tag = tags.first(where: { $0.id == id }) else { return [] }
+            let members = Set(tag.memberIDs)
+            return entries.filter { members.contains($0.id) }
         case .favorites: return entries.filter(\.favorite)
         case .liked: return entries.filter { $0.rating > 0 }
         case .frequent:

@@ -14,6 +14,7 @@ struct BrowserView: View {
         let tileWidth = min(320, floor((width - CGFloat(count - 1) * VSpace.group) / CGFloat(count)))
         return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
     }
+    @State private var coverTag: CatalogTag?
     @Environment(\.colorScheme) private var scheme
     private var studioIndex: Bool { model.shelf == .studios }
     private var playlistID: Int64? {
@@ -21,7 +22,7 @@ struct BrowserView: View {
         return nil
     }
     var body: some View {
-        let records = studioIndex ? [] : model.visibleVideos
+        let records = studioIndex || model.shelf == .tags ? [] : model.visibleVideos
         VStack(spacing: 0) {
             if selection != nil {
                 BulkEditBar(model: model, selection: $selection, visibleIDs: records.map(\.id),
@@ -31,12 +32,23 @@ struct BrowserView: View {
                 collection(columns: columns(for: viewport.size.width), records: records)
             }
         }
+        .sheet(item: $coverTag) { tag in
+            TagCoverPicker(model: model, tag: tag)
+        }
     }
 
     private func collection(columns: [GridItem], records: [CatalogEntry]) -> some View {
         let studios = studioIndex ? model.visibleStudios : []
-        let count = studioIndex ? studios.count : records.count
-        let unit = studioIndex ? (count == 1 ? "studio" : "studios") : (count == 1 ? "video" : "videos")
+        let tagIndex = model.shelf == .tags
+        let tags = tagIndex ? model.tags.filter { model.visit.filters.includes($0, term: model.searchTerm) } : []
+        let count: Int
+        let noun: String
+        switch model.shelf {
+        case .tags: (count, noun) = (tags.count, "tag")
+        case .studios: (count, noun) = (studios.count, "studio")
+        default: (count, noun) = (records.count, "video")
+        }
+        let unit = count == 1 ? noun : noun + "s"
         return ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
@@ -52,6 +64,13 @@ struct BrowserView: View {
                     }
                 }
                 if count == 0 { empty }
+                else if tagIndex {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
+                        ForEach(tags) { tag in
+                            TagTile(model: model, tag: tag) { coverTag = tag }
+                        }
+                    }
+                }
                 else if studioIndex { studioGrid(studios, columns: columns) }
                 else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
@@ -190,7 +209,11 @@ struct BrowserView: View {
         model.change("Playlist order saved") { try $0.reorderPlaylist(playlist, entryIDs: ids) }
     }
     @ViewBuilder private var empty: some View {
-        if model.narrowed {
+        if model.shelf == .tags {
+            ContentUnavailableView(model.narrowed ? "No matching tags" : "No tags yet",
+                                   systemImage: model.narrowed ? "magnifyingglass" : "tag",
+                                   description: Text(model.narrowed ? "Try a different search or clear a filter." : "Create a tag in Manage Tags or add one to a video."))
+        } else if model.narrowed {
             ContentUnavailableView(studioIndex ? "No matching studios" : "No matching videos", systemImage: "magnifyingglass",
                                    description: Text("Try a different search or clear a filter."))
         }

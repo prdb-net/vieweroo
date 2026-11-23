@@ -5,7 +5,6 @@ struct EntryTagEditor: View {
     let model: LibraryModel
     let entry: CatalogEntry
     @State private var selected: [String]
-    @State private var libraryTags: [String] = []
     @State private var draft = ""
     @State private var error: String?
 
@@ -17,7 +16,7 @@ struct EntryTagEditor: View {
 
     private var available: [String] {
         let assigned = Set(selected.map { $0.lowercased() })
-        return libraryTags.filter { !assigned.contains($0.lowercased()) }
+        return model.tags.map(\.name).filter { !assigned.contains($0.lowercased()) }
     }
 
     var body: some View {
@@ -46,14 +45,6 @@ struct EntryTagEditor: View {
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
-        }
-        .onAppear {
-            // Only other entries can supply an unassigned tag in this single-window editor.
-            var seen = Set<String>()
-            libraryTags = model.entries.filter { $0.id != entry.id }
-                .flatMap(\.tags)
-                .filter { seen.insert($0.lowercased()).inserted }
-                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         }
     }
 

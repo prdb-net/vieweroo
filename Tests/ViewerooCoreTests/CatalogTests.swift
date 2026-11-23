@@ -539,7 +539,7 @@ final class CatalogTests: XCTestCase {
         let choices = RelatedVideo.suggestions(for: refreshed, in: mixed)
         XCTAssertEqual(choices.count, 8)
         XCTAssertEqual(choices.prefix(3).map(\.entry.title), ["Studio", "Cast", "Tag"])
-        XCTAssertEqual(choices.prefix(3).map(\.subtitle), ["Harbor", "With Alex", "Tagged blue"])
+        XCTAssertEqual(choices.prefix(3).map(\.subtitle), ["Harbor", "With Alex", "Tagged Blue"])
         XCTAssertEqual(choices[3].entry.title, "D")
         XCTAssertTrue(choices.allSatisfy { $0.entry.libraryID == current.libraryID })
         XCTAssertTrue(Set(choices.map(\.entry.title)).isDisjoint(with: ["Current","Removed","Unavailable"]))

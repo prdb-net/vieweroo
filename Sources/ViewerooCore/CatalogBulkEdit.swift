@@ -6,7 +6,14 @@ public enum BulkVideoEdit: Sendable {
     case rating(Int)
     case addToPlaylist(Int64)
     case addTags([String])
+    case removeTag(Int64)
     case removeHistory
+}
+
+fileprivate struct RemovedTagCover: FetchableRecord, Decodable, Sendable {
+    let time: Double
+    let image: Data
+    let custom: Bool
 }
 
 public struct BulkEditReceipt: Sendable {
@@ -14,7 +21,8 @@ public struct BulkEditReceipt: Sendable {
         case favorite(previous: Bool)
         case rating(previous: Int, applied: Int)
         case playlist(Int64)
-        case tags([String])
+        case tags([Int64])
+        case removedTag(id: Int64, assignment: Int64, cover: RemovedTagCover?)
         case history([RemovedPlaybackSession])
     }
 
@@ -52,16 +60,15 @@ extension Catalog {
                     let sessions = try Self.removeHistory(db, entryID: id)
                     if !sessions.isEmpty { receipt.changes[id] = .history(sessions) }
                 case let .addTags(names):
-                    var existing = try String.fetchAll(db, sql: "SELECT name FROM entryTag WHERE entryID = ?", arguments: [id])
-                    var added: [String] = []
-                    for name in names {
-                        let tag = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !tag.isEmpty, !existing.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) else { continue }
-                        try db.execute(sql: "INSERT INTO entryTag(entryID, name) VALUES (?, ?)", arguments: [id, tag])
-                        added.append(tag)
-                        existing.append(tag)
-                    }
+                    let added = try names.compactMap { try Self.assignTag(db, name: $0, entryID: id, libraryID: libraryID) }
                     if !added.isEmpty { receipt.changes[id] = .tags(added) }
+                case let .removeTag(tagID):
+                    let args: StatementArguments = [tagID, id]
+                    if let assignment = try Int64.fetchOne(db, sql: "SELECT id FROM tagItem WHERE tagID = ? AND entryID = ?", arguments: args) {
+                        let cover = try RemovedTagCover.fetchOne(db, sql: "SELECT time,image,custom FROM tagCover WHERE tagID = ? AND entryID = ?", arguments: args)
+                        try db.execute(sql: "DELETE FROM tagItem WHERE id = ?", arguments: [assignment])
+                        receipt.changes[id] = .removedTag(id: tagID, assignment: assignment, cover: cover)
+                    }
                 }
             }
             return receipt
@@ -83,9 +90,22 @@ extension Catalog {
                                    arguments: [receipt.libraryID, playlistID, id])
                 case let .history(sessions):
                     try Self.restoreHistory(db, sessions: sessions, entryID: id, libraryID: receipt.libraryID)
+                case let .removedTag(tagID, assignment, cover):
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO tagItem(id,libraryID,tagID,entryID)
+                        SELECT ?, t.libraryID, t.id, e.id FROM tag t JOIN entry e ON e.libraryID = t.libraryID
+                        WHERE t.id = ? AND e.id = ? AND t.libraryID = ?
+                        """, arguments: [assignment, tagID, id, receipt.libraryID])
+                    if db.changesCount == 1, let cover {
+                        try db.execute(sql: """
+                            INSERT INTO tagCover(tagID,entryID,time,image,revision,custom) VALUES (?,?,?,?,?,?)
+                            ON CONFLICT(tagID) DO UPDATE SET entryID=excluded.entryID, time=excluded.time,
+                                image=excluded.image, revision=excluded.revision, custom=excluded.custom WHERE NOT tagCover.custom
+                            """, arguments: [tagID, id, cover.time, cover.image, UUID().uuidString, cover.custom])
+                    }
                 case let .tags(added):
-                    for tag in added {
-                        try db.execute(sql: "DELETE FROM entryTag WHERE entryID = ? AND name = ?", arguments: [id, tag])
+                    for assignment in added {
+                        try db.execute(sql: "DELETE FROM tagItem WHERE entryID = ? AND id = ?", arguments: [id, assignment])
                     }
                 }
             }

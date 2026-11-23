@@ -72,6 +72,7 @@ public struct LibrarySnapshot: Sendable {
     public let entries: [CatalogEntry]
     public let favoriteStudioIDs: Set<String>
     public let studioOptions: [StudioOption]
+    public let tags: [CatalogTag]
     public let playlists: [CatalogPlaylist]
 }
 
@@ -79,7 +80,7 @@ extension Catalog {
     static let entryQuery = """
         SELECT e.*,
             (SELECT json_group_array(name) FROM
-                (SELECT name FROM entryTag WHERE entryID = e.id ORDER BY name COLLATE NOCASE)) AS tags,
+                (SELECT t.name FROM tagItem i JOIN tag t ON t.id = i.tagID WHERE i.entryID = e.id ORDER BY t.name)) AS tags,
             (SELECT COUNT(*) FROM \(visibleSessions) s WHERE s.entryID = e.id) AS playCount,
             (SELECT COALESCE(SUM(s.watchTime),0) FROM \(visibleSessions) s
                 WHERE s.entryID = e.id) AS watchTime,
@@ -121,6 +122,7 @@ extension Catalog {
                                     try Self.favoriteStudioIDs(db, libraryID: $0, options: options)
                                 } ?? [],
                                 studioOptions: options,
+                                tags: libraryID.map { try Self.fetchTags(db, libraryID: $0) } ?? [],
                                 playlists: libraryID.map { try Self.fetchPlaylists(db, libraryID: $0) } ?? [])
         }
     }

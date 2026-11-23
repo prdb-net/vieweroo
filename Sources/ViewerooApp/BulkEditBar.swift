@@ -43,7 +43,7 @@ struct BulkEditBar: View {
             Text("Clear play counts, watch time and watched segments for \(scope)? Saved playback positions are kept.")
         }
         .sheet(isPresented: $editingTags) {
-            BulkTagSheet(videoCount: ids.count, libraryTags: model.entries.flatMap(\.tags)) { tags, onFailure in
+            BulkTagSheet(videoCount: ids.count, libraryTags: model.tags.map(\.name)) { tags, onFailure in
                 apply(.addTags(tags), to: ids, onFailure: onFailure)
             }
         }
@@ -73,6 +73,10 @@ struct BulkEditBar: View {
                 case .liked:
                     Button("Clear Like") {
                         if apply(.rating(0), to: ids) { selection = [] }
+                    }
+                case let .tag(id):
+                    Button("Remove Tag from Selected Videos") {
+                        if apply(.removeTag(id), to: ids) { selection = [] }
                     }
                 case .frequent:
                     Button("Remove from Watch History…") { historyRemoval = ids }
@@ -125,6 +129,7 @@ struct BulkEditBar: View {
         case .rating: text = count > 0 ? "Liked \(videos)" : "Already liked"
         case .addToPlaylist: text = count > 0 ? "Added \(videos) to playlist" : "Already in playlist"
         case .removeHistory: text = "Removed \(videos) from Watch History"
+        case .removeTag: text = "Removed tag from \(videos)"
         case .addTags: text = count > 0 ? "Tagged \(videos)" : "Tags already applied"
         }
         model.notice = ActionNotice(text: text, kind: .success, undo: count > 0 ? receipt : nil)

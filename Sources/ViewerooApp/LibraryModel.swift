@@ -8,8 +8,8 @@ import ViewerooCore
 enum Gate { case starting, setup, locked, ready, failed }
 
 enum Shelf: Hashable {
-    case studios, all, favorites, liked, frequent, playlists, settings, sources
-    case studio(String, siteID: String? = nil), performer(PRDBPerformer), playlist(Int64)
+    case studios, all, favorites, liked, tags, frequent, playlists, settings, sources
+    case studio(String, siteID: String? = nil), performer(PRDBPerformer), playlist(Int64), tag(Int64)
 }
 
 @MainActor @Observable
@@ -45,6 +45,7 @@ final class LibraryModel {
     var favoriteStudioIDs: Set<String> = []
     var studioDirectory = StudioDirectory()
     var studioOptions: [StudioOption] { studioDirectory.options }
+    var tags: [CatalogTag] = []
     var playlists: [CatalogPlaylist] = []
     var recentPlaylists: [CatalogPlaylist] {
         Array(playlists.filter { $0.lastOpenedOrder > 0 }.sorted { $0.lastOpenedOrder > $1.lastOpenedOrder }.prefix(5))
@@ -72,6 +73,7 @@ final class LibraryModel {
     }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var automaticCovers: AutomaticTagCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
     var setupReason: String?
@@ -165,6 +167,7 @@ final class LibraryModel {
         session = UUID()
         scanToken = UUID()
         previewToken = UUID()
+        automaticCovers = nil
         snapshotTask?.cancel()
         snapshotTask = nil
         videoInfoTask?.cancel()
@@ -185,7 +188,7 @@ final class LibraryModel {
         phase = gate
         message = nil; libraryID = nil
         resetNavigation()
-        libraries = []; sources = []; entries = []; playlists = []; studioDirectory = StudioDirectory(); orderedIDs = []
+        libraries = []; sources = []; entries = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); orderedIDs = []
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }
         }
@@ -222,7 +225,7 @@ final class LibraryModel {
         stopWork()
         libraryID = id
         loadingLibrary = id != nil
-        entries = []; sources = []; playlists = []; studioDirectory = StudioDirectory(); orderedIDs = []
+        entries = []; sources = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); orderedIDs = []
         resetNavigation()
         if let id { preferences.set(id, forKey: lastLibrary) }
         let initialLoad = reload()
@@ -314,6 +317,26 @@ final class LibraryModel {
         }
     }
 
+    func renameTag(_ tag: CatalogTag, to name: String, onFailure: @escaping (String) -> Void) -> Bool {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return change("Tag renamed", onFailure: onFailure) { catalog in
+            try catalog.renameTag(tag.id, to: clean)
+            func update(_ visit: inout BrowseVisit) {
+                if visit.filters.tags.removeValue(forKey: tag.name.lowercased()) != nil {
+                    visit.filters.tags[clean.lowercased()] = clean
+                }
+            }
+            update(&visit)
+            for index in backHistory.indices { update(&backHistory[index]) }
+            for key in lastCollections.keys {
+                if var saved = lastCollections[key] {
+                    update(&saved)
+                    lastCollections[key] = saved
+                }
+            }
+        }
+    }
+
     func renameStudio(_ name: String, to newName: String, in libraryID: Int64, onFailure: @escaping (String) -> Void) -> Bool {
         guard self.libraryID == libraryID else { return false }
         return change("Studio renamed", onFailure: onFailure) { catalog in
@@ -370,11 +393,14 @@ final class LibraryModel {
                     if availabilityChanged { generatePreviews() }
                     favoriteStudioIDs = snapshot.favoriteStudioIDs
                     studioDirectory = StudioDirectory(snapshot.studioOptions)
+                    tags = snapshot.tags
+                    let tagIDs = Set(tags.map(\.id))
                     playlists = snapshot.playlists
                     let entryIDs = Set(snapshot.entries.map(\.id))
                     let playlistIDs = Set(snapshot.playlists.map(\.id))
                     func valid(_ visit: BrowseVisit) -> Bool {
                         if let id = visit.detailID, !entryIDs.contains(id) { return false }
+                        if case let .tag(id) = visit.shelf { return tagIDs.contains(id) }
                         if case let .playlist(id) = visit.shelf { return playlistIDs.contains(id) }
                         return true
                     }
@@ -386,8 +412,17 @@ final class LibraryModel {
                     }
                     loadPlaylist()
                     if cinemaMode, let detailID, !orderedIDs.contains(detailID) { goBack() }
+                    let covers = AutomaticTagCovers(tags: tags, entries: entries, cache: cache)
+                    if covers != automaticCovers {
+                        automaticCovers = covers
+                        if try await covers.prepare(in: catalog) {
+                            guard session == stamp, !Task.isCancelled else { return }
+                            snapshotRequested = true
+                        }
+                    }
                 } catch {
                     guard session == stamp, !Task.isCancelled else { return }
+                    automaticCovers = nil
                     loadingLibrary = false
                     message = error.localizedDescription
                 }
@@ -620,6 +655,10 @@ final class LibraryModel {
                     _ = try await cache.prepare(media: entry.url, directory: directory)
                     guard previewToken == token else { return }
                     posterPrepared.send(directory)
+                    if automaticCovers?.candidates.values.contains(where: { $0.contains(where: { $0.id == entry.id }) }) == true {
+                        automaticCovers = nil
+                        reload()
+                    }
                 } catch {
                     guard previewToken == token, !Task.isCancelled else { return }
                     previews.failures.append(.init(entry: entry, reason: error.localizedDescription))

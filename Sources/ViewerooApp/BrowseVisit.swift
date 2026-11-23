@@ -18,7 +18,7 @@ enum CollectionKey: Hashable {
 }
 
 enum BrowseTile: Hashable {
-    case studio(String, siteID: String? = nil), video(Int64), performer(String), playlist(Int64)
+    case studio(String, siteID: String? = nil), video(Int64), performer(String), playlist(Int64), tag(Int64)
 }
 
 @MainActor

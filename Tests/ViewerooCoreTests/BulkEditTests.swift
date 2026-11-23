@@ -43,7 +43,7 @@ import Testing
     let tags = try apply(.addTags([" été ", "Weekend", "weekend"]), to: Array(ids.prefix(2)))
     #expect(tags.changedCount == 2)
     #expect(try Set(catalog.entry(ids[0])!.tags) == ["Été", "Keep", "Weekend"])
-    #expect(try Set(catalog.entry(ids[1])!.tags) == ["été", "Weekend"])
+    #expect(try Set(catalog.entry(ids[1])!.tags) == ["Été", "Weekend"])
     #expect(try catalog.entry(ids[2])!.tags.isEmpty)
     #expect(try apply(.addTags(["été"]), to: [ids[0]]).changedCount == 0)
     try catalog.undoVideoEdit(tags)

@@ -43,6 +43,11 @@ struct CollectionFilters: Equatable {
     var tags: [String: String] = [:]
     var isEmpty: Bool { selected.isEmpty && group == .all && qualities.isEmpty && studios.isEmpty && tags.isEmpty }
 
+    func includes(_ tag: CatalogTag, term: String) -> Bool {
+        (!selected.contains(.populated) || !tag.memberIDs.isEmpty)
+            && (term.isEmpty || tag.name.localizedCaseInsensitiveContains(term))
+    }
+
     func includes(_ playlist: CatalogPlaylist, term: String) -> Bool {
         (!selected.contains(.populated) || playlist.videoCount > 0)
             && (term.isEmpty || playlist.name.localizedCaseInsensitiveContains(term))
@@ -73,8 +78,17 @@ struct CollectionFilters: Equatable {
 }
 
 extension Shelf {
+    var supportsBulkEdit: Bool {
+        switch self {
+        case .all, .favorites, .liked, .frequent, .tag: true
+        default: false
+        }
+    }
+
     var searchPrompt: String? {
         switch self {
+        case .tags: "Search tags"
+        case .tag: "Search this tag’s videos"
         case .studios: "Search studios"
         case .all: "Search videos"
         case .favorites: "Search favorites"
@@ -91,15 +105,15 @@ extension Shelf {
 
     var isVideoCollection: Bool {
         switch self {
-        case .all, .favorites, .liked, .frequent, .studio, .performer, .playlist: true
-        case .studios, .playlists, .sources, .settings: false
+        case .all, .favorites, .liked, .frequent, .studio, .performer, .playlist, .tag: true
+        case .studios, .playlists, .sources, .settings, .tags: false
         }
     }
 
     var filterOptions: [CollectionFilter] {
         switch self {
         case .studios: [.favoriteStudios]
-        case .playlists: [.populated]
+        case .playlists, .tags: [.populated]
         case .sources: [.offline]
         case .favorites: [.liked, .available, .unplayed]
         case .liked: [.favoriteVideos, .available, .unplayed]
