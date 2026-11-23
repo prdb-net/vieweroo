@@ -648,9 +648,9 @@ final class LibraryModel {
                 scanningSourceID = source.id
                 scanningFolder = source.url.lastPathComponent
                 let task = Task.detached(priority: .utility) {
-                    // Scanner invokes this callback serially on its worker.
+                    // Scanner reports each committed batch serially on its worker.
                     let throttle = DiscoveryUpdates()
-                    try CatalogScanner(catalog: catalog).scan(source: source) { _ in
+                    try CatalogScanner(catalog: catalog).scan(source: source) {
                         if throttle.shouldRefresh() {
                             Task { @MainActor in if self.scanToken == token { self.reload() } }
                         }

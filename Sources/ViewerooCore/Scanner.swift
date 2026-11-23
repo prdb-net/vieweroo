@@ -26,7 +26,10 @@ public struct CatalogScanner: Sendable {
         return directory.path
     }
 
-    public func scan(source: CatalogSource, onDiscovery: @Sendable (CatalogEntry) -> Void = { _ in }) throws {
+    /// Discovered files are committed in batches. `onProgress` runs on the scanning thread
+    /// after each committed batch, so callers can show new tiles while the scan continues.
+    public func scan(source: CatalogSource, batchInterval: Duration = .milliseconds(250), batchLimit: Int = 200,
+                     onProgress: @Sendable () -> Void = {}) throws {
         catalog.activeScans.withLock { $0 += 1 }
         defer { catalog.activeScans.withLock { $0 -= 1 } }
         let generation = try catalog.database.write { db -> Int64 in
@@ -73,6 +76,17 @@ public struct CatalogScanner: Sendable {
             return true
         }) else { throw CatalogError.unavailableFolder }
 
+        var pending: [DiscoveredFile] = []
+        let clock = ContinuousClock()
+        var lastCommit: ContinuousClock.Instant?
+        func commit() throws {
+            guard !pending.isEmpty else { return }
+            try record(pending, source: source, generation: generation, boundary: boundary)
+            pending.removeAll(keepingCapacity: true)
+            lastCommit = clock.now
+            onProgress()
+        }
+
         do {
             for case let file as URL in files {
                 try Task.checkCancellation()
@@ -93,10 +107,15 @@ public struct CatalogScanner: Sendable {
                     rememberError(at: file, CocoaError(.fileReadUnknown))
                     continue
                 }
-                let entry = try discover(file: selectedURL(for: file), size: Int64(size), modified: modified.timeIntervalSince1970,
-                                         source: source, generation: generation, boundary: boundary)
-                onDiscovery(entry)
+                pending.append(DiscoveredFile(path: selectedURL(for: file).standardizedFileURL.path, size: Int64(size),
+                                              modified: modified.timeIntervalSince1970))
+                // Commit the first discovery right away so the first tile appears without delay.
+                if pending.count >= batchLimit || lastCommit.map({ clock.now - $0 >= batchInterval }) ?? true {
+                    try commit()
+                }
             }
+            try Task.checkCancellation()
+            try commit()
         } catch {
             if !Self.canOpen(source.url) { try setReachability(false, source: source, generation: generation) }
             throw error
@@ -124,11 +143,14 @@ public struct CatalogScanner: Sendable {
             // Carry forward the previous observation under each unreadable path.
             // Missing files in successfully traversed siblings can still be reconciled.
             for path in unreadablePaths {
+                // A range over the (libraryID, path) index instead of a prefix test on every entry.
+                let folder = path.hasSuffix("/") ? path : path + "/"
+                let end = String(folder.dropLast()) + "0"
                 try db.execute(sql: """
                     UPDATE membership SET generation = ? WHERE sourceID = ? AND generation < ? AND entryID IN (
-                        SELECT id FROM entry WHERE libraryID = ? AND (path = ? OR instr(path, rtrim(?, '/') || '/') = 1)
+                        SELECT id FROM entry WHERE libraryID = ? AND (path = ? OR (path >= ? AND path < ?))
                     )
-                    """, arguments: [generation, source.id, generation, source.libraryID, path, path])
+                    """, arguments: [generation, source.id, generation, source.libraryID, path, folder, end])
             }
             // An overlapping scan can discover a file after this scan passed its folder.
             // Only invalidate observations older than the start of this traversal.
@@ -154,30 +176,36 @@ public struct CatalogScanner: Sendable {
         else { throw CatalogError.staleScan }
     }
 
-    private func discover(file: URL, size: Int64, modified: Double, source: CatalogSource, generation: Int64, boundary: String) throws -> CatalogEntry {
-        let path = file.standardizedFileURL.path
-        return try catalog.database.write { db in
+    private struct DiscoveredFile {
+        let path: String
+        let size: Int64
+        let modified: Double
+    }
+
+    private func record(_ files: [DiscoveredFile], source: CatalogSource, generation: Int64, boundary: String) throws {
+        try catalog.database.write { db in
             try verifyGeneration(db, sourceID: source.id, generation: generation)
-            try db.execute(sql: """
-                INSERT INTO entry(libraryID,path,fileSize,modified) VALUES (?,?,?,?)
-                ON CONFLICT(libraryID,path) DO UPDATE SET
-                    fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL, duration = NULL, videoInfo = NULL,
-                    matchData = CASE WHEN confirmed THEN matchData END, candidateData = NULL,
-                    detectedStudio = NULL, needsLookup = NOT confirmed
-                WHERE entry.fileSize <> excluded.fileSize OR entry.modified <> excluded.modified
-                """, arguments: [source.libraryID, path, size, modified])
-            let entryChanged = db.changesCount > 0
-            let id = try Int64.fetchOne(db, sql: "SELECT id FROM entry WHERE libraryID = ? AND path = ?",
-                                        arguments: [source.libraryID, path])!
-            try db.execute(sql: """
-                INSERT INTO membership(libraryID, sourceID, entryID, present, generation)
-                SELECT s.libraryID, s.id, ?, 1, l.scanClock FROM source s JOIN library l ON l.id = s.libraryID
-                WHERE s.libraryID = ? AND instr(?, rtrim(s.path, '/') || '/') = 1
-                    AND instr(rtrim(s.path, '/') || '/', rtrim(?, '/') || '/') = 1
-                ON CONFLICT(sourceID, entryID) DO UPDATE SET present = 1, generation = excluded.generation
-                """, arguments: [id, source.libraryID, path, boundary])
-            if entryChanged { try Catalog.reconcileStudioCovers(db, entryID: id) }
-            return try Catalog.fetchEntry(db, id: id)!
+            for file in files {
+                try db.execute(sql: """
+                    INSERT INTO entry(libraryID,path,fileSize,modified) VALUES (?,?,?,?)
+                    ON CONFLICT(libraryID,path) DO UPDATE SET
+                        fileSize = excluded.fileSize, modified = excluded.modified, hash = NULL, playbackFailure = NULL, duration = NULL, videoInfo = NULL,
+                        matchData = CASE WHEN confirmed THEN matchData END, candidateData = NULL,
+                        detectedStudio = NULL, needsLookup = NOT confirmed
+                    WHERE entry.fileSize <> excluded.fileSize OR entry.modified <> excluded.modified
+                    """, arguments: [source.libraryID, file.path, file.size, file.modified])
+                let entryChanged = db.changesCount > 0
+                let id = try Int64.fetchOne(db, sql: "SELECT id FROM entry WHERE libraryID = ? AND path = ?",
+                                            arguments: [source.libraryID, file.path])!
+                try db.execute(sql: """
+                    INSERT INTO membership(libraryID, sourceID, entryID, present, generation)
+                    SELECT s.libraryID, s.id, ?, 1, l.scanClock FROM source s JOIN library l ON l.id = s.libraryID
+                    WHERE s.libraryID = ? AND instr(?, rtrim(s.path, '/') || '/') = 1
+                        AND instr(rtrim(s.path, '/') || '/', rtrim(?, '/') || '/') = 1
+                    ON CONFLICT(sourceID, entryID) DO UPDATE SET present = 1, generation = excluded.generation
+                    """, arguments: [id, source.libraryID, file.path, boundary])
+                if entryChanged { try Catalog.reconcileStudioCovers(db, entryID: id) }
+            }
         }
     }
 }

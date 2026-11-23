@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 import XCTest
 @testable import ViewerooCore
 
@@ -729,7 +730,7 @@ final class CatalogTests: XCTestCase {
         defer { f.clean() }
         for filename in ["Top.MP4","Nested/Other.MoV","Third.m4v","Excluded.mkv"] { try f.add(filename) }
         let scan = Task.detached {
-            try CatalogScanner(catalog: f.catalog).scan(source: f.source) { _ in
+            try CatalogScanner(catalog: f.catalog).scan(source: f.source, batchLimit: 1) {
                 withUnsafeCurrentTask { $0?.cancel() }
             }
         }
@@ -747,14 +748,30 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(f.catalog.sources(libraryID: f.library.id).first).scanPending)
     }
 
+    func testScanCommitsDiscoveriesInBatches() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        for index in 0..<7 { try f.add("Clip \(index).mp4", data: Data([UInt8(index)])) }
+        let counts = OSAllocatedUnfairLock(initialState: [Int]())
+        let catalog = f.catalog, library = f.library.id
+        try CatalogScanner(catalog: catalog).scan(source: f.source, batchInterval: .seconds(60), batchLimit: 3) {
+            let visible = (try? catalog.entries(libraryID: library).count) ?? -1
+            counts.withLock { $0.append(visible) }
+        }
+        // The first discovery is committed at once, then full batches, then the remainder.
+        XCTAssertEqual(counts.withLock { $0 }, [1, 4, 7])
+        XCTAssertTrue(try f.catalog.entries(libraryID: f.library.id).allSatisfy { $0.availability == .available })
+    }
+
     func testOverlappingScanPreservesFilesDiscoveredDuringAnOlderTraversal() throws {
         let f = try LibraryFixture()
         defer { f.clean() }
         let file = try f.add("Nested/One.mp4")
         let nested = try f.catalog.addSource(libraryID: f.library.id, url: file.deletingLastPathComponent())
         let scanner = CatalogScanner(catalog: f.catalog)
-        try scanner.scan(source: f.source) { entry in
-            guard entry.filename == "One.mp4" else { return }
+        let overlapped = OSAllocatedUnfairLock(initialState: false)
+        try scanner.scan(source: f.source, batchLimit: 1) {
+            guard !overlapped.withLock({ defer { $0 = true }; return $0 }) else { return }
             do {
                 try f.add("Nested/Two.mp4")
                 try scanner.scan(source: nested)
