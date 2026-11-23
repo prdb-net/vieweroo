@@ -68,12 +68,57 @@ public enum CatalogError: LocalizedError {
 }
 
 public final class Catalog: Sendable {
-    let database: DatabaseQueue
+    /// A WAL pool for files, so snapshots and main-thread reads never wait behind scans or
+    /// other writes. In-memory catalogs, used only by tests, fall back to a serial queue.
+    let database: any DatabaseWriter
     let activeScans = OSAllocatedUnfairLock(initialState: 0)
+    static let retainedBackups = 2
 
     public init(path: String) throws {
-        database = try DatabaseQueue(path: path)
+        if path.isEmpty || path == ":memory:" {
+            database = try DatabaseQueue(path: path)
+        } else {
+            database = try DatabasePool(path: path)
+            try Self.backUpBeforeMigrating(database, path: path)
+        }
         try Self.migrator.migrate(database)
+    }
+
+    /// Copy an existing catalog before pending migrations rewrite it. Fresh catalogs need no copy.
+    /// Keep the most recent copies in a `Backups` folder beside the catalog.
+    private static func backUpBeforeMigrating(_ database: any DatabaseWriter, path: String) throws {
+        let migrator = migrator
+        let state = try database.read { db -> (applied: Set<String>, complete: Bool) in
+            (try migrator.appliedIdentifiers(db), try migrator.hasCompletedMigrations(db))
+        }
+        guard !state.applied.isEmpty, !state.complete,
+              let pending = migrator.migrations.first(where: { !state.applied.contains($0) }) else { return }
+        let catalog = URL(fileURLWithPath: path)
+        let folder = catalog.deletingLastPathComponent().appending(path: "Backups", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .gmt, formatOptions: [.withYear, .withMonth, .withDay, .withTime])
+        let name = "\(catalog.deletingPathExtension().lastPathComponent) \(stamp) before \(pending).sqlite"
+        let target = folder.appending(path: name)
+        let partial = folder.appending(path: "." + name + ".partial")
+        func removePartial() {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                try? FileManager.default.removeItem(atPath: partial.path + suffix)
+            }
+        }
+        removePartial()
+        defer { removePartial() }
+        do {
+            let copy = try DatabaseQueue(path: partial.path)
+            try database.backup(to: copy)
+            // The copy inherits WAL mode. Store it as one self-contained file.
+            try copy.writeWithoutTransaction { try $0.execute(sql: "PRAGMA journal_mode = DELETE") }
+        }
+        try FileManager.default.moveItem(at: partial, to: target)
+        let prefix = catalog.deletingPathExtension().lastPathComponent + " "
+        let backups = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "sqlite" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for old in backups.dropFirst(retainedBackups) { try? FileManager.default.removeItem(at: old) }
     }
 
     public func libraries() throws -> [CatalogLibrary] {

@@ -208,6 +208,10 @@ extension Catalog {
                 );
                 """)
         }
+        migrator.registerMigration("playlist-item-entry-index-v17") { db in
+            // Deleting an entry cascades to its playlist items.
+            try db.execute(sql: "CREATE INDEX playlist_item_by_entry ON playlistItem(entryID)")
+        }
         return migrator
     }
 }

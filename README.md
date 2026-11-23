@@ -14,7 +14,7 @@ Run these three commands from the repository root.
 ./scripts/package
 ```
 
-The build produces `dist/Vieweroo.app`. The test suite uses temporary catalogs, generated video, synthetic PRDB responses, and a substitute for legacy Keychain access. Packaging rebuilds and signs the Apple Silicon app locally, then writes `dist/Vieweroo-apple-silicon.zip`.
+The build produces `dist/Vieweroo.app`. The test suite uses temporary catalogs, generated video, synthetic PRDB responses, and a substitute for legacy Keychain access. CI also runs `./scripts/test --sanitize=thread` to check for data races. Packaging rebuilds and signs the Apple Silicon app locally, then writes `dist/Vieweroo-apple-silicon.zip`.
 
 ## Run the synthetic test library
 
@@ -35,7 +35,7 @@ For an independent development library, run `./scripts/test-library` without arg
 3. Enter your personal PRDB API key while online. Vieweroo validates it and saves it in a separate local settings database. One key works across all your libraries.
 4. Choose **New Library**, give it a name, and open **Settings**. Click the gear beside **Source folders**, then **Add Folder…**. Once the library has a source folder, use the plus to add another. You can also press ⌘O to add a folder. The first scan imports MP4, M4V, and MOV files, including subfolders. Tiles appear as files are discovered. Click the status at the bottom of the sidebar to see the folder scan, PRDB matching and preview progress, including waiting videos, offline folders and failed previews.
 
-To update, quit Vieweroo and replace the app in Applications with the new copy. The catalog lives in `~/Library/Application Support/net.prdb.vieweroo/`; previews live in `~/Library/Caches/net.prdb.vieweroo/`. The replacement opens the existing catalog and migrates it as needed. On the first update from a Keychain-based version, macOS may ask for access to the previous PRDB key and PIN verifier. Allow the transfer to preserve them. Vieweroo saves both in `Settings.sqlite` before removing the old items. If you cancel, choose **Try Again** when ready. Later launches and updates use the settings database.
+To update, quit Vieweroo and replace the app in Applications with the new copy. The catalog lives in `~/Library/Application Support/net.prdb.vieweroo/`; previews live in `~/Library/Caches/net.prdb.vieweroo/`. The replacement opens the existing catalog and migrates it as needed. Before a migration, Vieweroo copies the catalog to its `Backups` folder and keeps the two most recent copies. On the first update from a Keychain-based version, macOS may ask for access to the previous PRDB key and PIN verifier. Allow the transfer to preserve them. Vieweroo saves both in `Settings.sqlite` before removing the old items. If you cancel, choose **Try Again** when ready. Later launches and updates use the settings database.
 
 ## Browse and play
 

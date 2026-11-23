@@ -32,7 +32,7 @@ Build the library, search, studio views, and settings in SwiftUI. Embed AVKit's 
 
 ### 4. Use SQLite with GRDB for local persistence
 
-Store all libraries in one SQLite database on the Mac, including when the video files reside on a network drive. Libraries can reference the same PRDB studio and performer records. The Swift core accesses SQLite through GRDB and can use SQL for queries such as finding the most frequently replayed segments of a video.
+Store all libraries in one SQLite database on the Mac, including when the video files reside on a network drive. Libraries can reference the same PRDB studio and performer records. The Swift core accesses SQLite through GRDB and can use SQL for queries such as finding the most frequently replayed segments of a video. Open the catalog in WAL mode so reads run alongside scans and other writes. Before pending migrations change an existing catalog, copy it to a `Backups` folder beside it and keep the two most recent copies.
 
 Give each library entry a stable local ID independent of its file path and PRDB match. Correcting a match updates the metadata link and preserves the entry's personal data. In the MVP, two distinct files matched to the same PRDB title retain separate entries.
 
