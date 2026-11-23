@@ -271,7 +271,7 @@ private final class WorkflowSecrets: SecretStore {
     model.play(first, at: 0)
     #expect(model.detailID == first.id)
     try await until(timeout: .seconds(20)) { model.playback.position > 10.5 }
-    model.playSuggested(second)
+    model.play(second, in: model.mainPlayer)
     try await until { model.playback.title == second.title && model.playback.position > 0.15 }
     #expect(model.detailID == second.id)
     let saved = try #require(try model.catalog?.entry(first.id)?.resume)
@@ -279,7 +279,7 @@ private final class WorkflowSecrets: SecretStore {
     #expect(first.resume == 0)
 
     // The same old tile may still be visible when selected again.
-    model.playSuggested(first)
+    model.play(first, in: model.mainPlayer)
     try await until { model.playback.playing && model.playback.title == first.title }
     #expect(model.playback.position >= saved - 0.05)
     model.goBack()
@@ -305,8 +305,7 @@ private final class WorkflowSecrets: SecretStore {
     try model.access.setPIN(current: nil, new: "0000")
     model.pinEnabled = true
     model.lock()
-    model.playSuggested(second)
-    #expect(!model.hasAlternatives(to: first))
+    model.play(second, in: model.mainPlayer)
     #expect(model.playback.player.currentItem == nil)
 }
 
@@ -688,10 +687,21 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
         let origin = model.visit.id
         let expected = shelf == .frequent ? [second.id, first.id] : [first.id, second.id]
         #expect(model.visibleVideos.map(\.id) == expected)
+        let clicked = try #require(model.visibleVideos.last)
+        let firstVisible = try #require(model.visibleVideos.first)
+        let scroll = model.visit.scroll
+        model.openDetail(firstVisible.id)
+        model.openDetail(clicked.id)
+        #expect(!model.playing && model.detailID == clicked.id && model.visit.scroll === scroll)
+        #expect(model.visibleVideos.map(\.id) == expected)
+        model.play(clicked)
+        #expect(model.detailID == clicked.id && model.cinemaQueue.map(\.id) == expected)
+        model.goBack()
+        #expect(model.visit.id == origin && model.visit.selectedTile == .video(clicked.id))
         model.startCinema()
         #expect(model.detailID == expected.first && model.cinemaQueue.map(\.id) == expected)
         let next = try #require(model.cinemaQueue.last)
-        model.playSuggested(next)
+        model.play(next, in: model.mainPlayer)
         if shelf == .frequent {
             let session = try catalog.beginSession(entryID: first.id)
             try catalog.recordInterval(sessionID: session, start: 0, end: 30)

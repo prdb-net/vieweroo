@@ -14,6 +14,9 @@ struct BrowserView: View {
         let tileWidth = min(320, floor((width - CGFloat(count - 1) * VSpace.group) / CGFloat(count)))
         return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
     }
+    @FocusState private var focusedTitle: Int64?
+    @State private var hoveredPoster: Int64?
+    @State private var hoveredTitle: Int64?
     @State private var coverCollection: CoverCollection?
     @Environment(\.colorScheme) private var scheme
     private var studioIndex: Bool { model.shelf == .studios }
@@ -33,6 +36,11 @@ struct BrowserView: View {
             }
             GeometryReader { viewport in
                 collection(columns: columns(for: viewport.size.width), records: records)
+            }
+        }
+        .onChange(of: model.detailID) { previous, current in
+            if previous != nil, current == nil, case let .video(id) = model.visit.selectedTile {
+                focusedTitle = id
             }
         }
         .sheet(item: $coverCollection) { collection in
@@ -90,68 +98,32 @@ struct BrowserView: View {
                 else {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
                         ForEach(records) { entry in
-                            Button {
-                                guard selection != nil else { model.openDetail(entry.id); return }
-                                NSApp.keyWindow?.makeFirstResponder(nil)
-                                if selection?.contains(entry.id) == true { selection?.remove(entry.id) }
-                                else { selection?.insert(entry.id) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: VSpace.tight) {
-                                    poster(entry, tile: .video(entry.id))
-                                    VStack(alignment: .leading, spacing: VSpace.unit) {
-                                        Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                                        if model.shelf == .frequent {
-                                            Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
+                            videoTile(entry)
+                                .contextMenu {
+                                    if selection == nil {
+                                        Button("Details") { model.openDetail(entry.id) }
+                                        Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
+                                            .disabled(!LibraryModel.cinemaPlayable(entry))
+                                        Menu("Play on Display") {
+                                            DisplayChoices { model.playOnDisplay(entry, screen: $0) }
                                         }
-                                        if let subtitle = subtitle(entry) {
-                                            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                        .disabled(!LibraryModel.cinemaPlayable(entry))
+                                        if entry.resume > 0 {
+                                            Button("Play from Beginning") { model.play(entry, at: 0) }
+                                                .disabled(!LibraryModel.cinemaPlayable(entry))
                                         }
+                                        Divider()
+                                        EntryReactions(model: model, entry: entry, inMenu: true)
+                                        Divider()
+                                        PlaylistMenu(model: model, entryID: entry.id, inContextMenu: true)
                                     }
-                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                            .accessibilityAddTraits(isSelected(.video(entry.id)) ? .isSelected : [])
-                            .overlay(alignment: .topTrailing) {
-                                if let selection {
-                                    SelectionCheckmark(checked: selection.contains(entry.id))
-                                } else if entry.availability == .available {
-                                    let action = entry.resume > 0 ? "Resume" : "Play"
-                                    Button { model.play(entry) } label: {
-                                        Image(systemName: "play.fill")
-                                            .font(.body.weight(.bold))
-                                            .frame(width: 30, height: 30)
-                                            .foregroundStyle(.white)
-                                            .background(.black.opacity(0.76), in: Circle())
+                                    if selection == nil, let id = playlistID {
+                                        Divider()
+                                        Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
+                                        Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
+                                        Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("\(action) \(entry.title)")
-                                    .help("\(action) \(entry.title)")
-                                    .padding(VSpace.tight)
                                 }
-                            }
-                            .contextMenu {
-                                if selection == nil {
-                                    Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
-                                        .disabled(entry.availability != .available)
-                                    Menu("Play on Display") {
-                                        DisplayChoices { model.playOnDisplay(entry, screen: $0) }
-                                    }
-                                    .disabled(entry.availability != .available)
-                                    if model.shelf == .frequent, entry.resume > 0 {
-                                        Button("Play from Beginning") { model.play(entry, at: 0) }
-                                            .disabled(entry.availability != .available)
-                                    }
-                                    Divider()
-                                    EntryReactions(model: model, entry: entry, inMenu: true)
-                                    Divider()
-                                    PlaylistMenu(model: model, entryID: entry.id, inContextMenu: true)
-                                }
-                                if selection == nil, let id = playlistID {
-                                    Divider()
-                                    Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
-                                    Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
-                                    Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
-                                }
-                            }
                         }
                     }
                 }
@@ -160,6 +132,72 @@ struct BrowserView: View {
         }
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
     }
+
+    @ViewBuilder private func videoTile(_ entry: CatalogEntry) -> some View {
+        let tile = BrowseTile.video(entry.id)
+        if let selected = selection {
+            Button {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                if selected.contains(entry.id) { selection?.remove(entry.id) }
+                else { selection?.insert(entry.id) }
+            } label: {
+                VStack(alignment: .leading, spacing: VSpace.tight) {
+                    poster(entry, tile: tile)
+                        .overlay(alignment: .topTrailing) { SelectionCheckmark(checked: selected.contains(entry.id)) }
+                    tileCaption(entry)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected.contains(entry.id) ? .isSelected : [])
+        } else {
+            let playable = LibraryModel.cinemaPlayable(entry)
+            let action = playable ? (entry.resume > 0 ? "Resume" : "Play") : "Details"
+            VStack(alignment: .leading, spacing: VSpace.tight) {
+                Button {
+                    if playable { model.play(entry) } else { model.openDetail(entry.id) }
+                } label: {
+                    poster(entry, tile: tile)
+                        .overlay(alignment: .topTrailing) {
+                            if playable && hoveredPoster == entry.id {
+                                Image(systemName: "play.fill")
+                                    .frame(width: 30, height: 30)
+                                    .foregroundStyle(.white)
+                                    .background(.black.opacity(0.76), in: Circle())
+                                    .padding(VSpace.tight).allowsHitTesting(false)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .help("\(action) · \(entry.title)")
+                .accessibilityLabel("\(action) \(entry.title)")
+                .onHover { inside in hoveredPoster = inside ? entry.id : nil }
+                Button { model.openDetail(entry.id) } label: {
+                    tileCaption(entry)
+                }
+                .focused($focusedTitle, equals: entry.id)
+                .help("Show details")
+                .accessibilityLabel("Details for \(entry.title)")
+                .onHover { inside in hoveredTitle = inside ? entry.id : nil }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func tileCaption(_ entry: CatalogEntry) -> some View {
+        VStack(alignment: .leading, spacing: VSpace.unit) {
+            Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                .underline(selection == nil && hoveredTitle == entry.id)
+            if model.shelf == .frequent {
+                Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
+            }
+            if let subtitle = subtitle(entry) {
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+    }
+
     private func studioGrid(_ studios: [StudioTile], columns: [GridItem]) -> some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
             ForEach(studios) { item in

@@ -302,7 +302,17 @@ final class LibraryModel {
 
     func openDetail(_ id: Int64) {
         guard id != detailID else { return }
-        navigate(to: BrowseVisit(shelf: shelf, detailID: id), from: .video(id))
+        if detailID != nil {
+            visit.detailID = id
+            visit.selectedTile = .video(id)
+            if let index = backHistory.indices.last {
+                backHistory[index].selectedTile = .video(id)
+            }
+        } else {
+            let next = BrowseVisit(shelf: shelf, query: query, filters: visit.filters, detailID: id,
+                                   selectedTile: .video(id), scroll: visit.scroll)
+            navigate(to: next, from: .video(id))
+        }
     }
 
     func search(_ term: String) {
@@ -724,11 +734,15 @@ final class LibraryModel {
     func play(_ selection: CatalogEntry, in destination: PlayerSession, at position: Double? = nil, suggested: Bool = true) {
         guard destination === mainPlayer || destination === secondPlayer, let catalog,
               let entry = playableEntry(selection, suggested: suggested) else { return }
+        if !destination.cinemaMode {
+            destination.setCinema(launchQueue(for: entry), collection: shelf)
+        }
         if destination === mainPlayer {
-            if detailID == nil {
+            if !playing {
+                visit.scroll.save()
                 openDetail(entry.id)
             } else if detailID != entry.id {
-                visit = BrowseVisit(shelf: shelf, detailID: entry.id)
+                visit.detailID = entry.id
             }
             if !playing, secondPlayer?.playback.isAudible == true, !playback.muted { playback.toggleMute() }
         }
@@ -736,22 +750,27 @@ final class LibraryModel {
         reload()
     }
 
-    func playOnDisplay(_ selection: CatalogEntry, screen: NSScreen, cinema: [CatalogEntry] = []) {
-        guard let catalog, let entry = playableEntry(selection, suggested: !cinema.isEmpty),
+    private func launchQueue(for entry: CatalogEntry) -> [CatalogEntry] {
+        let visible = visibleVideos
+        return visible.contains { $0.id == entry.id } ? visible : [entry]
+    }
+
+    func playOnDisplay(_ selection: CatalogEntry, screen: NSScreen) {
+        guard let catalog, let entry = playableEntry(selection, suggested: true),
               NSScreen.screens.contains(where: { $0.displayID == screen.displayID }) else { return }
         let destination = PlayerSession()
         if playback.isAudible { destination.playback.toggleMute() }
         closeSecondPlayer()
         secondPlayer = destination
-        if !cinema.isEmpty { destination.setCinema(cinema, collection: shelf) }
+        destination.setCinema(launchQueue(for: entry), collection: shelf)
         destination.open(entry, at: nil, model: self, catalog: catalog)
         playerDisplay.present(destination, model: self, on: screen)
     }
 
     func startCinema(on screen: NSScreen) {
-        guard shelf.isVideoCollection, detailID == nil else { return }
+        guard shelf.isVideoCollection, !playing else { return }
         let queue = visibleVideos
-        if let first = queue.first(where: Self.cinemaPlayable) { playOnDisplay(first, screen: screen, cinema: queue) }
+        if let first = queue.first(where: Self.cinemaPlayable) { playOnDisplay(first, screen: screen) }
     }
 
     func movePlayer(_ source: PlayerSession, to screen: NSScreen) {
@@ -778,20 +797,11 @@ final class LibraryModel {
         if refresh { reload() }
     }
 
-    func hasAlternatives(to current: CatalogEntry) -> Bool {
-        phase == .ready && current.libraryID == libraryID && entries.contains { RelatedVideo.canOffer($0, for: current) }
-    }
-
-    func playSuggested(_ suggestion: CatalogEntry) {
-        play(suggestion, suggested: true)
-    }
-
     func startCinema() {
-        guard shelf.isVideoCollection, detailID == nil else { return }
+        guard shelf.isVideoCollection, !playing else { return }
         let queue = visibleVideos
         guard let first = queue.first(where: Self.cinemaPlayable) else { return }
         play(first, suggested: true)
-        if playing && detailID == first.id { mainPlayer.setCinema(queue, collection: shelf) }
     }
 
     nonisolated static func cinemaPlayable(_ entry: CatalogEntry) -> Bool {

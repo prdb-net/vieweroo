@@ -1,49 +1,6 @@
 import SwiftUI
 import ViewerooCore
 
-struct RelatedVideosView: View {
-    enum Style { case rail, shelf }
-
-    let model: LibraryModel
-    let current: CatalogEntry
-    var style: Style = .rail
-    let onSelect: (CatalogEntry) -> Void
-
-    var body: some View {
-        if model.phase == .ready, current.libraryID == model.libraryID {
-            let suggestions = RelatedVideo.suggestions(for: current, in: model.entries)
-            if !suggestions.isEmpty {
-                VStack(alignment: .leading, spacing: VSpace.control) {
-                    Text("More to Watch")
-                        .font(.title3.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    switch style {
-                    case .rail:
-                        LazyVStack(alignment: .leading, spacing: VSpace.tight) {
-                            choices(suggestions)
-                        }
-                    case .shelf:
-                        ScrollView(.horizontal) {
-                            LazyHStack(alignment: .top, spacing: VSpace.group) {
-                                choices(suggestions)
-                            }
-                            .padding(.bottom, VSpace.tight)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func choices(_ suggestions: [RelatedVideo]) -> some View {
-        ForEach(suggestions) { suggestion in
-            RelatedVideoButton(model: model, suggestion: suggestion, style: style) {
-                onSelect(suggestion.entry)
-            }
-        }
-    }
-}
-
 struct CinemaSuggestions: View {
     let model: LibraryModel
     let entry: CatalogEntry
@@ -63,7 +20,7 @@ struct CinemaSuggestions: View {
                     .padding(.horizontal, VSpace.unit)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(suggestions) { suggestion in
-                    RelatedVideoButton(model: model, suggestion: suggestion, style: .rail, cinema: true) {
+                    RelatedVideoButton(model: model, suggestion: suggestion) {
                         onSelect(suggestion.entry)
                     }
                 }
@@ -91,46 +48,30 @@ private struct CinemaCaption: ViewModifier {
 private struct RelatedVideoButton: View {
     let model: LibraryModel
     let suggestion: RelatedVideo
-    let style: RelatedVideosView.Style
-    var cinema = false
     let select: () -> Void
     @State private var hovered = false
 
-    private var subtitle: String? { cinema ? suggestion.entry.studio : suggestion.subtitle }
+    private var subtitle: String? { suggestion.entry.studio }
 
     var body: some View {
         Button(action: select) {
-            Group {
-                switch style {
-                case .rail:
-                    HStack(spacing: VSpace.control) {
-                        poster.frame(width: cinema ? 68 : 104)
-                        if cinema { caption.modifier(CinemaCaption()) }
-                        else { caption }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                case .shelf:
-                    VStack(alignment: .leading, spacing: VSpace.tight) {
-                        poster
-                        caption
-                    }.frame(width: 168, alignment: .leading)
-                }
+            HStack(spacing: VSpace.control) {
+                Poster(model: model, entry: suggestion.entry).frame(width: 68)
+                caption.modifier(CinemaCaption())
             }
-            .padding(cinema ? VSpace.unit : 0)
-            .background(.white.opacity(cinema && hovered ? 0.14 : 0), in: RoundedRectangle(cornerRadius: VSpace.tight))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(VSpace.unit)
+            .background(.white.opacity(hovered ? 0.14 : 0), in: RoundedRectangle(cornerRadius: VSpace.tight))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
             EntryReaction(model: model, entry: suggestion.entry, reaction: .favorite, inMenu: true)
         }
-        .onHover { if cinema { hovered = $0 } }
+        .onHover { hovered = $0 }
         .help("Play \(suggestion.entry.title)")
         .accessibilityLabel(Text("Play \(suggestion.entry.title)"))
         .accessibilityValue(Text(subtitle ?? ""))
-    }
-
-    private var poster: some View {
-        Poster(model: model, entry: suggestion.entry)
     }
 
     private var caption: some View {
@@ -140,8 +81,8 @@ private struct RelatedVideoButton: View {
                 .multilineTextAlignment(.leading)
             if let subtitle {
                 Text(subtitle)
-                    .font(.caption.weight(cinema ? .medium : .regular))
-                    .foregroundStyle(cinema ? .primary : .secondary)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
             }
         }

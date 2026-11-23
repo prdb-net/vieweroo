@@ -17,14 +17,15 @@ struct LibraryView: View {
     @State private var bulkSelection: Set<Int64>?
     @State private var searchFocused = false
     @State private var sheet: EditSheet?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var columns = NavigationSplitViewVisibility.automatic
 
     var body: some View {
         ZStack {
-            if model.playing && (playerWindow.fullScreen || model.cinemaMode) {
+            if model.playing {
                 PlayerScreen(model: model, session: model.mainPlayer, window: playerWindow)
                     .ignoresSafeArea()
-                    .toolbarBackground(model.cinemaMode ? .hidden : .automatic, for: .windowToolbar)
+                    .toolbarBackground(.hidden, for: .windowToolbar)
             } else {
                 navigation
             }
@@ -106,10 +107,8 @@ struct LibraryView: View {
                     .padding(.top, VSpace.control)
 
                     Group {
-                        if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
-                            EntryView(model: model, entry: entry, window: playerWindow)
-                        } else if model.shelf == .settings,
-                                  let library = model.libraries.first(where: { $0.id == model.libraryID }) {
+                        if model.shelf == .settings,
+                           let library = model.libraries.first(where: { $0.id == model.libraryID }) {
                             LibrarySettingsView(model: model, library: library)
                         } else if model.shelf == .sources {
                             SourcesView(model: model)
@@ -118,8 +117,25 @@ struct LibraryView: View {
                                         selectionShortcuts: !searchFocused && sheet == nil)
                         }
                     }
-                    .id(model.visit.id)
+                    .id(ObjectIdentifier(model.visit.scroll))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .trailing) {
+                        if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
+                            GeometryReader { bounds in
+                                EntryLibraryDetails(model: model, entry: entry)
+                                    .id(id)
+                                    .frame(width: min(396, bounds.size.width * 0.62))
+                                    .frame(maxHeight: .infinity, alignment: .top)
+                                    .background {
+                                        Color(nsColor: .windowBackgroundColor)
+                                            .shadow(color: .black.opacity(0.16), radius: 8, x: -3)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                            }
+                            .transition(.move(edge: .trailing))
+                        }
+                    }
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.detailID != nil)
                 }
             }
         }

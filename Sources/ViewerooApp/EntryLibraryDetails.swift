@@ -3,9 +3,9 @@ import SwiftUI
 import ViewerooCore
 
 struct EntryLibraryDetails: View {
-    @Environment(\.dismiss) private var dismiss
     let model: LibraryModel
     let entry: CatalogEntry
+    @State private var fileExpanded = true
     @State private var showEncoding = false
     @State private var choosingStudio = false
     @State private var matching = false
@@ -19,38 +19,74 @@ struct EntryLibraryDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Library Details")
-                .font(.title2.bold())
-                .padding(.horizontal, VSpace.page)
-                .padding(.vertical, VSpace.group)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: VSpace.section) {
-                    fileSection
-                    Divider()
-                    matchSection
-                    studioSection
-                    EntryTagEditor(model: model, entry: entry)
-                }
-                .padding(.horizontal, VSpace.page)
-                .padding(.vertical, VSpace.section)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider()
-            HStack {
-                if entry.availability != .available {
-                    Button("Remove Library Entry…", role: .destructive) { deleting = true }
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: VSpace.unit) {
+                    Text(entry.title).font(.title2.bold()).textSelection(.enabled)
+                        .accessibilityAddTraits(.isHeader)
+                    let studio = model.studioDirectory.studio(for: entry)
+                    HStack {
+                        Button(studio.name) {
+                            model.browse(.studio(studio.name, siteID: studio.siteID), from: .studio(studio.name, siteID: studio.siteID))
+                        }
+                        .buttonStyle(.link)
+                        if let quality = entry.videoInfo?.quality { Text(quality).foregroundStyle(.secondary) }
+                        if let duration = entry.duration { Text(clockLabel(duration)).foregroundStyle(.secondary) }
+                    }.font(.callout)
+                    if let account = studio.creator { CreatorProfileView(account: account) }
                 }
                 Spacer()
-                Button("Done") {
-                    if showEncoding { showEncoding = false } else { dismiss() }
-                }.keyboardShortcut(.cancelAction)
+                Button("Close Details", systemImage: "xmark.circle.fill", action: model.goBack)
+                    .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Close details (Esc)")
             }
-            .padding(.horizontal, VSpace.page)
-            .padding(.vertical, VSpace.control)
+            .padding(VSpace.group)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: VSpace.group) {
+                    HStack(spacing: VSpace.tight) {
+                        EntryReactions(model: model, entry: entry)
+                        PlaylistMenu(model: model, entryID: entry.id)
+                            .labelStyle(.iconOnly).help("Add to Playlist")
+                        Spacer()
+                        Menu {
+                            Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
+                            if entry.resume > 0 {
+                                Button("Play from Beginning") { model.play(entry, at: 0) }
+                            }
+                            Menu("Play on Display") { DisplayChoices { model.playOnDisplay(entry, screen: $0) } }
+                        } label: { Label("Playback options", systemImage: "play.rectangle") }
+                        .labelStyle(.iconOnly).help("Playback options").disabled(!LibraryModel.cinemaPlayable(entry))
+                    }
+                    if !LibraryModel.cinemaPlayable(entry) {
+                        Label(entry.availability == .offline ? "Reconnect the source drive to play this video." :
+                              entry.availability == .missing ? "This file is missing from its source folder." :
+                              entry.playbackFailure ?? "Playback unavailable", systemImage: "exclamationmark.triangle")
+                            .font(.callout)
+                    }
+                    EntryPerformers(model: model, entry: entry)
+                    Divider()
+                    EntryTagEditor(model: model, entry: entry)
+                    Divider()
+                    EntryHistory(model: model, entry: entry)
+                    Divider()
+                    DisclosureGroup("File", isExpanded: $fileExpanded) { fileSection }
+                    Divider()
+                    DisclosureGroup("PRDB Match and Studio") {
+                        VStack(alignment: .leading, spacing: VSpace.group) {
+                            matchSection
+                            studioSection
+                        }.padding(.vertical, VSpace.tight)
+                    }
+                    if entry.availability != .available {
+                        Button("Remove Library Entry…", systemImage: "trash", role: .destructive) { deleting = true }
+                            .labelStyle(.iconOnly).help("Remove Library Entry…")
+                    }
+                }
+                .padding(VSpace.group)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .disabled(savingName)
-        .interactiveDismissDisabled(savingName || showEncoding)
         .sheet(isPresented: $choosingStudio) {
             StudioDirectoryView(model: model, libraryID: entry.libraryID, entry: entry)
         }
@@ -65,10 +101,10 @@ struct EntryLibraryDetails: View {
 
     private var fileSection: some View {
         VStack(alignment: .leading, spacing: VSpace.tight) {
-            HStack {
-                Text("File").font(.headline)
-                Spacer()
-                if !editingName {
+            if !editingName {
+                HStack {
+                    Text(entry.filename).font(.headline).textSelection(.enabled).help(entry.path)
+                    Spacer()
                     IconActionButton(.edit, "Rename File…", targetLabel: "Rename File “\(entry.filename)”") {
                         basename = entry.url.deletingPathExtension().lastPathComponent
                         editingName = true
@@ -92,11 +128,6 @@ struct EntryLibraryDetails: View {
                     Button("Rename", action: rename)
                         .disabled(basename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-            } else {
-                Text(entry.filename)
-                    .font(.system(.title3, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled).help(entry.path)
             }
             Text(entry.url.deletingLastPathComponent().path(percentEncoded: false))
                 .font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -105,8 +136,10 @@ struct EntryLibraryDetails: View {
                 Button("Show in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([entry.url])
                 }
+                .labelStyle(.iconOnly).help("Show in Finder")
                 .disabled(entry.availability != .available)
-                Button("Video Encoding", systemImage: "chevron.down") { showEncoding.toggle() }
+                Button("Video Encoding", systemImage: "info.circle") { showEncoding.toggle() }
+                    .labelStyle(.iconOnly).help("Video Encoding")
                     .popover(isPresented: $showEncoding, arrowEdge: .bottom) {
                         encoding
                     }
@@ -162,7 +195,7 @@ struct EntryLibraryDetails: View {
                 Spacer()
                 IconActionButton(.edit, "Choose Studio…") { choosingStudio = true }
             }
-            if let creator = model.studioDirectory.studio(for: entry).creator { CreatorProfileView(account: creator) }
+
             if let manual = entry.manualStudio {
                 MetadataChip(name: manual, removeLabel: "Use Automatic Studio") {
                     model.change("Using automatic studio") { try $0.setManualStudio(entryID: entry.id, name: nil) }
@@ -181,17 +214,19 @@ struct EntryLibraryDetails: View {
             HStack {
                 Text("PRDB title").font(.headline)
                 Spacer()
-                Button(entry.match == nil ? "Find Match…" : "Correct Match…") {
+                Button(entry.match == nil ? "Find Match…" : "Correct Match…", systemImage: "magnifyingglass") {
                     matchError = nil
                     matching = true
                 }
+                .labelStyle(.iconOnly).help(entry.match == nil ? "Find Match…" : "Correct Match…")
                 if entry.match != nil {
-                    Button("Remove Match") {
+                    Button("Remove Match", systemImage: "minus.circle") {
                         matchError = nil
                         model.change("Title match removed", onFailure: { matchError = $0 }) {
                             try $0.confirmMatch(entryID: entry.id, title: nil)
                         }
                     }
+                    .labelStyle(.iconOnly)
                     .help("Unlink the PRDB title and keep this video unmatched until you choose a title.")
                 }
             }

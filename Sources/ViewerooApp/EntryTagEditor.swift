@@ -25,10 +25,10 @@ struct EntryTagEditor: View {
                 Text("Tags").font(.headline)
                 Spacer()
                 let options = available
-                Menu("Choose Tag") {
+                Menu("Choose Tag", systemImage: "tag") {
                     ForEach(options, id: \.self) { tag in Button(tag) { add(tag) } }
                 }
-                .fixedSize().disabled(options.isEmpty)
+                .labelStyle(.iconOnly).help("Choose Tag").fixedSize().disabled(options.isEmpty)
             }
             if !selected.isEmpty {
                 ChipRows {
