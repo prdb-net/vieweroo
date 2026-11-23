@@ -92,6 +92,29 @@ public final class Catalog: Sendable {
         }
         try Self.migrator.migrate(database)
         try finishInterruptedRenames()
+        try reindexAfterSystemUpdate()
+    }
+
+    private static let log = Logger(subsystem: "net.prdb.vieweroo", category: "catalog")
+
+    /// Unique tag and studio names use Foundation's case-insensitive comparison, which a
+    /// macOS update can refine. Rebuild those indexes once per system version.
+    func reindexAfterSystemUpdate(system: String = ProcessInfo.processInfo.operatingSystemVersionString) throws {
+        try database.write { db in
+            let indexed = try String.fetchOne(db, sql: "SELECT value FROM catalogState WHERE key = 'collationSystem'")
+            guard indexed != system else { return }
+            do {
+                try db.inSavepoint {
+                    try db.execute(sql: "REINDEX swiftCaseInsensitiveCompare")
+                    return .commit
+                }
+            } catch {
+                // Names that now compare equal keep their old index until one is renamed.
+                Self.log.error("Could not rebuild name indexes: \(error.localizedDescription, privacy: .public)")
+            }
+            try db.execute(sql: "INSERT OR REPLACE INTO catalogState(key, value) VALUES ('collationSystem', ?)",
+                           arguments: [system])
+        }
     }
 
     /// Copy an existing catalog before pending migrations rewrite it. Fresh catalogs need no copy.

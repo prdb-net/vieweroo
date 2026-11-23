@@ -302,6 +302,54 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(switched.studioOptions.contains { $0.name == "Quiet Pier" })
     }
 
+    func testFirstReleaseCatalogKeepsPersonalDataThroughEveryMigration() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let path = base.appendingPathComponent("Catalog.sqlite").path
+        let title = PRDBTitle(id: "t1", title: "Harbor Dawn", studio: .init(id: "s1", name: "Harbor Lights"))
+        do {
+            let old = try DatabaseQueue(path: path)
+            try Catalog.migrator.migrate(old, upTo: "catalog-v1")
+            try old.write { db in
+                try db.execute(sql: """
+                    INSERT INTO library(id,name) VALUES (1,'Archive');
+                    INSERT INTO source(id,libraryID,path) VALUES (1,1,'/Archive'), (2,1,'/Archive/Nested');
+                    INSERT INTO studio(id,name) VALUES ('s1','Harbor Lights');
+                    INSERT INTO entry(id,libraryID,path,fileSize,modified,favorite,rating,resume,manualStudio,matchData,needsLookup)
+                      VALUES (1,1,'/Archive/Harbor.mp4',10,0,1,1,42,NULL,?,0),
+                             (2,1,'/Archive/Nested/Quiet.mp4',20,0,0,-1,0,'Quiet Pier',NULL,1);
+                    INSERT INTO membership(libraryID,sourceID,entryID) VALUES (1,1,1),(1,1,2),(1,2,2);
+                    INSERT INTO entryTag(entryID,name) VALUES (1,'Night'),(2,'night'),(2,'Rain');
+                    INSERT INTO playlist(id,libraryID,name) VALUES (1,1,'Weekend');
+                    INSERT INTO playlistItem(libraryID,playlistID,entryID,position) VALUES (1,1,2,0),(1,1,1,1);
+                    INSERT INTO session(id,entryID) VALUES (1,1);
+                    INSERT INTO interval(sessionID,start,end) VALUES (1,30,42);
+                    """, arguments: [try JSONEncoder().encode(title)])
+            }
+        }
+        let catalog = try Catalog(path: path)
+        XCTAssertTrue(try catalog.database.read { try Catalog.migrator.hasCompletedMigrations($0) })
+        XCTAssertEqual(try catalog.libraries().map(\.name), ["Archive"])
+        let entries = try catalog.entries(libraryID: 1)
+        let harbor = try XCTUnwrap(entries.first { $0.id == 1 })
+        let quiet = try XCTUnwrap(entries.first { $0.id == 2 })
+        XCTAssertEqual(harbor.match?.title, "Harbor Dawn")
+        XCTAssertTrue(harbor.favorite)
+        XCTAssertEqual(harbor.rating, 1)
+        XCTAssertEqual(harbor.resume, 42)
+        XCTAssertEqual(harbor.playCount, 1)
+        XCTAssertEqual(quiet.rating, -1)
+        XCTAssertEqual(quiet.studio, "Quiet Pier")
+        XCTAssertEqual(Set(harbor.tags.map { $0.lowercased() }), ["night"])
+        XCTAssertEqual(Set(quiet.tags.map { $0.lowercased() }), ["night", "rain"])
+        XCTAssertEqual(try catalog.playlistEntryIDs(1), [2, 1])
+        XCTAssertEqual(try catalog.sources(libraryID: 1).count, 2)
+        XCTAssertNotNil(try catalog.database.read {
+            try String.fetchOne($0, sql: "SELECT value FROM catalogState WHERE key = 'collationSystem'")
+        })
+    }
+
     func testPendingMigrationsKeepABackupOfTheCatalog() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

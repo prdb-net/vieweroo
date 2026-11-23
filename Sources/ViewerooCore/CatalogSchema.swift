@@ -251,6 +251,9 @@ extension Catalog {
                 )
                 """)
         }
+        migrator.registerMigration("catalog-state-v21") { db in
+            try db.execute(sql: "CREATE TABLE catalogState (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)")
+        }
         return migrator
     }
 }
