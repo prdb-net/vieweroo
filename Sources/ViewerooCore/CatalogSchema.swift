@@ -241,6 +241,16 @@ extension Catalog {
             // Recognize an unmounted share whose empty mount point is still readable.
             try db.execute(sql: "ALTER TABLE source ADD COLUMN volume TEXT")
         }
+        migrator.registerMigration("pending-renames-v20") { db in
+            // The catalog records a rename before the file moves, so an interrupted rename
+            // can be completed or undone when the catalog next opens.
+            try db.execute(sql: """
+                CREATE TABLE pendingRename (
+                    entryID INTEGER PRIMARY KEY REFERENCES entry ON DELETE CASCADE,
+                    fromPath TEXT NOT NULL, toPath TEXT NOT NULL
+                )
+                """)
+        }
         return migrator
     }
 }

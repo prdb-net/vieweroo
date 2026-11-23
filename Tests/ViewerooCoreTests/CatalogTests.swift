@@ -117,6 +117,47 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testInterruptedRenamesAreCompletedOrUndoneWhenTheCatalogOpens() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        let stayed = try fixture.add("Stayed.mp4")
+        let moved = try fixture.add("Moved.mp4", data: Data([8]))
+        try fixture.scan()
+        let entries = try fixture.catalog.entries(libraryID: fixture.library.id)
+        let stayedID = try XCTUnwrap(entries.first { $0.filename == "Stayed.mp4" }).id
+        let movedID = try XCTUnwrap(entries.first { $0.filename == "Moved.mp4" }).id
+        let renamedStay = fixture.media.appendingPathComponent("Never Moved.mp4")
+        let renamedMove = fixture.media.appendingPathComponent("Arrived.mp4")
+        // The catalog committed both renames. Only the second file moved before the app stopped.
+        try FileManager.default.moveItem(at: moved, to: renamedMove)
+        try fixture.catalog.database.write { db in
+            for (id, from, to) in [(stayedID, stayed, renamedStay), (movedID, moved, renamedMove)] {
+                try db.execute(sql: "UPDATE entry SET path = ? WHERE id = ?", arguments: [to.path, id])
+                try db.execute(sql: "INSERT INTO pendingRename(entryID, fromPath, toPath) VALUES (?, ?, ?)",
+                               arguments: [id, from.path, to.path])
+            }
+        }
+
+        let reopened = try Catalog(path: fixture.databasePath)
+        XCTAssertEqual(try reopened.entry(stayedID)?.path, stayed.path)
+        XCTAssertEqual(try reopened.entry(movedID)?.path, renamedMove.path)
+        XCTAssertEqual(try reopened.database.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM pendingRename") }, 0)
+        XCTAssertEqual(try reopened.entry(stayedID)?.availability, .available)
+        XCTAssertEqual(try reopened.entry(movedID)?.availability, .available)
+    }
+
+    func testRenameLeavesNoPendingRecord() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Before.mp4")
+        try fixture.scan()
+        let entry = try XCTUnwrap(fixture.catalog.entries(libraryID: fixture.library.id).first)
+        try fixture.catalog.renameFile(entry, basename: "After")
+        XCTAssertEqual(try fixture.catalog.entry(entry.id)?.filename, "After.mp4")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.media.appendingPathComponent("After.mp4").path))
+        XCTAssertEqual(try fixture.catalog.database.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM pendingRename") }, 0)
+    }
+
     func testSiteOnlySuggestionsNeedPathEvidenceAtImport() async throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }

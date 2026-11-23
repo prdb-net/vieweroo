@@ -46,8 +46,16 @@ public struct CatalogScanner: Sendable {
     /// after each committed batch, so callers can show new tiles while the scan continues.
     public func scan(source: CatalogSource, batchInterval: Duration = .milliseconds(250), batchLimit: Int = 200,
                      onProgress: @Sendable () -> Void = {}) throws {
-        catalog.activeScans.withLock { $0 += 1 }
-        defer { catalog.activeScans.withLock { $0 -= 1 } }
+        // A rename holds the catalog and the file system for a moment. Start once it finishes.
+        while !catalog.fileActivity.withLock({ activity in
+            guard !activity.renaming else { return false }
+            activity.scans += 1
+            return true
+        }) {
+            try Task.checkCancellation()
+            usleep(10_000)
+        }
+        defer { catalog.fileActivity.withLock { $0.scans -= 1 } }
         let generation = try catalog.database.write { db -> Int64 in
             try db.execute(sql: "UPDATE library SET scanClock = scanClock + 1 WHERE id = ?", arguments: [source.libraryID])
             try db.execute(sql: """

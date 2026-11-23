@@ -70,11 +70,17 @@ public enum CatalogError: LocalizedError {
     }
 }
 
+struct FileActivity {
+    var scans = 0
+    var renaming = false
+}
+
 public final class Catalog: Sendable {
     /// A WAL pool for files, so snapshots and main-thread reads never wait behind scans or
     /// other writes. In-memory catalogs, used only by tests, fall back to a serial queue.
     let database: any DatabaseWriter
-    let activeScans = OSAllocatedUnfairLock(initialState: 0)
+    /// Scans and renames of files on disk exclude each other within the process.
+    let fileActivity = OSAllocatedUnfairLock(initialState: FileActivity())
     static let retainedBackups = 2
 
     public init(path: String) throws {
@@ -85,6 +91,7 @@ public final class Catalog: Sendable {
             try Self.backUpBeforeMigrating(database, path: path)
         }
         try Self.migrator.migrate(database)
+        try finishInterruptedRenames()
     }
 
     /// Copy an existing catalog before pending migrations rewrite it. Fresh catalogs need no copy.
