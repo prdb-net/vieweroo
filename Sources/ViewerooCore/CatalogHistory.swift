@@ -92,7 +92,10 @@ extension Catalog {
     public func recordInterval(sessionID: Int64, start: Double, end: Double) throws {
         guard start.isFinite, end.isFinite, start >= 0, end > start else { throw CatalogError.invalidValue }
         try database.write { db in
-            try db.execute(sql: "INSERT INTO interval(sessionID,start,end) VALUES (?,?,?)", arguments: [sessionID, start, end])
+            try db.execute(sql: """
+                INSERT INTO interval(sessionID,start,end) SELECT id, ?, ? FROM session WHERE id = ?
+                """, arguments: [start, end, sessionID])
+            guard db.changesCount == 1 else { throw CatalogError.sessionRemoved }
         }
     }
 

@@ -47,6 +47,8 @@ public enum CatalogAvailability: String, Sendable {
 
 public enum CatalogError: LocalizedError {
     case staleScan, invalidPlaylistOrder, invalidValue, unavailableFolder
+    /// The playback session was removed from Watch History while it was still recording.
+    case sessionRemoved
 
     case duplicateTag, duplicateStudio, invalidStudioName, studioUnavailable
 
@@ -60,6 +62,7 @@ public enum CatalogError: LocalizedError {
         case .invalidPlaylistOrder: "The playlist changed. Reopen it and try again."
         case .invalidValue: "The supplied value is invalid."
         case .unavailableFolder: "The source folder could not be read."
+        case .sessionRemoved: "The viewing session was removed."
         }
     }
 }

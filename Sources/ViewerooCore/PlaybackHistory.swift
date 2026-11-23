@@ -57,11 +57,21 @@ public final class PlaybackHistory {
     }
 
     private func finishInterval(at end: Double) throws {
-        if let start = intervalStart, let session, end > start {
-            try append(session, start, end)
-            recordedWatchTime += end - start
-        }
+        guard let start = intervalStart else { return }
         intervalStart = nil
+        guard let current = session, end > start else { return }
+        do {
+            try append(current, start, end)
+        } catch CatalogError.sessionRemoved {
+            // Watch History was cleared during playback. Continue in a new session
+            // that must again reach the minimum watch time before it saves a position.
+            recordedWatchTime = 0
+            lastSavedPosition = nil
+            let replacement = try begin()
+            session = replacement
+            try append(replacement, start, end)
+        }
+        recordedWatchTime += end - start
     }
 
     private func savePosition(_ value: Double) throws {

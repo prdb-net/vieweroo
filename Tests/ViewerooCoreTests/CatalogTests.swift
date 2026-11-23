@@ -724,6 +724,33 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(try score() - beforeFullPlay, 1, accuracy: 1e-10)
     }
 
+    func testRemovingHistoryDuringPlaybackContinuesInANewSession() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Playing.mp4")
+        try fixture.scan()
+        let catalog = fixture.catalog
+        let id = try XCTUnwrap(catalog.entries(libraryID: fixture.library.id).first).id
+        let history = PlaybackHistory(begin: { try catalog.beginSession(entryID: id) },
+                                      append: { try catalog.recordInterval(sessionID: $0, start: $1, end: $2) },
+                                      resume: { try catalog.setResume(entryID: id, seconds: $0) })
+        try history.sample(position: 0, playing: true, clock: 0)
+        try history.sample(position: 12, playing: true, clock: 12)
+        XCTAssertEqual(try catalog.entry(id)?.playCount, 1)
+
+        let receipt = try catalog.editVideos(in: fixture.library.id, entryIDs: [id], edit: .removeHistory)
+        XCTAssertEqual(try catalog.entry(id)?.playCount, 0)
+        try history.sample(position: 18, playing: true, clock: 18)
+        try history.sample(position: 30, playing: false, clock: 30)
+        let continued = try XCTUnwrap(catalog.entry(id))
+        XCTAssertEqual(continued.playCount, 1)
+        XCTAssertEqual(continued.watchTime, 18, accuracy: 1e-9)
+        XCTAssertEqual(continued.resume, 30)
+
+        try catalog.undoVideoEdit(receipt)
+        XCTAssertEqual(try catalog.entry(id)?.playCount, 2)
+    }
+
     func testShortSessionsStayOutOfHistoryAndPreserveResume() throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }
