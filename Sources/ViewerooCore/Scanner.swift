@@ -12,6 +12,22 @@ public struct CatalogScanner: Sendable {
         return true
     }
 
+    /// The mounted volume and its UUID, when the file system reports one.
+    static func volumeIdentity(of url: URL) -> String? {
+        guard let values = try? url.resourceValues(forKeys: [.volumeURLKey, .volumeUUIDStringKey]),
+              let volume = values.volume else { return nil }
+        return (values.volumeUUIDString ?? "") + "|" + volume.standardizedFileURL.path
+    }
+
+    /// A share that is no longer mounted can leave an empty, readable mount point on another
+    /// volume. Treat that folder as offline so its entries keep their offline state.
+    static func isReachable(_ source: CatalogSource) -> Bool {
+        guard canOpen(source.url) else { return false }
+        guard let saved = source.volume, let current = volumeIdentity(of: source.url), current != saved else { return true }
+        let children = (try? FileManager.default.contentsOfDirectory(atPath: source.path)) ?? []
+        return children.contains { !$0.hasPrefix(".") }
+    }
+
     // A selected root may itself be a link. An ancestor above the last link
     // cannot discover its files, because recursive enumeration skips links.
     static func traversalBoundary(for root: URL, upTo ancestor: String = "/") -> String {
@@ -41,11 +57,12 @@ public struct CatalogScanner: Sendable {
             else { throw CatalogError.staleScan }
             return value
         }
-        guard Self.canOpen(source.url) else {
+        guard Self.isReachable(source) else {
             try setReachability(false, source: source, generation: generation)
             return
         }
         try setReachability(true, source: source, generation: generation)
+        var discoveredAny = false
 
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         var traversalError: Error?
@@ -82,6 +99,7 @@ public struct CatalogScanner: Sendable {
         func commit() throws {
             guard !pending.isEmpty else { return }
             try record(pending, source: source, generation: generation, boundary: boundary)
+            discoveredAny = true
             pending.removeAll(keepingCapacity: true)
             lastCommit = clock.now
             onProgress()
@@ -117,17 +135,23 @@ public struct CatalogScanner: Sendable {
             try Task.checkCancellation()
             try commit()
         } catch {
-            if !Self.canOpen(source.url) { try setReachability(false, source: source, generation: generation) }
+            if !Self.isReachable(source) { try setReachability(false, source: source, generation: generation) }
             throw error
         }
 
         try Task.checkCancellation()
-        guard Self.canOpen(source.url) else {
+        guard Self.isReachable(source) else {
             try setReachability(false, source: source, generation: generation)
             return
         }
+        // Learn the volume of an older source only once the folder shows its content.
+        let volume = Self.volumeIdentity(of: source.url)
+        let learnVolume = volume != nil && volume != source.volume && (source.volume != nil || discoveredAny)
         try catalog.database.write { db in
             try verifyGeneration(db, sourceID: source.id, generation: generation)
+            if learnVolume {
+                try db.execute(sql: "UPDATE source SET volume = ? WHERE id = ?", arguments: [volume, source.id])
+            }
             // Older catalogs inferred membership solely from a path prefix. Remove
             // claims across links, retaining the membership of any explicitly selected linked root.
             for link in links {

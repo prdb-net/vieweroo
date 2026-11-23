@@ -237,6 +237,10 @@ extension Catalog {
                     BEGIN UPDATE studioRevision SET value = value + 1; END;
                 """)
         }
+        migrator.registerMigration("source-volume-v19") { db in
+            // Recognize an unmounted share whose empty mount point is still readable.
+            try db.execute(sql: "ALTER TABLE source ADD COLUMN volume TEXT")
+        }
         return migrator
     }
 }

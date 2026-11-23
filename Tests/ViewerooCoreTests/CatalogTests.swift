@@ -777,6 +777,34 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(f.catalog.sources(libraryID: f.library.id).first).scanPending)
     }
 
+    func testAnEmptyMountPointOnAnotherVolumeCountsAsOffline() throws {
+        let f = try LibraryFixture()
+        defer { f.clean() }
+        let movie = try f.add("Harbor.mp4")
+        try f.scan()
+        let recorded = try XCTUnwrap(f.catalog.sources(libraryID: f.library.id).first?.volume)
+        XCTAssertEqual(recorded, CatalogScanner.volumeIdentity(of: f.media))
+
+        // Simulate a share that was mounted at this folder and is now gone.
+        try f.catalog.database.write { try $0.execute(sql: "UPDATE source SET volume = 'NAS-UUID|/Volumes/NAS'") }
+        let parked = f.base.appendingPathComponent("Parked.mp4")
+        try FileManager.default.moveItem(at: movie, to: parked)
+        try Data().write(to: f.media.appendingPathComponent(".DS_Store"))
+        func source() throws -> CatalogSource { try XCTUnwrap(f.catalog.sources(libraryID: f.library.id).first) }
+        try CatalogScanner(catalog: f.catalog).scan(source: source())
+        XCTAssertFalse(try source().online)
+        XCTAssertEqual(try f.catalog.entries(libraryID: f.library.id).map(\.availability), [.offline])
+        XCTAssertTrue(try f.catalog.checkSources(libraryID: f.library.id) == false)
+
+        // Content on the new volume confirms the move and replaces the saved volume.
+        try FileManager.default.moveItem(at: parked, to: movie)
+        XCTAssertTrue(try f.catalog.checkSources(libraryID: f.library.id))
+        try CatalogScanner(catalog: f.catalog).scan(source: source())
+        XCTAssertTrue(try source().online)
+        XCTAssertEqual(try source().volume, recorded)
+        XCTAssertEqual(try f.catalog.entries(libraryID: f.library.id).map(\.availability), [.available])
+    }
+
     func testScanCommitsDiscoveriesInBatches() throws {
         let f = try LibraryFixture()
         defer { f.clean() }

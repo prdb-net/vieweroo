@@ -13,6 +13,8 @@ public struct CatalogSource: Identifiable, Hashable, Sendable {
     public let path: String
     public let online: Bool
     public let scanPending: Bool
+    /// The volume that held the folder when it was last scanned successfully.
+    let volume: String?
     public var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
 
     fileprivate var prefix: String { path.hasSuffix("/") ? path : path + "/" }
@@ -27,6 +29,7 @@ public struct CatalogSource: Identifiable, Hashable, Sendable {
         path = row["path"]
         online = row["online"]
         scanPending = row["scanPending"]
+        volume = row["volume"]
     }
 }
 
@@ -174,8 +177,12 @@ public final class Catalog: Sendable {
             let inserted = db.changesCount == 1
             let row = try Row.fetchOne(db, sql: "SELECT * FROM source WHERE libraryID = ? AND path = ?",
                                        arguments: [libraryID, path])!
-            let source = CatalogSource(row)
+            var source = CatalogSource(row)
             guard inserted else { return source }
+            if let volume = CatalogScanner.volumeIdentity(of: source.url) {
+                try db.execute(sql: "UPDATE source SET volume = ? WHERE id = ?", arguments: [volume, source.id])
+                source = CatalogSource(try Row.fetchOne(db, sql: "SELECT * FROM source WHERE id = ?", arguments: [source.id])!)
+            }
             // Inherit observations only from overlapping roots that can actually
             // traverse the same subtree. A linked child is its own source.
             let coverage = try Self.fetchSources(db, libraryID: libraryID).filter { other in
@@ -219,7 +226,7 @@ public final class Catalog: Sendable {
         var changed = false
         for source in try sources(libraryID: libraryID) {
             try Task.checkCancellation()
-            let online = CatalogScanner.canOpen(source.url)
+            let online = CatalogScanner.isReachable(source)
             guard online != source.online else { continue }
             let updated = try database.write { db in
                 try Task.checkCancellation()
