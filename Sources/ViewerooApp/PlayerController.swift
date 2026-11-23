@@ -34,6 +34,8 @@ final class PlayerController: ObservableObject {
     private var airPlayFailed = false
     private let makeMediaServer: (URL) throws -> AirPlayMediaServer
     private var seekID: UUID?
+    /// Set from the loop's end notification until the seek back to its start completes.
+    private var restartingLoop = false
     @Published private(set) var wantsPlayback = false
     private(set) var ready = false
     let recordedInterval = PassthroughSubject<Int64, Never>()
@@ -152,10 +154,12 @@ final class PlayerController: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self, self.generation == token, self.ready, item.status == .readyToPlay else { return }
                 let requested = self.player.rate != 0
-                // AVPlayer sets its rate to zero automatically at a loop boundary.
-                // The end-time notification decides whether to play the next pass.
-                if !requested, !hasReason,
-                   let end = self.loopEnd, self.player.currentTime().seconds >= end - 0.05 { return }
+                // AVPlayer sets its rate to zero without a reason at a loop boundary. The end-time
+                // notification decides whether to play the next pass. Setting the end time at the
+                // current position also stops the item while the seek back to the loop start runs,
+                // and the stop can arrive after that seek has moved the clock.
+                if !requested, !hasReason, let end = self.loopEnd,
+                   self.restartingLoop || self.seekID != nil || self.player.currentTime().seconds >= end - 0.05 { return }
                 if self.wantsPlayback != requested { self.wantsPlayback = requested }
             }
         })
@@ -166,9 +170,12 @@ final class PlayerController: ObservableObject {
             }
         }
         listen(for: .AVPlayerItemDidPlayToEndTime, item: item) { controller, _ in
+            // A seek into the loop is already on its way and resumes the next pass itself.
+            if controller.seekID != nil, controller.loopEnd != nil { return }
             controller.sample(playing: false)
             if let start = controller.loopStart, controller.loopEnd != nil, controller.wantsPlayback {
                 controller.seek(to: start, resume: true)
+                controller.restartingLoop = true
             } else {
                 controller.wantsPlayback = false
                 controller.ended = true
@@ -340,6 +347,7 @@ final class PlayerController: ObservableObject {
             Task { @MainActor in
                 guard let self, self.seekID == ticket else { return }
                 self.seekID = nil
+                self.restartingLoop = false
                 self.didJump()
                 if finished, self.wantsPlayback { self.player.play() }
             }
@@ -366,6 +374,7 @@ final class PlayerController: ObservableObject {
 
     private func detachItemObservers() {
         ready = false
+        restartingLoop = false
         playing = false
         generation = UUID()
         seekID = nil
