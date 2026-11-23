@@ -1,6 +1,13 @@
 import Foundation
 import ViewerooCore
 
+struct VisibleVideosKey: Equatable {
+    let revision: Int
+    let shelf: Shelf
+    let term: String
+    let filters: CollectionFilters
+}
+
 struct StudioTile: Identifiable {
     let studio: StudioOption
     let count: Int
@@ -48,11 +55,18 @@ extension LibraryModel {
             }.map { StudioTile(studio: $0, count: groups[$0.id]?.count ?? 0, cover: groups[$0.id]?.first) }
     }
 
+    /// Views read this several times per update and on every hover or scroll change.
+    /// Reuse the result until the collection, search or filters change.
     var visibleVideos: [CatalogEntry] {
+        // Register observation of every input, also when the cached result is returned.
+        _ = (entries, tags, orderedIDs, studioDirectory)
+        let key = VisibleVideosKey(revision: collectionRevision, shelf: shelf, term: searchTerm, filters: visit.filters)
+        if let cache = visibleVideosCache, cache.key == key { return cache.videos }
         let scoped = videosInCollection
-        guard narrowed else { return scoped }
-        let term = searchTerm
-        return scoped.filter { visit.filters.includes($0, directory: studioDirectory, term: term) }
+        let term = key.term
+        let videos = narrowed ? scoped.filter { visit.filters.includes($0, directory: studioDirectory, term: term) } : scoped
+        visibleVideosCache = (key, videos)
+        return videos
     }
 
     var videosInCollection: [CatalogEntry] {

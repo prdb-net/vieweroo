@@ -15,8 +15,6 @@ struct BrowserView: View {
         return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
     }
     @FocusState private var focusedTitle: Int64?
-    @State private var hoveredPoster: Int64?
-    @State private var hoveredTitle: Int64?
     @State private var coverCollection: CoverCollection?
     @Environment(\.colorScheme) private var scheme
     private var studioIndex: Bool { model.shelf == .studios }
@@ -144,7 +142,7 @@ struct BrowserView: View {
                 VStack(alignment: .leading, spacing: VSpace.tight) {
                     poster(entry, tile: tile)
                         .overlay(alignment: .topTrailing) { SelectionCheckmark(checked: selected.contains(entry.id)) }
-                    tileCaption(entry)
+                    tileCaption(entry, underlined: false)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
@@ -154,40 +152,43 @@ struct BrowserView: View {
             let playable = LibraryModel.cinemaPlayable(entry)
             let action = playable ? (entry.resume > 0 ? "Resume" : "Play") : "Details"
             VStack(alignment: .leading, spacing: VSpace.tight) {
-                Button {
-                    if playable { model.play(entry) } else { model.openDetail(entry.id) }
-                } label: {
-                    poster(entry, tile: tile)
-                        .overlay(alignment: .topTrailing) {
-                            if playable && hoveredPoster == entry.id {
-                                Image(systemName: "play.fill")
-                                    .frame(width: 30, height: 30)
-                                    .foregroundStyle(.white)
-                                    .background(.black.opacity(0.76), in: Circle())
-                                    .padding(VSpace.tight).allowsHitTesting(false)
+                // Hover state lives in each tile, so pointer movement does not re-evaluate the grid.
+                Hovering { hovered in
+                    Button {
+                        if playable { model.play(entry) } else { model.openDetail(entry.id) }
+                    } label: {
+                        poster(entry, tile: tile)
+                            .overlay(alignment: .topTrailing) {
+                                if playable && hovered {
+                                    Image(systemName: "play.fill")
+                                        .frame(width: 30, height: 30)
+                                        .foregroundStyle(.white)
+                                        .background(.black.opacity(0.76), in: Circle())
+                                        .padding(VSpace.tight).allowsHitTesting(false)
+                                }
                             }
-                        }
-                        .contentShape(Rectangle())
+                            .contentShape(Rectangle())
+                    }
+                    .help("\(action) · \(entry.title)")
+                    .accessibilityLabel("\(action) \(entry.title)")
                 }
-                .help("\(action) · \(entry.title)")
-                .accessibilityLabel("\(action) \(entry.title)")
-                .onHover { inside in hoveredPoster = inside ? entry.id : nil }
-                Button { model.openDetail(entry.id) } label: {
-                    tileCaption(entry)
+                Hovering { hovered in
+                    Button { model.openDetail(entry.id) } label: {
+                        tileCaption(entry, underlined: hovered)
+                    }
+                    .focused($focusedTitle, equals: entry.id)
+                    .help("Show details")
+                    .accessibilityLabel("Details for \(entry.title)")
                 }
-                .focused($focusedTitle, equals: entry.id)
-                .help("Show details")
-                .accessibilityLabel("Details for \(entry.title)")
-                .onHover { inside in hoveredTitle = inside ? entry.id : nil }
             }
             .buttonStyle(.plain)
         }
     }
 
-    private func tileCaption(_ entry: CatalogEntry) -> some View {
+    private func tileCaption(_ entry: CatalogEntry, underlined: Bool) -> some View {
         VStack(alignment: .leading, spacing: VSpace.unit) {
             Text(entry.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                .underline(selection == nil && hoveredTitle == entry.id)
+                .underline(underlined)
             if model.shelf == .frequent {
                 Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
             }
@@ -376,5 +377,15 @@ private struct ImportedPoster: View {
             }.value
             if !Task.isCancelled { image = data.flatMap(NSImage.init(data:)) }
         }
+    }
+}
+
+/// Tracks the pointer for one control without invalidating its parent view.
+private struct Hovering<Content: View>: View {
+    @State private var hovered = false
+    @ViewBuilder let content: (Bool) -> Content
+
+    var body: some View {
+        content(hovered).onHover { hovered = $0 }
     }
 }

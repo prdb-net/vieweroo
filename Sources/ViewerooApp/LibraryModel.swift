@@ -53,17 +53,17 @@ final class LibraryModel {
     var pinEnabled = false
     var libraries: [CatalogLibrary] = []
     var sources: [CatalogSource] = []
-    var entries: [CatalogEntry] = []
+    var entries: [CatalogEntry] = [] { didSet { collectionRevision &+= 1 } }
     var studioCovers: [String: CatalogCover] = [:]
     var favoriteStudioIDs: Set<String> = []
-    var studioDirectory = StudioDirectory()
+    var studioDirectory = StudioDirectory() { didSet { collectionRevision &+= 1 } }
     var studioOptions: [StudioOption] { studioDirectory.options }
-    var tags: [CatalogTag] = []
+    var tags: [CatalogTag] = [] { didSet { collectionRevision &+= 1 } }
     var playlists: [CatalogPlaylist] = []
     var recentPlaylists: [CatalogPlaylist] {
         Array(playlists.filter { $0.lastOpenedOrder > 0 }.sorted { $0.lastOpenedOrder > $1.lastOpenedOrder }.prefix(5))
     }
-    var orderedIDs: [Int64] = []
+    var orderedIDs: [Int64] = [] { didSet { collectionRevision &+= 1 } }
     private(set) var loadingLibrary = false
     var libraryID: Int64?
     private(set) var visit = BrowseVisit()
@@ -98,6 +98,9 @@ final class LibraryModel {
     @ObservationIgnored private var playbackRefresh: Task<Void, Never>?
     @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
     @ObservationIgnored private var studioCache: StudioOptionsCache?
+    /// Changes whenever the inputs of `visibleVideos` other than the visit change.
+    @ObservationIgnored private(set) var collectionRevision = 0
+    @ObservationIgnored var visibleVideosCache: (key: VisibleVideosKey, videos: [CatalogEntry])?
     @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
