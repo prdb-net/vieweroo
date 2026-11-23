@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Lookout</title>
+  <desc id="desc">A front-facing amber kangaroo holds two sea-glass binocular lenses up to its eyes.</desc>
+  <defs>
+    <linearGradient id="pine" x2=".7" y2="1">
+      <stop stop-color="#205850"/><stop offset="1" stop-color="#0a3335"/>
+    </linearGradient>
+    <clipPath id="frame"><rect x="14" y="14" width="228" height="228" rx="50"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <path fill="url(#pine)" d="M14 14h228v228H14z"/>
+    <!-- One ear is cocked toward a sound. -->
+    <path fill="#d39656" d="M106 112C84 97 63 66 60 34c28 7 54 34 58 65z"/>
+    <path fill="#8f5c40" d="M102 93C85 77 73 57 69 44c18 10 34 33 38 49z"/>
+    <path fill="#f6c17c" d="M141 98c-5-23 2-53 21-72 10 25 4 59-11 80z"/>
+    <path fill="#a36c49" d="M148 89c-1-18 4-40 12-52 4 16-1 40-10 52z"/>
+    <path fill="#dd9b54" d="M40 247c12-26 33-37 52-47 8-7 10-22 11-37h45c0 16 4 29 14 36 22 14 45 24 59 48z"/>
+    <path fill="#f5c784" d="M98 195c4 17 12 34 25 49h30c-5-13-4-27 4-43-9-9-12-23-13-38h-37z"/>
+    <path fill="#f7bd73" d="M78 121c3-22 19-38 46-39 30-1 53 15 58 40 3 18-5 33-21 46-8 6-10 20-21 26-9 5-20 5-30-2-8-6-12-16-18-24-12-13-17-29-14-47z"/>
+    <path fill="#ffdb9b" d="M101 147c7-7 16-11 27-11s21 3 28 11c1 12-2 27-9 37-5 7-12 12-21 12-11 0-18-7-23-15-7-11-8-24-2-34z"/>
+    <path fill="#413e35" d="M112 168c0-4 6-5 16-5 9 0 15 1 15 5-1 5-8 11-15 13-8-2-15-8-16-13z"/>
+    <path d="M128 179v4q-3 5-8 4m8-4q3 5 8 3" fill="none" stroke="#926549" stroke-width="2" stroke-linecap="round"/>
+    <g transform="rotate(-4 128 127)">
+      <path fill="#326d65" d="M52 129l10-25c5-11 14-16 29-16 13 0 22 5 26 13l8 23zm80-4 7-23c4-10 14-15 27-15s24 5 29 16l10 26z"/>
+      <path fill="#78aaa0" d="M109 109q18-14 38 0l2 15q-20-11-41 0z"/>
+      <circle cx="88" cy="128" r="36" fill="#c6e5bc" stroke="#204643" stroke-width="4"/>
+      <circle cx="167" cy="128" r="36" fill="#c6e5bc" stroke="#204643" stroke-width="4"/>
+      <g fill="#205b5d"><circle cx="88" cy="128" r="25"/><circle cx="167" cy="128" r="25"/></g>
+      <g fill="#82b6aa"><path d="M67 131c0-14 9-25 23-25l-21 32z"/><path d="M146 131c0-14 9-25 23-25l-21 32z"/></g>
+    </g>
+    <g fill="#bd8047">
+      <path d="M57 150c-6 18 3 49 20 66 6 6 15 4 16-4 1-12-13-39-27-58z"/>
+      <path d="M192 144c9 10 5 40-7 62-6 11-16 14-21 7-4-7 7-36 18-58z"/>
+    </g>
+    <g fill="#f4be79">
+      <path d="M84 212c-9 6-23-13-30-32-4-12-5-24-8-35-1-6 2-8 5-4l5 7-3-15c-1-5 3-7 6-2l6 13-1-9c0-5 4-6 6-1l5 17c1 5-1 10-4 12 1 13 7 27 14 39 2 4 2 8-1 10z"/>
+      <path d="M168 211c7 4 17-8 23-23 5-12 8-24 9-35 4-4 7-16 7-22 0-5-4-5-6 0l-4 8 1-13c0-6-4-7-6-1l-4 14-1-8c0-5-4-5-5 0l-2 18c0 5 2 8 5 11-2 12-10 29-17 40-3 5-3 9 0 11z"/>
+    </g>
+  </g>
+</svg>

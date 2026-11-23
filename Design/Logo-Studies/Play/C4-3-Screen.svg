@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Screen</title>
+  <desc id="desc">A round left lens carries the kangaroo ears. A short bridge joins it to a widescreen right lens with a solid play button.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87">
+    <path d="M72 118C56 107 47 85 45 67c17 3 33 15 40 32-1-18 4-37 17-53 9 20 7 46-5 66z"/>
+    <path d="M103 139q14-11 31-3l-1 18q-16-9-31 3z"/>
+    <path fill-rule="evenodd" d="M76 104c23-1 39 16 39 42 0 29-17 52-42 52-23 0-39-17-39-42 0-30 17-51 42-52z
+      M76 124c-13 0-22 15-22 32 0 14 7 22 18 22 13 0 23-14 23-31 0-15-8-24-19-23z"/>
+    <path fill-rule="evenodd" d="M146 106h55c15 0 23 9 23 25v35c0 17-10 27-27 27h-54c-16 0-24-9-24-25v-35c0-17 10-27 27-27z
+      M148 124c-7 0-11 4-11 11v30c0 7 4 10 10 10h48c7 0 11-4 11-11v-30c0-6-4-10-10-10z"/>
+    <path d="M160 137c0-3 2-4 5-3l22 13c3 2 3 4 0 6l-22 13c-3 1-5 0-5-3z"/>
+  </g>
+</svg>

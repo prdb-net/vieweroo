@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Play</title>
+  <desc id="desc">A pair of bold, rounded o's leans forward. The right counter is cut into the shape of a play button.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87" transform="translate(15) skewX(-6)">
+    <path d="M77 113C65 100 55 80 56 58c19 6 31 19 38 39-1-21 6-39 22-53 7 23 0 48-12 67z"/>
+    <path fill-rule="evenodd" d="M86 103c31 0 46 14 46 43v11c0 29-16 44-46 44s-45-15-45-44v-11c0-29 15-43 45-43z
+      M86 125c-15 0-22 8-22 23v8c0 15 7 23 22 23s22-8 22-23v-8c0-15-7-23-22-23z"/>
+    <path d="M120 138q9-6 18 0v22q-9-4-18 0z"/>
+    <path fill-rule="evenodd" d="M170 103c31 0 46 14 46 43v11c0 29-16 44-46 44s-45-15-45-44v-11c0-29 15-43 45-43z
+      M155 133c0-5 4-7 9-5l29 18c5 3 5 7 0 10l-29 19c-5 3-9 0-9-5z"/>
+  </g>
+</svg>

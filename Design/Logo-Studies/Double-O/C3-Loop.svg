@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Loop</title>
+  <desc id="desc">The two o's form a continuous ribbon that crosses over itself, with kangaroo ears on the left loop.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <path fill="#ffda87" d="M78 117C64 104 52 83 54 60c18 6 32 21 38 42 0-19 5-38 18-54 7 24 3 49-11 70z"/>
+  <!-- The ends stop just short of the rising stroke to expose the crossing. -->
+  <path fill="none" stroke="#ffda87" stroke-width="20"
+        d="M118 136c-12-16-22-24-35-24-21 0-34 17-34 38s13 38 33 38c19 0 33-18 46-38s28-38 46-38c20 0 33 16 33 37s-13 39-33 39c-14 0-25-11-36-25"/>
+</svg>

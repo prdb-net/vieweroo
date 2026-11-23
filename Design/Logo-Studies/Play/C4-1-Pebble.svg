@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Pebble</title>
+  <desc id="desc">Two soft, round o's meet below a pair of kangaroo ears. A rounded play triangle opens inside the right o.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87">
+    <path fill-rule="evenodd" d="M81 117C66 107 52 84 52 61c19 4 35 17 42 37 0-23 8-42 24-55 6 24 0 50-15 69z
+      M110 63c-6 9-11 21-12 33 7-9 11-22 12-33z"/>
+    <!-- A shallow waist keeps the two lobes legible at small sizes. -->
+    <path fill-rule="evenodd" d="M87 102c18 0 33 8 42 22 9-14 24-22 43-22 28 0 46 20 46 47 0 32-20 53-49 53-19 0-32-8-41-21-10 14-24 21-43 21-28 0-47-20-47-47 0-31 20-53 49-53z
+      M88 125c-14 0-24 14-24 30 0 14 8 23 21 23 14 0 24-14 24-31 0-13-8-22-21-22z
+      M154 135c0-6 5-9 10-6l26 16c6 4 6 10 0 14l-26 16c-5 3-10 0-10-6z"/>
+  </g>
+</svg>

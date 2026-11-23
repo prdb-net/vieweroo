@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Moonrise</title>
+  <desc id="desc">A kangaroo's profile cuts into a pale gold moon. Its upturned nose follows a single star in an indigo night sky.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#252d4d"/>
+  <circle cx="125" cy="130" r="83" fill="#fada94"/>
+  <g id="kangaroo">
+    <!-- The silhouette meets the night sky at the lower rim of the moon. -->
+    <path fill="#252d4d" d="M38 226c8-28 28-47 44-65 10-12 15-24 16-37-15-12-24-30-26-51 17 7 30 20 38 36-1-17 1-36 11-52 11 17 14 38 10 54 11-3 19-1 25 5 5 4 9 5 15 4l18-4c5-1 8 2 7 6-1 9-10 18-20 23-7 4-15 5-20 6-8 7-11 23-10 37 1 18 7 27 12 38z"/>
+    <path fill="#fada94" d="M141 121q6-6 12-1-5 5-11 4z"/>
+    <path d="M171 140q9-2 15-8" fill="none" stroke="#fada94" stroke-width="1.8" stroke-linecap="round"/>
+  </g>
+  <path fill="#fff1c7" d="M207 46c1 9 4 12 12 13-8 2-11 5-12 14-2-9-5-12-13-14 8-1 11-4 13-13z"/>
+</svg>

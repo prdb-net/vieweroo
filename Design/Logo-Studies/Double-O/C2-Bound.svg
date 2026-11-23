@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Bound</title>
+  <desc id="desc">Two italic o's leap up and to the right. Swept-back ears and a tapered kangaroo tail extend the lower letter.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87">
+    <path d="M91 137C68 130 50 116 40 93c21 2 37 10 51 25-13-19-20-39-17-61 21 13 35 37 36 62z"/>
+    <path d="M92 201c-16 12-30 11-43 4-14-8-22-22-24-42 11 18 25 27 39 27 6 0 12-1 18-4z"/>
+    <path fill-rule="evenodd" d="M108 115c27-1 42 20 33 47-8 26-32 45-56 44-25-1-38-19-31-44 7-26 29-46 54-47z
+      M106 136c-12 0-25 14-29 29-4 12-1 20 8 21 12 1 25-13 30-28 4-13 1-22-9-22z"/>
+    <path d="M128 138c8-1 15-8 23-20l4 23c-6 8-16 15-27 17z"/>
+    <path fill-rule="evenodd" d="M190 88c26-1 39 18 31 45-8 26-31 46-55 45-24-1-37-20-30-44 7-26 29-45 54-46z
+      M188 109c-12 0-24 12-29 28-4 12-1 21 8 21 12 1 24-13 29-28 4-12 1-21-8-21z"/>
+  </g>
+</svg>

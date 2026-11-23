@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Skip</title>
+  <desc id="desc">Swept-back ears and forward-leaning letters suggest a kangaroo in motion. The higher, leading letter holds a play cutout.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87">
+    <path d="M88 128C66 121 48 107 40 88c19-1 37 8 52 24-13-22-18-42-15-62 20 13 34 36 35 65z"/>
+    <path fill-rule="evenodd" d="M103 113c28-4 44 9 44 32 0 26-20 54-45 60-27 7-51-3-53-27-3-28 22-61 54-65z
+      M100 136c-13 3-25 18-26 32-1 13 7 19 18 16 14-3 26-20 27-34 0-11-7-17-19-14z"/>
+    <path d="M128 136c13-5 21-14 31-28l-3 33c-9 9-21 16-35 18z"/>
+    <path fill-rule="evenodd" d="M185 88c26-3 41 12 37 37-4 28-25 53-52 59-25 5-44-9-41-34 3-27 28-59 56-62z
+      M165 118c1-4 4-6 8-4l23 14c4 2 3 6-1 9l-33 20c-4 2-6 0-5-4z"/>
+  </g>
+</svg>

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Matinee</title>
+  <desc id="desc">A cream and ochre kangaroo in profile peers through dark opera glasses against a vermilion field.</desc>
+  <defs><clipPath id="frame"><rect x="14" y="14" width="228" height="228" rx="50"/></clipPath></defs>
+  <g clip-path="url(#frame)">
+    <path fill="#cc5039" d="M14 14h228v228H14z"/>
+    <!-- A cut-paper profile faces into the open left side of the tile. -->
+    <path fill="#eaa449" d="M131 100c-9-21-8-47 5-76 14 23 15 48 7 74z"/>
+    <path fill="#503c34" d="M135 79c-4-12-3-30 0-41 5 14 6 28 3 42z"/>
+    <path fill="#fff0c8" d="M221 250c-7-33-32-54-51-79-14-18-17-38-18-55 22-15 39-41 46-74-30 9-55 31-66 53-19-8-35-3-48 17l-19 25-23 9c-6 4-7 11-1 16 9 9 31 15 53 10 15 17 22 44 14 78z"/>
+    <path fill="#dea148" d="M148 102c12-21 26-35 39-47-6 20-21 39-39 47z"/>
+    <path fill="#e4a348" d="M95 172c9-7 20-14 26-24-2 13-11 23-19 31z"/>
+    <path fill="#302e31" d="M41 145l15-4c6-1 9 2 7 7-3 7-10 12-17 13-6-3-10-11-5-16z"/>
+    <path d="M53 164q11 4 21 1" fill="none" stroke="#a96a39" stroke-width="2.4" stroke-linecap="round"/>
+    <!-- Short theatre glasses, tilted on a single handle. -->
+    <g transform="rotate(12 92 111)">
+      <path d="M80 119l25 63" fill="none" stroke="#302e31" stroke-width="8" stroke-linecap="round"/>
+      <path fill="#504449" d="M49 83l31-5c10-1 15 7 16 16l-1 11-34 20z"/>
+      <path fill="#302e31" d="M59 99l28 4 1 11-29-6z"/>
+      <ellipse cx="52" cy="103" rx="17" ry="24" fill="#302e31"/>
+      <ellipse cx="51" cy="103" rx="12" ry="18" fill="#ffd06d"/>
+      <ellipse cx="51" cy="103" rx="7" ry="12" fill="#403d40"/>
+      <path fill="#594950" d="M79 93l35-6c10-2 19 7 20 17l-1 7-41 26z"/>
+      <path fill="#302e31" d="M114 87l5-1c9-2 17 6 18 16l-1 9-6 2c2-11-4-25-16-26z"/>
+      <ellipse cx="83" cy="115" rx="20" ry="28" fill="#302e31"/>
+      <ellipse cx="82" cy="115" rx="14" ry="21" fill="#ffce69"/>
+      <ellipse cx="82" cy="115" rx="8.5" ry="14" fill="#403d40"/>
+      <path fill="#fff0c8" d="M77 118c-2-7 1-15 5-16z"/>
+    </g>
+    <!-- A single ochre forearm stays legible across the cream cheek. -->
+    <path fill="#dea148" d="M137 175c6 6 5 16 1 24-4 10-11 17-19 15-13-3-24-17-35-31-5 0-10-3-13-7-2-3-1-6 2-5l7 3-7-9c-2-3 0-6 3-4l10 8-4-8c-2-4 1-6 4-3l10 10c3 4 3 7 1 10l21 15c4-3 6-9 9-14 3-5 7-7 10-4z"/>
+    <path fill="#fff0c8" d="M127 202c5-6 8-13 10-20 3 8-1 17-7 22z"/>
+  </g>
+</svg>

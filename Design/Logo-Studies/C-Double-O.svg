@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Vieweroo — Double O</title>
+  <desc id="desc">Two connected, forward-leaning lowercase o's in butter yellow. A pair of long kangaroo ears grows from the first letter.</desc>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="#433454"/>
+  <g fill="#ffda87">
+    <!-- Both counters are part of the letterforms so the mark also works in one ink. -->
+    <path fill-rule="evenodd" d="M83 104C70 94 61 75 61 58c17 5 30 16 37 35-1-21 4-39 18-52 7 20 4 45-7 63 21 6 29 25 24 49-6 28-26 48-53 48-27 0-42-19-37-45 5-25 19-45 40-52z M100 125c-13-4-25 10-30 27-4 15-2 26 8 29 13 4 26-10 31-28 4-15 1-25-9-28z"/>
+    <path fill-rule="evenodd" d="M177 102c29 0 44 21 38 48-6 29-27 51-54 51-26 0-42-19-36-47 6-29 25-52 52-52z M182 125c-13-4-25 10-30 27-4 15-2 26 8 29 13 4 26-10 31-28 4-15 1-25-9-28z"/>
+    <path d="M117 130c10 2 21-5 31-14l-5 23c-7 8-19 14-28 14z"/>
+  </g>
+</svg>
