@@ -34,7 +34,8 @@ public struct CatalogPlaylist: Identifiable, Hashable, Sendable {
     public let id: Int64
     public let libraryID: Int64
     public let name: String
-    public let videoCount: Int
+    public let memberIDs: Set<Int64>
+    public var videoCount: Int { memberIDs.count }
     public let lastOpenedOrder: Int64
 }
 

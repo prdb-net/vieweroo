@@ -8,11 +8,13 @@ extension Catalog {
 
     static func fetchPlaylists(_ db: Database, libraryID: Int64) throws -> [CatalogPlaylist] {
         try Row.fetchAll(db, sql: """
-            SELECT p.*, (SELECT COUNT(*) FROM playlistItem WHERE playlistID = p.id) AS videoCount
+            SELECT p.*, (SELECT json_group_array(entryID) FROM playlistItem WHERE playlistID = p.id) AS memberIDs
             FROM playlist p WHERE p.libraryID = ? ORDER BY p.name COLLATE swiftLocalizedStandardCompare, p.id
             """, arguments: [libraryID]).map { row in
-                CatalogPlaylist(id: row["id"], libraryID: row["libraryID"], name: row["name"],
-                                videoCount: row["videoCount"], lastOpenedOrder: row["lastOpenedOrder"])
+                let members: String = row["memberIDs"]
+                let memberIDs = try JSONDecoder().decode(Set<Int64>.self, from: Data(members.utf8))
+                return CatalogPlaylist(id: row["id"], libraryID: row["libraryID"], name: row["name"],
+                                       memberIDs: memberIDs, lastOpenedOrder: row["lastOpenedOrder"])
             }
     }
 
@@ -39,7 +41,7 @@ extension Catalog {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return try database.write { db in
             try db.execute(sql: "INSERT INTO playlist(libraryID, name) VALUES (?, ?)", arguments: [libraryID, clean])
-            return CatalogPlaylist(id: db.lastInsertedRowID, libraryID: libraryID, name: clean, videoCount: 0, lastOpenedOrder: 0)
+            return CatalogPlaylist(id: db.lastInsertedRowID, libraryID: libraryID, name: clean, memberIDs: [], lastOpenedOrder: 0)
         }
     }
 

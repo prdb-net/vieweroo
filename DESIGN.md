@@ -66,6 +66,8 @@ In an open tag, All Videos, Favorites, Liked and Watch History, place the icon-o
 
 Keep **Back** at the upper leading edge of the content, above the scroll area. Enable it when an earlier browsing location exists. Command–[ retraces one step, restoring the search term, filters, scroll position and selected tile. When users reopen a collection from the sidebar, a tile or a link, restore its last applied search, filters and scroll offset in a new visit. Keep chips and the count visible for empty results. Back retraces the actual visits. Clear remembered collections and history on lock, library switch and quit.
 
+Right-click a video tile in a collection to play or resume, add or remove a favorite, set or clear a like or dislike, or choose a destination under **Add to Playlist**. Keep reactions and playlist actions available for offline and missing videos. In Watch History, offer **Play from Beginning** alongside **Resume** when there is a saved position. In a playlist, group reordering and removal below **Add to Playlist**. In selection mode, use the bulk action bar.
+
 Select a video tile to open its title page or use the tile’s Play button to start or resume immediately. Keep the title and a link to its studio above the 16∶9 poster. Play replaces the poster with the video in place and reveals the transport beneath it. When a resume point exists, offer both Resume and Play from Beginning on the poster. Group reactions and playlist actions below the video with the play count, total watch time and Library Details button. Open the most-watched segments in a popover anchored to the counts. Selecting a segment closes the popover and plays from its start. Place the local resolution tier beside the studio. Library Details opens a wide, scrollable sheet. Show the file and folder together with **Show in Finder** and a **Video Encoding** button that opens a popover below it. Follow the file with its PRDB match, studio and library tags. Keep Done within reach while scrolling.
 
 In Library Details, show **Remove Match** beside **Correct Match…** whenever a title is linked. After removal, show **No title linked** and offer **Find Match…**.
@@ -74,7 +76,7 @@ In **Match a PRDB Title**, keep the filename and current match visible. With no 
 
 Moving the pointer horizontally across a video tile, title poster or suggested thumbnail steps through its cached stills. Show the time of the displayed still. Restore the poster on exit and keep the poster visible while frames are unavailable.
 
-**More to Watch** offers up to eight playable titles from the current library. Prefer the same studio, then a shared performer, then a shared tag. Fill the remaining places in catalog order, starting after the current video. Include the relationship in the subtitle when available. Choosing a title starts it at its saved position. The list stays out of the layout when there are no alternatives.
+**More to Watch** offers up to eight playable titles from the current library. Prefer the same studio, then a shared performer, then a shared tag. Fill the remaining places in catalog order, starting after the current video. Include the relationship in the subtitle when available. Choosing a title starts it at its saved position. On the title page and in Cinema Mode, right-click a recommendation to add or remove that video from Favorites while playback continues. The list stays out of the layout when there are no alternatives.
 
 Keep the same recommendation layout before and during playback. At 760 pt of detail space, place the list beside the video. Below that, use a horizontal shelf below the cast. Selecting a suggestion replaces the current title in place. Full screen dedicates the window to playback.
 
@@ -100,7 +102,7 @@ Inset notices 24 pt from the window edges and raise them above the player contro
 
 On the detail page, acknowledge a successful selection at the button. Three small pink hearts rise when saving a Favorite. Like lifts a mint thumb through four short rays. Dislike taps a violet thumb against a small impact line. Keep the button frame still. A filled symbol and tinted outline show the saved state. Clearing a selection restores its outline immediately. Reduce Motion keeps the state change instant. The [interactive reference](Design/reactions.html) demonstrates the three reactions.
 
-Briefly show a checkmark on **Add to Playlist** when a video joins a playlist. Name the destination in the notice. A repeat insertion reports that the video already belongs to that playlist.
+Briefly show a checkmark on **Add to Playlist** when a video joins a playlist. Name the destination in the notice. In a video tile’s context menu, show a checkmark next to each playlist that already contains the video. Choosing a checked destination keeps the video in place and reports that it already belongs to that playlist.
 
 Place the A and B markers just above the native timeline at their playback times. Setting A settles the start marker into position. Setting B briefly brightens the span, which stays visible until the loop clears. Reduce Motion shows the markers and span immediately.
 

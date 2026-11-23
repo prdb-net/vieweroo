@@ -1,7 +1,7 @@
 import SwiftUI
 import ViewerooCore
 
-enum VideoReaction: String {
+enum VideoReaction: String, CaseIterable {
     case favorite = "Favorite"
     case like = "Like"
     case dislike = "Dislike"
@@ -25,6 +25,14 @@ enum VideoReaction: String {
         }
     }
 
+    func actionTitle(isSelected: Bool) -> String {
+        switch self {
+        case .favorite: isSelected ? "Remove from Favorites" : "Add to Favorites"
+        case .like: isSelected ? "Clear Like" : "Like Video"
+        case .dislike: isSelected ? "Clear Dislike" : "Dislike Video"
+        }
+    }
+
     var duration: Double {
         switch self {
         case .favorite: 0.56
@@ -41,14 +49,6 @@ struct ReactionButton: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activation = 0
-
-    private var helpText: String {
-        switch reaction {
-        case .favorite: isSelected ? "Remove from Favorites" : "Add to Favorites"
-        case .like: isSelected ? "Clear Like" : "Like Video"
-        case .dislike: isSelected ? "Clear Dislike" : "Dislike Video"
-        }
-    }
 
     var body: some View {
         let tint = reaction.tint(in: scheme)
@@ -93,7 +93,7 @@ struct ReactionButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(ReactionButtonStyle(tint: isSelected ? tint : nil))
-        .help(helpText)
+        .help(reaction.actionTitle(isSelected: isSelected))
         .accessibilityLabel(reaction.rawValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -167,26 +167,62 @@ struct EntryReactions: View {
     let model: LibraryModel
     let entry: CatalogEntry
 
+    var inMenu = false
+
     var body: some View {
-        HStack(spacing: VSpace.tight) {
-            ReactionButton(reaction: .favorite, isSelected: entry.favorite) {
-                let confirmation = entry.favorite ? "Removed from Favorites" : "Added to Favorites"
-                return model.change(model.cinemaMode ? nil : confirmation,
-                             kind: entry.favorite ? .success : .favorite) {
-                    try $0.setFavorite(entryID: entry.id, value: !entry.favorite)
-                }
-            }
-            rating(1, reaction: .like)
-            rating(-1, reaction: .dislike)
+        if inMenu {
+            actions
+        } else {
+            HStack(spacing: VSpace.tight) { actions }
         }
     }
 
-    private func rating(_ value: Int, reaction: VideoReaction) -> some View {
-        ReactionButton(reaction: reaction, isSelected: entry.rating == value) {
-            let updated = entry.rating == value ? 0 : value
-            let confirmation = updated == 0 ? "Rating cleared" : updated == 1 ? "Marked as liked" : "Marked as disliked"
+    @ViewBuilder private var actions: some View {
+        ForEach(VideoReaction.allCases, id: \.self) { reaction in
+            EntryReaction(model: model, entry: entry, reaction: reaction, inMenu: inMenu)
+        }
+    }
+}
+
+struct EntryReaction: View {
+    let model: LibraryModel
+    let entry: CatalogEntry
+    let reaction: VideoReaction
+    let inMenu: Bool
+
+    private var selected: Bool {
+        switch reaction {
+        case .favorite: entry.favorite
+        case .like: entry.rating == 1
+        case .dislike: entry.rating == -1
+        }
+    }
+
+    var body: some View {
+        if inMenu {
+            Button {
+                _ = save()
+            } label: {
+                Label(reaction.actionTitle(isSelected: selected), systemImage: reaction.symbol + (selected ? ".fill" : ""))
+            }
+        } else {
+            ReactionButton(reaction: reaction, isSelected: selected, save: save)
+        }
+    }
+
+    private func save() -> Bool {
+        guard entry.libraryID == model.libraryID else { return false }
+        switch reaction {
+        case .favorite:
+            let confirmation = selected ? "Removed from Favorites" : "Added to Favorites"
+            return model.change(model.cinemaMode ? nil : confirmation, kind: selected ? .success : .favorite) {
+                try $0.setFavorite(entryID: entry.id, value: !selected)
+            }
+        case .like, .dislike:
+            let rating = selected ? 0 : (reaction == .like ? 1 : -1)
+            let confirmation = selected ? "Rating cleared" : (reaction == .like ? "Marked as liked" : "Marked as disliked")
             return model.change(model.cinemaMode ? nil : confirmation) {
-                try $0.setRating(entryID: entry.id, value: updated)
+                try $0.setRating(entryID: entry.id, value: rating)
             }
         }
     }

@@ -122,9 +122,19 @@ struct BrowserView: View {
                             }
                             .contextMenu {
                                 if selection == nil {
-                                    Button("Play") { model.play(entry) }.disabled(entry.availability != .available)
+                                    Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
+                                        .disabled(entry.availability != .available)
+                                    if model.shelf == .frequent, entry.resume > 0 {
+                                        Button("Play from Beginning") { model.play(entry, at: 0) }
+                                            .disabled(entry.availability != .available)
+                                    }
+                                    Divider()
+                                    EntryReactions(model: model, entry: entry, inMenu: true)
+                                    Divider()
+                                    PlaylistMenu(model: model, entryID: entry.id, inContextMenu: true)
                                 }
                                 if let id = playlistID {
+                                    Divider()
                                     Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
                                     Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
                                     Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
@@ -225,7 +235,7 @@ struct BrowserView: View {
             } actions: { Button("Choose Folder…") { model.pickSource() }.buttonStyle(.borderedProminent) }
         } else {
             ContentUnavailableView("No videos here yet", systemImage: "film",
-                                   description: Text(playlistID != nil ? "Open a video and choose Add to Playlist." : "Videos appear here when they belong to this collection."))
+                                   description: Text(playlistID != nil ? "Right-click a video in your library and choose Add to Playlist." : "Videos appear here when they belong to this collection."))
         }
     }
 }

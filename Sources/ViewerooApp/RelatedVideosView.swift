@@ -69,6 +69,9 @@ private struct RelatedVideoButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            EntryReaction(model: model, entry: suggestion.entry, reaction: .favorite, inMenu: true)
+        }
         .help("Play \(suggestion.entry.title)")
         .accessibilityLabel(Text("Play \(suggestion.entry.title)"))
         .accessibilityValue(Text(suggestion.subtitle ?? ""))

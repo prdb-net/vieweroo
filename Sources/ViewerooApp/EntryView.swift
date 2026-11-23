@@ -11,6 +11,9 @@ struct EntryView: View {
 
     var body: some View {
         GeometryReader { layout in
+            // Keep the player width stable when a legacy scrollbar appears at the content-height threshold.
+            let gutter = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+            let pageWidth = min(1320, max(1, layout.size.width - gutter))
             let sideBySide = layout.size.width >= 760 && model.hasAlternatives(to: entry)
             ScrollViewReader { scroll in
                 ScrollView {
@@ -29,7 +32,7 @@ struct EntryView: View {
                         }
                     }
                     .padding(VSpace.section)
-                    .frame(maxWidth: sideBySide ? 1320 : 780, alignment: .leading)
+                    .frame(width: sideBySide ? pageWidth : min(pageWidth, 780), alignment: .leading)
                     .frame(maxWidth: .infinity)
                     .background(BrowseScrollAnchor(position: model.visit.scroll))
                 }
