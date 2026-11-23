@@ -54,3 +54,16 @@ import ViewerooCore
     let unchanged = history.prune { _ in true }
     #expect(!unchanged)
 }
+
+@MainActor
+@Test func libraryWorkCancelsEveryTaskWhenTheSessionEnds() async {
+    let work = LibraryWork()
+    for slot in LibraryWork.Slot.allCases {
+        work[slot] = Task { try? await Task.sleep(for: .seconds(60)) }
+    }
+    let tasks = LibraryWork.Slot.allCases.compactMap { work[$0] }
+    work.cancel()
+    #expect(work.isCancelled)
+    #expect(LibraryWork.Slot.allCases.allSatisfy { work[$0] == nil })
+    for task in tasks { await task.value; #expect(task.isCancelled) }
+}

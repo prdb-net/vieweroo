@@ -32,15 +32,11 @@ final class LibraryModel {
     @ObservationIgnored private var validated = false
     @ObservationIgnored private var directoryUpdated: Date?
     @ObservationIgnored private(set) var catalog: Catalog?
-    @ObservationIgnored private var worker: Task<Void, Never>?
-    @ObservationIgnored private var availabilityTask: Task<Void, Never>?
-    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    /// Every background task of the open library. Replaced when the library session ends.
+    @ObservationIgnored private var work = LibraryWork()
     @ObservationIgnored private var scanQueue: [CatalogSource] = []
     @ObservationIgnored private var scanningSourceID: Int64?
     @ObservationIgnored private var refreshRequested = false
-    @ObservationIgnored private var videoInfoTask: Task<Void, Never>?
-    @ObservationIgnored private var previewTask: Task<Void, Never>?
-    @ObservationIgnored private var session = UUID()
     @ObservationIgnored private var scanToken = UUID()
     @ObservationIgnored private var panel: NSOpenPanel?
     @ObservationIgnored private var previewToken = UUID()
@@ -96,8 +92,6 @@ final class LibraryModel {
         subscriptionRequired ? PRDBError.subscriptionRequired.localizedDescription : lookupStatus
     }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
-    @ObservationIgnored private var snapshotTask: Task<Void, Never>?
-    @ObservationIgnored private var playbackRefresh: Task<Void, Never>?
     @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
     @ObservationIgnored private var studioCache: StudioOptionsCache?
     /// Files whose video track could not be read during this session, by entry, size and date.
@@ -150,20 +144,20 @@ final class LibraryModel {
 
     func replacePRDBKey(_ input: String) async throws {
         guard phase == .ready else { throw CancellationError() }
-        let stamp = session
+        let stamp = work
         let key = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if try access.apiKey() == key {
             do { try await client.validate(key: key) }
             catch {
-                guard session == stamp, !Task.isCancelled else { throw CancellationError() }
+                guard work === stamp, !Task.isCancelled else { throw CancellationError() }
                 handleNetwork(error, key: key)
                 throw error
             }
         } else {
-            try await access.validateAndStore(key: key, client: client, while: { self.session == stamp })
+            try await access.validateAndStore(key: key, client: client, while: { self.work === stamp })
         }
         try Task.checkCancellation()
-        guard phase == .ready, session == stamp else { throw CancellationError() }
+        guard phase == .ready, work === stamp else { throw CancellationError() }
         validated = true
         subscriptionRequired = false
         lookupStatus = nil
@@ -254,16 +248,11 @@ final class LibraryModel {
 
     private func stopWork() {
         notice = nil
-        session = UUID()
+        work.cancel()
+        work = LibraryWork()
         scanToken = UUID()
         previewToken = UUID()
         automaticCovers = nil
-        snapshotTask?.cancel()
-        snapshotTask = nil
-        playbackRefresh?.cancel()
-        playbackRefresh = nil
-        videoInfoTask?.cancel()
-        worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         mainPlayer.stop()
         closeSecondPlayer(refresh: false)
         panel?.cancel(nil); panel = nil
@@ -272,7 +261,6 @@ final class LibraryModel {
         refreshRequested = false
         scanBusy = false; scanningFolder = nil; lookupStatus = nil
         previews = PreviewProgress(); lookupActivity = nil
-        previewTask = nil
     }
 
     private func conceal(_ gate: Gate) {
@@ -304,7 +292,7 @@ final class LibraryModel {
             case PRDBError.subscriptionRequired:
                 subscriptionRequired = true
                 lookupActivity = nil
-                worker?.cancel()
+                work[.lookups]?.cancel()
             case PRDBError.rateLimited:
                 lookupStatus = "PRDB’s request limit was reached. Pending lookups will retry."
             default:
@@ -323,18 +311,18 @@ final class LibraryModel {
         if let id { preferences.set(id, forKey: lastLibrary) }
         let initialLoad = reload()
         guard let catalog else { return }
-        let stamp = session
+        let stamp = work
         if let id {
-            availabilityTask = Task {
+            work[.availability] = Task {
                 do {
                     let probe = Task.detached(priority: .utility) { try catalog.checkSources(libraryID: id) }
                     let changed = try await withTaskCancellationHandler { try await probe.value } onCancel: { probe.cancel() }
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     if changed { await reload()?.value } else { await initialLoad?.value }
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     let pending = sources.filter { $0.online && $0.scanPending }
                     if !pending.isEmpty { scan(pending) } else if !scanBusy { generatePreviews() }
-                } catch { if session == stamp, !Task.isCancelled { message = error.localizedDescription } }
+                } catch { if work === stamp, !Task.isCancelled { message = error.localizedDescription } }
             }
         }
         startLookups()
@@ -436,22 +424,22 @@ final class LibraryModel {
     func reload() -> Task<Void, Never>? {
         guard phase == .ready, let catalog else { return nil }
         snapshotRequested = true
-        if let snapshotTask { return snapshotTask }
-        let stamp = session, id = libraryID
+        if let pending = work[.snapshot] { return pending }
+        let stamp = work, id = libraryID
         let task = Task {
-            guard session == stamp, !Task.isCancelled else { return }
+            guard work === stamp, !Task.isCancelled else { return }
             while snapshotRequested {
                 let revision = editRevision
                 snapshotRequested = false
                 do {
                     let snapshot = try await catalog.snapshot(libraryID: id, studios: studioCache)
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     if revision != editRevision { continue }
                     studioCache = snapshot.studios
                     loadingLibrary = false
                     libraries = snapshot.libraries
                     sources = snapshot.sources
-                    let availabilityChanged = previewTask != nil && !scanBusy &&
+                    let availabilityChanged = work[.previews] != nil && !scanBusy &&
                         entries.lazy.filter { $0.availability == .available }.count !=
                         snapshot.entries.lazy.filter { $0.availability == .available }.count
                     entries = snapshot.entries
@@ -480,20 +468,20 @@ final class LibraryModel {
                     if covers != automaticCovers {
                         automaticCovers = covers
                         if try await covers.prepare(in: catalog) {
-                            guard session == stamp, !Task.isCancelled else { return }
+                            guard work === stamp, !Task.isCancelled else { return }
                             snapshotRequested = true
                         }
                     }
                 } catch {
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     automaticCovers = nil
                     loadingLibrary = false
                     message = error.localizedDescription
                 }
             }
-            snapshotTask = nil
+            stamp[.snapshot] = nil
         }
-        snapshotTask = task
+        work[.snapshot] = task
         return task
     }
     private func loadPlaylist(recordOpening: Bool = false) {
@@ -506,7 +494,7 @@ final class LibraryModel {
             if recordOpening, detailID == nil, recentPlaylists.first?.id != id {
                 playlists = try catalog.recordPlaylistOpen(id, libraryID: libraryID)
                 // An older in-flight snapshot could otherwise restore the previous order.
-                if snapshotTask != nil {
+                if work[.snapshot] != nil {
                     editRevision &+= 1
                     reload()
                 }
@@ -558,9 +546,9 @@ final class LibraryModel {
         picker.canChooseDirectories = true; picker.canChooseFiles = false
         picker.prompt = "Add Folder"; picker.allowsMultipleSelection = true
         panel = picker
-        let stamp = session
+        let stamp = work
         picker.beginSheetModal(for: window) { [weak self] response in
-            guard let self, self.session == stamp else { return }
+            guard let self, self.work === stamp else { return }
             self.panel = nil
             guard response == .OK else { return }
             self.addSources(picker.urls)
@@ -580,7 +568,7 @@ final class LibraryModel {
 
     func refresh() {
         guard phase == .ready, libraryID != nil else { return }
-        availabilityTask?.cancel()
+        work[.availability]?.cancel()
         unreadableVideoInfo.removeAll()
         scanCurrentSources(requested: true)
     }
@@ -604,7 +592,7 @@ final class LibraryModel {
         guard !scanBusy else { return }
         let token = UUID()
         scanToken = token; scanBusy = true
-        scanTask = Task {
+        work[.scan] = Task {
             var errors: [String] = []
             while true {
                 guard scanToken == token, !Task.isCancelled else { return }
@@ -644,21 +632,21 @@ final class LibraryModel {
 
     func renameFile(_ entry: CatalogEntry, basename: String) async throws {
         guard phase == .ready, detailID == entry.id, let catalog else { throw FileRenameError.unavailable }
-        let stamp = session
+        let stamp = work
         try await Task.detached(priority: .userInitiated) {
             try catalog.renameFile(entry, basename: basename)
         }.value
-        guard phase == .ready, session == stamp else { return }
+        guard phase == .ready, work === stamp else { return }
         editRevision &+= 1
         await reload()?.value
-        guard phase == .ready, session == stamp else { return }
+        guard phase == .ready, work === stamp else { return }
         if let updated = entries.first(where: { $0.id == entry.id }), updated.path != entry.path {
             if playing && detailID == entry.id {
                 playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
             }
             secondPlayer?.playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
             // The preview directory follows the path. Rebuild only this entry unless a run is active.
-            if previewTask == nil || previews.phase == .idle { generatePreviews(only: [updated]) }
+            if work[.previews] == nil || previews.phase == .idle { generatePreviews(only: [updated]) }
             else { generatePreviews() }
             notify("File renamed")
         }
@@ -669,8 +657,8 @@ final class LibraryModel {
     }
 
     private func readVideoInfo(in entries: [CatalogEntry], catalog: Catalog) {
-        videoInfoTask?.cancel()
-        videoInfoTask = Task(priority: .utility) {
+        work[.videoInfo]?.cancel()
+        work[.videoInfo] = Task(priority: .utility) {
             let updates = DiscoveryUpdates()
             var pendingReload = false
             for entry in entries where entry.videoInfo == nil {
@@ -701,14 +689,14 @@ final class LibraryModel {
 
     private func generatePreviews(only selection: [CatalogEntry]? = nil) {
         guard let catalog else { return }
-        previewTask?.cancel()
+        work[.previews]?.cancel()
         let token = UUID()
         previewToken = token
         let pending = (selection ?? entries).filter { $0.availability == .available }
         // A rename keeps the cached video info. Leave a running probe of the library alone.
         if selection == nil { readVideoInfo(in: pending, catalog: catalog) }
         previews = PreviewProgress(phase: .checking)
-        previewTask = Task(priority: .utility) {
+        work[.previews] = Task(priority: .utility) {
             // Older catalogs may already have preview images but lack movie durations.
             var backfilled = false
             for entry in pending where entry.playCount > 0 && entry.duration == nil {
@@ -857,12 +845,12 @@ final class LibraryModel {
     /// Recorded intervals change Watch History, play counts and the Unplayed filter.
     /// Coalesce the periodic writes of both players into one snapshot.
     func playbackRecorded() {
-        guard phase == .ready, playbackRefresh == nil else { return }
-        let stamp = session
-        playbackRefresh = Task {
+        guard phase == .ready, work[.playbackRefresh] == nil else { return }
+        let stamp = work
+        work[.playbackRefresh] = Task {
             try? await Task.sleep(for: .seconds(2))
-            playbackRefresh = nil
-            guard session == stamp, !Task.isCancelled else { return }
+            stamp[.playbackRefresh] = nil
+            guard work === stamp, !Task.isCancelled else { return }
             reload()
         }
     }
@@ -874,16 +862,16 @@ final class LibraryModel {
 
     private func startLookups() {
         guard let catalog, let key = try? access.apiKey() else { return }
-        worker?.cancel()
+        work[.lookups]?.cancel()
         lookupActivity = nil
-        let id = libraryID, stamp = session, client = client
-        worker = Task(priority: .utility) {
-            await snapshotTask?.value
-            guard session == stamp, !Task.isCancelled else { return }
+        let id = libraryID, stamp = work, client = client
+        work[.lookups] = Task(priority: .utility) {
+            await work[.snapshot]?.value
+            guard work === stamp, !Task.isCancelled else { return }
             if let id, entries.contains(where: \.needsLookup) {
                 lookupActivity = "Recognizing studios…"
                 try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
-                guard session == stamp, !Task.isCancelled else { return }
+                guard work === stamp, !Task.isCancelled else { return }
                 lookupActivity = nil
                 reload()
             }
@@ -910,13 +898,13 @@ final class LibraryModel {
                         lookupActivity = "Matching videos…"
                         try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client,
                                                       failures: lookupFailures) {
-                            await MainActor.run { if self.session == stamp { _ = self.reload() } }
+                            await MainActor.run { if self.work === stamp { _ = self.reload() } }
                         }
                     }
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     lookupStatus = nil
                 } catch {
-                    guard session == stamp, !Task.isCancelled else { return }
+                    guard work === stamp, !Task.isCancelled else { return }
                     lookupActivity = nil
                     handleNetwork(error, key: key)
                     if phase != .ready || subscriptionRequired { return }
