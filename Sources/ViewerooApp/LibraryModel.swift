@@ -66,13 +66,15 @@ final class LibraryModel {
     var orderedIDs: [Int64] = [] { didSet { collectionRevision &+= 1 } }
     private(set) var loadingLibrary = false
     var libraryID: Int64?
-    private(set) var visit = BrowseVisit()
-    private var backHistory: [BrowseVisit] = []
-    @ObservationIgnored private var lastCollections: [CollectionKey: BrowseVisit] = [:]
+    private var history = BrowseHistory()
+    private(set) var visit: BrowseVisit {
+        get { history.visit }
+        set { history.visit = newValue }
+    }
     var shelf: Shelf { visit.shelf }
     var query: String { visit.query }
     var detailID: Int64? { visit.detailID }
-    var canGoBack: Bool { !backHistory.isEmpty }
+    var canGoBack: Bool { history.canGoBack }
     var cinemaQueue: [CatalogEntry] { mainPlayer.cinemaQueue }
     var cinemaMode: Bool { !cinemaQueue.isEmpty }
     var showsCinemaSuggestions: Bool {
@@ -341,50 +343,25 @@ final class LibraryModel {
     private func resetNavigation() {
         studioCovers.removeAll()
         favoriteStudioIDs.removeAll()
-        backHistory.removeAll()
-        lastCollections.removeAll()
-        visit = BrowseVisit()
+        history = BrowseHistory()
     }
 
     private func navigate(to next: BrowseVisit, from tile: BrowseTile? = nil) {
         guard phase == .ready, libraryID != nil else { return }
         if playing { endPlayback() }
-        if let tile { visit.selectedTile = tile }
-        saveCurrentLocation()
-        backHistory.append(visit)
-        visit = next
+        history.push(next, from: tile)
         loadPlaylist(recordOpening: true)
-    }
-
-    private func saveCurrentLocation() {
-        visit.scroll.save()
-        visit.castScroll.save()
-        guard detailID == nil else { return }
-        let key = CollectionKey(shelf)
-        // Back can display an older search. Passing through it does not apply it again.
-        if let latest = lastCollections[key], latest.query != query || latest.filters != visit.filters { return }
-        lastCollections[key] = visit
     }
 
     func browse(_ destination: Shelf, from tile: BrowseTile? = nil) {
         guard destination != shelf || detailID != nil else { return }
-        let next = lastCollections[CollectionKey(destination)]?.reopened(on: destination) ?? BrowseVisit(shelf: destination)
-        navigate(to: next, from: tile)
-    }
-
-    /// Show another video in the open detail visit. Back highlights the latest video.
-    private func replaceDetail(with id: Int64) {
-        visit.detailID = id
-        visit.selectedTile = .video(id)
-        if let index = backHistory.indices.last {
-            backHistory[index].selectedTile = .video(id)
-        }
+        navigate(to: history.revisit(destination), from: tile)
     }
 
     func openDetail(_ id: Int64) {
         guard id != detailID else { return }
         if detailID != nil {
-            replaceDetail(with: id)
+            history.replaceDetail(with: id)
         } else {
             let next = BrowseVisit(shelf: shelf, query: query, filters: visit.filters, detailID: id,
                                    selectedTile: .video(id), scroll: visit.scroll)
@@ -402,12 +379,11 @@ final class LibraryModel {
 
     func refine(query: String, filters: CollectionFilters) {
         guard phase == .ready, libraryID != nil, detailID == nil else { return }
-        defer { lastCollections[CollectionKey(shelf)] = visit }
+        defer { history.rememberCollection() }
         guard query != visit.query || filters != visit.filters else { return }
         if visit.query.isEmpty && visit.filters.isEmpty {
             navigate(to: BrowseVisit(shelf: shelf, query: query, filters: filters))
-        } else if query.isEmpty && filters.isEmpty, let previous = backHistory.last,
-                  previous.shelf == shelf, previous.detailID == nil, previous.query.isEmpty, previous.filters.isEmpty {
+        } else if query.isEmpty && filters.isEmpty, history.clearingSearchReturns(to: shelf) {
             goBack()
         } else {
             visit.query = query
@@ -428,19 +404,7 @@ final class LibraryModel {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return change("Tag renamed", onFailure: onFailure) { catalog in
             try catalog.renameTag(tag.id, to: clean)
-            func update(_ visit: inout BrowseVisit) {
-                if visit.filters.tags.removeValue(forKey: tag.name.lowercased()) != nil {
-                    visit.filters.tags[clean.lowercased()] = clean
-                }
-            }
-            update(&visit)
-            for index in backHistory.indices { update(&backHistory[index]) }
-            for key in lastCollections.keys {
-                if var saved = lastCollections[key] {
-                    update(&saved)
-                    lastCollections[key] = saved
-                }
-            }
+            history.renameTag(tag.name, to: clean)
         }
     }
 
@@ -448,11 +412,7 @@ final class LibraryModel {
         guard self.libraryID == libraryID else { return false }
         return change("Studio renamed", onFailure: onFailure) { catalog in
             try catalog.renameCustomStudio(libraryID: libraryID, name: name, to: newName)
-            visit.renameStudio(name, to: newName)
-            for index in backHistory.indices { backHistory[index].renameStudio(name, to: newName) }
-            let oldKey = CollectionKey(.studio(name)), newKey = CollectionKey(.studio(newName))
-            if let saved = lastCollections.removeValue(forKey: oldKey) { lastCollections[newKey] = saved }
-            for key in lastCollections.keys { lastCollections[key]?.renameStudio(name, to: newName) }
+            history.renameStudio(name, to: newName)
         }
     }
 
@@ -460,18 +420,14 @@ final class LibraryModel {
         guard self.libraryID == libraryID else { return }
         change("Studio deleted", onFailure: onFailure) { catalog in
             try catalog.deleteCustomStudio(libraryID: libraryID, name: name)
-            let key = CollectionKey(.studio(name))
-            lastCollections.removeValue(forKey: key)
-            // Detail visits opened from the studio would reopen over an empty collection.
-            backHistory.removeAll { CollectionKey($0.shelf) == key }
+            history.removeStudio(name)
         }
     }
 
     func goBack() {
-        guard phase == .ready, let previous = backHistory.popLast() else { return }
+        guard phase == .ready, history.canGoBack else { return }
         if playing { endPlayback() }
-        saveCurrentLocation()
-        visit = previous
+        _ = history.pop()
         loadPlaylist(recordOpening: true)
     }
 
@@ -514,12 +470,7 @@ final class LibraryModel {
                         if case let .playlist(id) = visit.shelf { return playlistIDs.contains(id) }
                         return true
                     }
-                    backHistory.removeAll { !valid($0) }
-                    lastCollections = lastCollections.filter { valid($0.value) }
-                    if !valid(visit) {
-                        if playing { endPlayback() }
-                        visit = backHistory.popLast() ?? BrowseVisit()
-                    }
+                    if history.prune(keeping: valid), playing { endPlayback() }
                     loadPlaylist()
                     if cinemaMode, !mainPlayer.refresh(entries: entries, playlists: playlists) { goBack() }
                     if let secondPlayer, !secondPlayer.refresh(entries: entries, playlists: playlists) {
@@ -837,7 +788,7 @@ final class LibraryModel {
                 visit.scroll.save()
                 openDetail(entry.id)
             } else if detailID != entry.id {
-                replaceDetail(with: entry.id)
+                history.replaceDetail(with: entry.id)
             }
             if !playing, secondPlayer?.playback.isAudible == true, !playback.muted { playback.toggleMute() }
         }
