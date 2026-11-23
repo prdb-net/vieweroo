@@ -608,7 +608,7 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     let libraryID = try #require(model.libraryID)
     let list = try catalog.createPlaylist(libraryID: libraryID, name: "Double Feature")
     model.browse(.playlist(list.id))
-    model.startPlaylistCinema()
+    model.startCinema()
     #expect(!model.cinemaMode && !model.playing)
 
     let folder = root.appending(path: "Media")
@@ -624,13 +624,132 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     try catalog.setPlaybackFailure(entryID: first.id, message: "Unsupported video", fileSize: first.fileSize, modified: first.modified)
     await model.reload()?.value
     model.search("No matches")
+    model.startCinema()
+    #expect(!model.cinemaMode && !model.playing)
+    model.search("First")
+    model.startCinema()
+    #expect(!model.cinemaMode && !model.playing)
+    model.search("Second")
     let origin = model.visit.id
-    model.startPlaylistCinema()
+    model.startCinema()
     #expect(model.cinemaMode && model.playing && model.detailID == second.id)
     try catalog.removeFromPlaylist(list.id, entryID: second.id)
     await model.reload()?.value
     #expect(!model.cinemaMode && model.playback.player.currentItem == nil)
-    #expect(model.visit.id == origin && model.query == "No matches")
-    model.startPlaylistCinema()
+    #expect(model.visit.id == origin && model.query == "Second" && model.shelf == .playlist(list.id))
+    model.startCinema()
     #expect(!model.cinemaMode && !model.playing)
+}
+
+@MainActor
+@Test func collectionCinemaKeepsTheFilteredLaunchOrderThroughPlaybackAndReactions() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.cinema.collections." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root, cache: PreviewCache(root: root.appending(path: "Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Cinema")
+    let catalog = try #require(model.catalog)
+    let folder = root.appending(path: "Media")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let movie = folder.appending(path: "Scene A.mp4")
+    try await writeColorMovie(to: movie, seconds: 31)
+    for name in ["Scene B.mp4", "Scene C.mp4", "Outtake.mp4"] {
+        try FileManager.default.copyItem(at: movie, to: folder.appending(path: name))
+    }
+    model.addSources([folder])
+    try await until { model.entries.count == 4 && !model.scanBusy }
+    let scenes = model.entries.filter { $0.filename.hasPrefix("Scene") }
+    try #require(scenes.count == 3)
+    let first = scenes[0], second = scenes[1]
+    for entry in model.entries {
+        try catalog.setTags(entryID: entry.id, tags: ["Program"])
+        try catalog.setFavorite(entryID: entry.id, value: true)
+        if entry.id != scenes[2].id { try catalog.setRating(entryID: entry.id, value: 1) }
+        let session = try catalog.beginSession(entryID: entry.id)
+        try catalog.recordInterval(sessionID: session, start: 0, end: entry.id == second.id ? 20 : 10)
+    }
+    await model.reload()?.value
+    let tag = try #require(model.tags.first { $0.name == "Program" })
+    model.browse(.tags)
+    model.startCinema()
+    #expect(!model.cinemaMode)
+
+    for shelf: Shelf in [.all, .tag(tag.id), .liked, .favorites, .frequent] {
+        model.browse(shelf)
+        let filters = CollectionFilters(selected: shelf == .liked ? [.favoriteVideos] : [.liked])
+        model.refine(query: "Scene", filters: filters)
+        let origin = model.visit.id
+        let expected = shelf == .frequent ? [second.id, first.id] : [first.id, second.id]
+        #expect(model.visibleVideos.map(\.id) == expected)
+        model.startCinema()
+        #expect(model.detailID == expected.first && model.cinemaQueue.map(\.id) == expected)
+        let next = try #require(model.cinemaQueue.last)
+        model.playSuggested(next)
+        if shelf == .frequent {
+            let session = try catalog.beginSession(entryID: first.id)
+            try catalog.recordInterval(sessionID: session, start: 0, end: 30)
+            try catalog.setRating(entryID: second.id, value: 0)
+        }
+        await model.reload()?.value
+        #expect(model.detailID == next.id && model.cinemaQueue.map(\.id) == expected)
+        model.goBack()
+        #expect(model.visit.id == origin && model.query == "Scene" && model.visit.filters == filters)
+        #expect(!model.cinemaMode && !model.playing)
+    }
+    #expect(model.visibleVideos.map(\.id) == [first.id])
+}
+
+@MainActor
+@Test func detachedCinemaKeepsItsItemWhileTheLibraryPlaysAndLocks() async throws {
+    _ = NSApplication.shared
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let folder = root.appendingPathComponent("Clips")
+    try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: root) }
+    let firstURL = folder.appendingPathComponent("First.mp4")
+    try await writeColorMovie(to: firstURL, seconds: 20)
+    try fm.copyItem(at: firstURL, to: folder.appendingPathComponent("Second.mp4"))
+    let suite = "vieweroo.detached.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: WorkflowSecrets(), authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) },
+                             preferences: preferences, directory: root.appendingPathComponent("Support"),
+                             cache: PreviewCache(root: root.appendingPathComponent("Cache")))
+    model.start()
+    try await model.configure(key: "fixture-access")
+    model.createLibrary("Clips")
+    model.addSources([folder])
+    try await until { model.entries.count == 2 && !model.scanBusy }
+    model.browse(.all)
+    let origin = model.visit.id
+    let queue = model.visibleVideos
+    model.startCinema()
+    try await until { model.playback.playing }
+    let item = try #require(model.playback.player.currentItem)
+    model.detachMainPlayer()
+    let detached = try #require(model.secondPlayer)
+    #expect(detached.playback.player.currentItem === item)
+    #expect(detached.cinemaQueue.map(\.id) == queue.map(\.id))
+    #expect(!model.playing && model.visit.id == origin)
+
+    model.play(queue[1])
+    try await until { model.playback.playing && detached.playback.playing }
+    #expect(model.playback.muted && !detached.playback.muted)
+    #expect(model.playback.player.currentItem !== item)
+    model.playback.togglePlayback()
+    #expect(detached.playback.wantsPlayback)
+    model.pinEnabled = true
+    model.lock()
+    #expect(model.secondPlayer == nil && !model.playing)
+    #expect(detached.playback.player.currentItem == nil && model.playback.player.currentItem == nil)
 }

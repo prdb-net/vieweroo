@@ -26,8 +26,9 @@ struct ViewerooApp: App {
         Window(Text(verbatim: title), id: "library") {
             RootView(model: model)
                 .frame(minWidth: 790, minHeight: 535)
+                .onAppear { delegate.model = model }
                 .background {
-                    LibraryWindowConfiguration(browsing: model.phase == .ready, cinema: model.cinemaMode)
+                    LibraryWindowConfiguration(model: model, browsing: model.phase == .ready, cinema: model.cinemaMode)
                         .frame(width: 0, height: 0)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -63,6 +64,13 @@ struct ViewerooApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var model: LibraryModel?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model?.mainPlayer.stop()
+        model?.closeSecondPlayer(refresh: false)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -76,10 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // Keep AppKit's title bar background so empty areas receive native window gestures.
 // The library menu occupies a single leading toolbar item while browsing.
 struct LibraryWindowConfiguration: NSViewRepresentable {
+    let model: LibraryModel
     let browsing: Bool
     var cinema = false
 
     final class Host: NSView {
+        weak var model: LibraryModel?
         var cinema = false
         var browsing = false
         private var titlebarUpdatePending = false
@@ -100,13 +110,25 @@ struct LibraryWindowConfiguration: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: nil)
+            if let window {
+                NotificationCenter.default.addObserver(self, selector: #selector(libraryClosing),
+                                                      name: NSWindow.willCloseNotification, object: window)
+            }
             window?.sharingType = .none
             window?.isRestorable = false
             window?.tabbingMode = .disallowed
             updateTitlebar()
         }
+        @objc private func libraryClosing() {
+            if let model, model.playing { model.endPlayback() }
+        }
     }
-    func makeNSView(context: Context) -> Host { Host() }
+    func makeNSView(context: Context) -> Host {
+        let host = Host()
+        host.model = model
+        return host
+    }
     func updateNSView(_ nsView: Host, context: Context) {
         let changingPresentation = nsView.cinema != cinema
         nsView.cinema = cinema
@@ -149,7 +171,6 @@ struct RootView: View {
         .alert("Vieweroo", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
             Button("OK") { model.message = nil }
         } message: { Text(model.message ?? "") }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.playback.stop() }
     }
 }
 

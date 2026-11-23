@@ -4,6 +4,7 @@ import ViewerooCore
 
 struct PlayerScreen: View {
     let model: LibraryModel
+    let session: PlayerSession
     @ObservedObject var window: PlayerWindow
     @State private var videoAspectRatio: CGFloat = 16.0 / 9
     @State private var lastActivity = Date.now
@@ -11,41 +12,59 @@ struct PlayerScreen: View {
     @State private var playing = false
     @State private var overHeader = false
     @State private var overTransport = false
-    @State private var adjustingVolume = false
+    @State private var adjustingSlider = false
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var detached: Bool { session === model.secondPlayer }
+
+    private func move(to screen: NSScreen) {
+        if !detached { window.leavePlayer() }
+        model.movePlayer(session, to: screen)
+    }
+
+    private func leave() {
+        if detached { model.closeSecondPlayer() }
+        else {
+            window.leavePlayer()
+            model.goBack()
+        }
+    }
+
     private var hideControls: Bool {
-        window.fullScreen && playing && idle && !overHeader && !overTransport && !adjustingVolume && !voiceOver
+        window.fullScreen && playing && idle && !overHeader && !overTransport && !adjustingSlider && !voiceOver
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.cinemaMode {
-                picture
-                    .background(.black)
-                    .overlay(alignment: .bottom) {
-                        GeometryReader { viewport in
-                            CinemaControls(model: model, window: window, playerHeight: viewport.size.height)
-                                .frame(maxHeight: .infinity, alignment: .bottom)
-                                .environment(\.colorScheme, .dark)
-                        }
-                    }
-            } else if window.fullScreen {
+            if session.cinemaMode || window.fullScreen || detached {
                 picture
                     .background(.black)
                     .overlay {
-                        VStack(spacing: 0) {
-                            header.background(.black.opacity(0.86))
-                            Spacer()
-                            transport.background(.black.opacity(0.86))
+                        Group {
+                            if session.cinemaMode {
+                                GeometryReader { viewport in
+                                    CinemaControls(model: model, session: session, window: window, leave: leave, move: move,
+                                                   playerHeight: viewport.size.height, adjustingSlider: $adjustingSlider)
+                                        .frame(maxHeight: .infinity, alignment: .bottom)
+                                }
+                            } else {
+                                VStack(spacing: 0) {
+                                    header.background(.black.opacity(0.86))
+                                    Spacer()
+                                    transport.background(.black.opacity(0.86))
+                                }
+                            }
                         }
                         .environment(\.colorScheme, .dark)
                         .opacity(hideControls ? 0 : 1)
                         .allowsHitTesting(!hideControls)
+                        .accessibilityHidden(hideControls)
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hideControls)
                     }
-                    .onContinuousHover { if case .active = $0 { revealControls() } }
+                    .onContinuousHover { phase in
+                        if window.fullScreen, case .active = phase { revealControls() }
+                    }
             } else {
                 Color.black.aspectRatio(16 / 9, contentMode: .fit)
                     .overlay { picture }
@@ -53,10 +72,11 @@ struct PlayerScreen: View {
                 transport
             }
         }
-        .onReceive(model.playback.$videoAspectRatio.removeDuplicates()) { videoAspectRatio = $0 ?? 16.0 / 9 }
-        .onReceive(model.playback.$playing.removeDuplicates()) { active in
+        .onReceive(session.playback.$videoAspectRatio.removeDuplicates()) { videoAspectRatio = $0 ?? 16.0 / 9 }
+        .onReceive(session.playback.$playing.removeDuplicates()) { active in
             if playing != active { playing = active; revealControls() }
         }
+        .onChange(of: adjustingSlider) { revealControls() }
         .onReceive(window.keyboardActivity) { revealControls() }
         .onChange(of: window.fullScreen) {
             overHeader = false
@@ -73,10 +93,10 @@ struct PlayerScreen: View {
     private var videoSurface: some View {
         GeometryReader { viewport in
             let bounds = CGRect(origin: .zero, size: viewport.size)
-            let picture = window.fullScreen || model.cinemaMode ? bounds : AVMakeRect(
+            let picture = window.fullScreen || session.cinemaMode ? bounds : AVMakeRect(
                 aspectRatio: CGSize(width: videoAspectRatio, height: 1), insideRect: bounds
             )
-            PlayerSurface(player: model.playback.player)
+            PlayerSurface(player: session.playback.player)
                 .frame(width: picture.width, height: picture.height)
                 .background(.black)
                 .position(x: bounds.midX, y: bounds.midY)
@@ -90,14 +110,14 @@ struct PlayerScreen: View {
             Rectangle().fill(.clear).contentShape(Rectangle())
                 .gesture(TapGesture(count: 2).onEnded { window.toggle() }
                     .exclusively(before: TapGesture().onEnded {
-                        if model.playback.duration > 0 { model.playback.togglePlayback() }
+                        if session.playback.duration > 0 { session.playback.togglePlayback() }
                     }))
                 .accessibilityHidden(true)
             VStack {
-                PlayerStatus(controller: model.playback)
-                if model.cinemaMode { Spacer() }
+                PlayerStatus(controller: session.playback)
+                if session.cinemaMode { Spacer() }
             }
-            .padding(.top, model.cinemaMode ? 48 : 0)
+            .padding(.top, session.cinemaMode ? 48 : 0)
         }
     }
 
@@ -108,30 +128,31 @@ struct PlayerScreen: View {
 
     private var header: some View {
         HStack(spacing: VSpace.control) {
-            Button {
-                window.leavePlayer()
-                model.goBack()
-            } label: { Label("Back", systemImage: "chevron.left") }
+            Button(action: leave) {
+                Label(detached ? "Close Player" : "Back", systemImage: detached ? "xmark" : "chevron.left")
+            }
             .labelStyle(.iconOnly)
-            .help("Return to the library")
-            Text(model.playback.title)
+            .help(detached ? "Close Player" : "Return to the library")
+            Text(session.playback.title)
                 .font(.headline).lineLimit(1).truncationMode(.tail)
-                .help(model.playback.title)
+                .help(session.playback.title)
             Spacer(minLength: VSpace.tight)
             if model.pinEnabled {
                 Button(action: model.lock) { Label("Lock Vieweroo", systemImage: "lock").labelStyle(.iconOnly) }
                     .help("Lock Vieweroo (⇧⌘L)")
             }
-            AirPlayRoute(player: model.playback.player)
-                .frame(width: 32, height: 28)
-                .help("Choose an AirPlay video receiver")
+            if window.fullScreen {
+                AirPlayRoute(player: session.playback.player)
+                    .frame(width: 32, height: 28)
+                    .help("Choose an AirPlay video receiver")
+            }
         }
         .padding(.horizontal, VSpace.group).padding(.vertical, VSpace.tight)
         .onHover { overHeader = $0 }
     }
 
     private var transport: some View {
-        PlayerTransport(controller: model.playback, window: window, adjustingVolume: $adjustingVolume)
+        PlayerTransport(controller: session.playback, window: window, move: move, adjustingSlider: $adjustingSlider)
             .padding(.horizontal, window.fullScreen ? VSpace.group : VSpace.unit).padding(.vertical, VSpace.control)
             .onHover { overTransport = $0 }
     }
@@ -139,53 +160,60 @@ struct PlayerScreen: View {
 
 private struct CinemaControls: View {
     @Bindable var model: LibraryModel
+    let session: PlayerSession
     @ObservedObject var window: PlayerWindow
+    let leave: () -> Void
+    let move: (NSScreen) -> Void
     let playerHeight: CGFloat
-    @State private var adjustingVolume = false
+    @Binding var adjustingSlider: Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let playlist = model.videosInCollection
-        if let index = playlist.firstIndex(where: { $0.id == model.detailID }) {
-            let entry = playlist[index]
-            let previous = playlist[..<index].last(where: LibraryModel.cinemaPlayable)
-            let next = playlist.dropFirst(index + 1).first(where: LibraryModel.cinemaPlayable)
+        let queue = session.cinemaQueue
+        let collectionTitle = model.collectionTitle(for: session.collection ?? model.shelf)
+        let detached = session === model.secondPlayer
+        let backLabel = detached ? "Close Player" : "Return to \(collectionTitle)"
+        if let index = queue.firstIndex(where: { $0.id == session.entryID }) {
+            let entry = queue[index]
+            let previous = queue[..<index].last(where: LibraryModel.cinemaPlayable)
+            let next = queue.dropFirst(index + 1).first(where: LibraryModel.cinemaPlayable)
             VStack(alignment: .trailing, spacing: 0) {
                 if model.showsCinemaSuggestions {
                     let preferredCount = model.cinemaRecommendationCount.rawValue
-                    CinemaSuggestions(model: model, entry: entry, playlist: playlist,
-                                      limit: playerHeight < 640 ? min(preferredCount, 4) : preferredCount)
+                    CinemaSuggestions(model: model, entry: entry, queue: queue,
+                                      limit: playerHeight < 640 ? min(preferredCount, 4) : preferredCount) { entry in
+                        model.play(entry, in: session)
+                    }
                         .padding(.trailing, VSpace.section)
                 }
 
                 VStack(spacing: VSpace.tight) {
                     HStack(spacing: VSpace.control) {
-                        Button {
-                            window.leavePlayer()
-                            model.goBack()
-                        } label: { Label("Return to Playlist", systemImage: "chevron.left") }
+                        Button(action: leave) {
+                            Label(backLabel, systemImage: detached ? "xmark" : "chevron.left")
+                        }
                         .labelStyle(.iconOnly)
                         .keyboardShortcut(.escape, modifiers: [])
-                        .help("Return to Playlist (Esc)")
+                        .help("\(backLabel) (Esc)")
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.title).font(.headline)
-                            Text("\(model.collectionTitle) · \(index + 1) of \(playlist.count)")
+                            Text("\(collectionTitle) · \(index + 1) of \(queue.count)")
                                 .font(.caption)
                         }
                         .lineLimit(1)
                         .frame(maxWidth: 200, alignment: .leading)
                         .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
 
-                        PlayerTimeline(controller: model.playback)
+                        PlayerTimeline(controller: session.playback, onEditingChanged: { adjustingSlider = $0 })
                             .id(entry.id)
-                        PlaybackTime(controller: model.playback)
+                        PlaybackTime(controller: session.playback)
                     }
 
                     HStack(spacing: VSpace.tight) {
                         step("Previous Video", symbol: "backward.end.fill", to: previous)
-                        PlaybackButtons(controller: model.playback)
+                        PlaybackButtons(controller: session.playback)
                         step("Next Video", symbol: "forward.end.fill", to: next)
                         Spacer(minLength: VSpace.group)
                         EntryReactions(model: model, entry: entry)
@@ -195,7 +223,7 @@ private struct CinemaControls: View {
                         .toggleStyle(.button)
                         .labelStyle(.iconOnly)
                         .help(model.showsCinemaSuggestions ? "Hide video recommendations" : "Show video recommendations")
-                        PlayerOptions(controller: model.playback, window: window, adjustingVolume: $adjustingVolume,
+                        PlayerOptions(controller: session.playback, window: window, move: move, adjustingSlider: $adjustingSlider,
                                       cinema: true)
                             .padding(.leading, VSpace.control)
                     }
@@ -222,7 +250,7 @@ private struct CinemaControls: View {
 
     private func step(_ label: String, symbol: String, to entry: CatalogEntry?) -> some View {
         Button {
-            if let entry { model.play(entry, suggested: true) }
+            if let entry { model.play(entry, in: session) }
         } label: { Label(label, systemImage: symbol) }
         .labelStyle(.iconOnly)
         .disabled(entry == nil)
@@ -233,17 +261,18 @@ private struct CinemaControls: View {
 private struct PlayerTransport: View {
     @ObservedObject var controller: PlayerController
     @ObservedObject var window: PlayerWindow
-    @Binding var adjustingVolume: Bool
+    let move: (NSScreen) -> Void
+    @Binding var adjustingSlider: Bool
 
     var body: some View {
         VStack(spacing: VSpace.tight) {
-            PlayerTimeline(controller: controller)
+            PlayerTimeline(controller: controller, onEditingChanged: { adjustingSlider = $0 })
                 .disabled(controller.duration <= 0)
             HStack(spacing: VSpace.control) {
                 PlaybackButtons(controller: controller)
                 PlaybackTime(controller: controller).foregroundStyle(.secondary)
                 Spacer(minLength: VSpace.unit)
-                PlayerOptions(controller: controller, window: window, adjustingVolume: $adjustingVolume)
+                PlayerOptions(controller: controller, window: window, move: move, adjustingSlider: $adjustingSlider)
             }
         }
     }
@@ -295,7 +324,8 @@ private struct PlaybackButtons: View {
 private struct PlayerOptions: View {
     @ObservedObject var controller: PlayerController
     @ObservedObject var window: PlayerWindow
-    @Binding var adjustingVolume: Bool
+    let move: (NSScreen) -> Void
+    @Binding var adjustingSlider: Bool
     var cinema = false
 
     var body: some View {
@@ -329,7 +359,7 @@ private struct PlayerOptions: View {
                 .help(controller.muted ? "Unmute (M)" : "Mute (M)")
                 Slider(value: Binding(get: { controller.muted ? 0 : Double(controller.volume) },
                                       set: { controller.setVolume(Float($0)) }),
-                       in: 0...1, onEditingChanged: { adjustingVolume = $0 })
+                       in: 0...1, onEditingChanged: { adjustingSlider = $0 })
                     .frame(width: 72)
                     .accessibilityLabel("Volume")
                     .help("Playback volume")
@@ -339,6 +369,13 @@ private struct PlayerOptions: View {
                     .frame(width: 28, height: 24)
                     .help("Choose an AirPlay video receiver")
             }
+            Menu {
+                DisplayChoices(select: move)
+            } label: {
+                Label("Move to Display", systemImage: "display.2").labelStyle(.iconOnly)
+            }
+            .fixedSize()
+            .help("Move this player to a display")
             Button(action: window.toggle) {
                 Label(window.fullScreen ? "Exit Full Screen" : "Enter Full Screen",
                       systemImage: window.fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
@@ -409,6 +446,7 @@ private struct AirPlayRoute: NSViewRepresentable {
 
 private struct PlayerTimeline: View {
     @ObservedObject var controller: PlayerController
+    let onEditingChanged: (Bool) -> Void
     @State private var frames: [PreviewFrame] = []
     @State private var hover: CGFloat?
     @State private var draft = 0.0
@@ -433,6 +471,7 @@ private struct PlayerTimeline: View {
             Slider(value: Binding(get: { editing ? draft : controller.position }, set: { draft = $0 }),
                    in: 0...max(0.001, controller.duration), onEditingChanged: { started in
                 editing = started
+                onEditingChanged(started)
                 if started { draft = controller.position }
                 else { controller.seek(to: draft) }
             })

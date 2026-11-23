@@ -9,7 +9,9 @@ struct StudioTile: Identifiable {
 }
 
 extension LibraryModel {
-    var collectionTitle: String {
+    var collectionTitle: String { collectionTitle(for: shelf) }
+
+    func collectionTitle(for shelf: Shelf) -> String {
         switch shelf {
         case .tags: return "Tags"
         case let .tag(id): return tags.first { $0.id == id }?.name ?? "Tag"

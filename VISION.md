@@ -36,7 +36,9 @@ Sometimes you want to watch an entire video. Other times you have a particular s
 
 Enter full screen from the player to give the video the whole window. The controls recede during uninterrupted playback and return on pointer movement. Leave full screen to browse other titles while watching.
 
-Choose **Cinema Mode** in a playlist to watch in the library window, with the video extending behind the Mac window buttons. Previous and Next move through playable titles in playlist order. Playback controls and icon-only reactions stay visible along the bottom, with the picture showing through the controls. Returning to the playlist restores your browsing position. A transparent overlay on the right offers other playable videos from the playlist. Choose 2, 4 or 6 recommendations in Settings. The default is 4, and smaller player windows show at most 4. Select a title to resume it or hide the list from the bottom bar. Vieweroo remembers your preference.
+Choose **Cinema Mode** in any video collection to watch in the library window, with the video extending behind the Mac window buttons. Previous and Next move through playable titles in the order shown when you enter Cinema Mode, including any search or filters. In windowed Cinema Mode, playback controls and icon-only reactions stay visible along the bottom, with the picture showing through the controls. In full screen, the bottom bar and recommendations fade together after three idle seconds of playback. Move the pointer or pause to bring them back. Returning to the collection restores your browsing position. A transparent overlay on the right offers other playable videos from the same selection. Choose 2, 4 or 6 recommendations in Settings. The default is 4, and smaller player windows show at most 4. Select a title to resume it or hide the list from the bottom bar. Vieweroo remembers your preference.
+
+Use a second player window to watch up to two videos at once, each in full screen on its own display. Send a title or a filtered Cinema collection to a named display while browsing in the library. Move an open player to a display with its position, sound, pause state, loop and Cinema order intact. Each window has its own controls and history session. An additional video starts muted when the other player is audible. Disconnecting the second player's display pauses it and returns it to a remaining screen. Locking stops both players.
 
 AirPlay is part of the MVP. You can choose an Apple TV or another compatible AirPlay receiver from the player and watch the video on that screen while controlling playback from your Mac.
 
@@ -99,7 +101,3 @@ These ideas are planned for after the minimum viable product (MVP). During devel
 ### Playback compatibility
 
 16. **Additional video formats.** Test AVPlayer with more container and codec combinations and expand the set of formats Vieweroo imports based on the results.
-
-### Watching on two displays
-
-17. **Independent player windows.** Open a second video while the first keeps playing. Each video can play full screen on its own display, with independent playback controls, sound, and resume position. Locking Vieweroo stops both videos and hides their windows’ contents.

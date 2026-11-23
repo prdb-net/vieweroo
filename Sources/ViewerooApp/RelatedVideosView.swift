@@ -47,13 +47,14 @@ struct RelatedVideosView: View {
 struct CinemaSuggestions: View {
     let model: LibraryModel
     let entry: CatalogEntry
-    let playlist: [CatalogEntry]
+    let queue: [CatalogEntry]
     let limit: Int
+    let onSelect: (CatalogEntry) -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        let suggestions = RelatedVideo.suggestions(for: entry, in: playlist).prefix(limit)
+        let suggestions = RelatedVideo.suggestions(for: entry, in: queue).prefix(limit)
         if !suggestions.isEmpty {
             VStack(alignment: .leading, spacing: VSpace.tight) {
                 Text("More to Watch")
@@ -63,7 +64,7 @@ struct CinemaSuggestions: View {
                     .accessibilityAddTraits(.isHeader)
                 ForEach(suggestions) { suggestion in
                     RelatedVideoButton(model: model, suggestion: suggestion, style: .rail, cinema: true) {
-                        model.playSuggested(suggestion.entry)
+                        onSelect(suggestion.entry)
                     }
                 }
             }

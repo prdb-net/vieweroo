@@ -22,7 +22,7 @@ struct LibraryView: View {
     var body: some View {
         ZStack {
             if model.playing && (playerWindow.fullScreen || model.cinemaMode) {
-                PlayerScreen(model: model, window: playerWindow)
+                PlayerScreen(model: model, session: model.mainPlayer, window: playerWindow)
                     .ignoresSafeArea()
                     .toolbarBackground(model.cinemaMode ? .hidden : .automatic, for: .windowToolbar)
             } else {
@@ -36,6 +36,9 @@ struct LibraryView: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+        }
+        .onChange(of: model.secondPlayer != nil, initial: true) { _, active in
+            playerWindow.usingSecondPlayer = active
         }
         .focusedSceneValue(\.showAppSettings, sheet == nil ? Binding(get: { false }, set: { show in
             if show { sheet = .settings }

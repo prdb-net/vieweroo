@@ -284,6 +284,8 @@ final class PlayerController: ObservableObject {
         player.isMuted = muted
     }
 
+    var isAudible: Bool { wantsPlayback && !muted && volume > 0 }
+
     func toggleMute() {
         if muted && volume == 0 { setVolume(audibleVolume); return }
         muted.toggle()

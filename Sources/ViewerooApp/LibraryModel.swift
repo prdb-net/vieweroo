@@ -20,7 +20,10 @@ enum Shelf: Hashable {
 final class LibraryModel {
     @ObservationIgnored let access: AccessController
     @ObservationIgnored let client: PRDBClient
-    @ObservationIgnored let playback = PlayerController()
+    private(set) var mainPlayer = PlayerSession()
+    private(set) var secondPlayer: PlayerSession?
+    @ObservationIgnored let playerDisplay = DisplayPlayerWindow()
+    var playback: PlayerController { mainPlayer.playback }
     @ObservationIgnored let artworkURL: (URL?) -> URL?
     @ObservationIgnored private let prepareCatalog: ((Catalog) throws -> Void)?
     @ObservationIgnored let cache: PreviewCache
@@ -65,7 +68,8 @@ final class LibraryModel {
     var query: String { visit.query }
     var detailID: Int64? { visit.detailID }
     var canGoBack: Bool { !backHistory.isEmpty }
-    private(set) var cinemaMode = false
+    var cinemaQueue: [CatalogEntry] { mainPlayer.cinemaQueue }
+    var cinemaMode: Bool { !cinemaQueue.isEmpty }
     var showsCinemaSuggestions: Bool {
         didSet { preferences.set(showsCinemaSuggestions, forKey: Self.cinemaSuggestionsKey) }
     }
@@ -74,7 +78,7 @@ final class LibraryModel {
     }
     private static let cinemaCountKey = "cinemaRecommendationCount"
     private static let cinemaSuggestionsKey = "showsCinemaSuggestions"
-    var playing = false
+    var playing: Bool { mainPlayer.entryID != nil }
     var scanBusy = false
     private(set) var scanningFolder: String?
     private(set) var lookupActivity: String?
@@ -187,8 +191,8 @@ final class LibraryModel {
         snapshotTask = nil
         videoInfoTask?.cancel()
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
-        playback.stop(); playing = false
-        cinemaMode = false
+        mainPlayer.stop()
+        closeSecondPlayer(refresh: false)
         panel?.cancel(nil); panel = nil
         scanQueue.removeAll()
         scanningSourceID = nil
@@ -428,7 +432,10 @@ final class LibraryModel {
                         visit = backHistory.popLast() ?? BrowseVisit()
                     }
                     loadPlaylist()
-                    if cinemaMode, let detailID, !orderedIDs.contains(detailID) { goBack() }
+                    if cinemaMode, !mainPlayer.refresh(entries: entries, playlists: playlists) { goBack() }
+                    if let secondPlayer, !secondPlayer.refresh(entries: entries, playlists: playlists) {
+                        closeSecondPlayer()
+                    }
                     let covers = AutomaticCollectionCovers(tags: tags, playlists: playlists, entries: entries, cache: cache)
                     if covers != automaticCovers {
                         automaticCovers = covers
@@ -604,6 +611,7 @@ final class LibraryModel {
             if playing && detailID == entry.id {
                 playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
             }
+            secondPlayer?.playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
             generatePreviews()
             notify("File renamed")
         }
@@ -694,25 +702,80 @@ final class LibraryModel {
     }
 
     func play(_ selection: CatalogEntry, at position: Double? = nil, suggested: Bool = false) {
-        guard phase == .ready, selection.libraryID == libraryID, let catalog else { return }
+        play(selection, in: mainPlayer, at: position, suggested: suggested)
+    }
+
+    private func playableEntry(_ selection: CatalogEntry, suggested: Bool) -> CatalogEntry? {
+        guard phase == .ready, selection.libraryID == libraryID, let catalog else { return nil }
         do {
-            // A visible tile can predate the last session or a source refresh.
             guard let entry = try catalog.entry(selection.id), entry.libraryID == libraryID,
                   entry.availability == .available, !suggested || entry.playbackFailure == nil else {
                 reload()
                 notify("This video is no longer available to play.", kind: .error)
-                return
+                return nil
             }
+            return entry
+        } catch {
+            message = error.localizedDescription
+            return nil
+        }
+    }
+
+    func play(_ selection: CatalogEntry, in destination: PlayerSession, at position: Double? = nil, suggested: Bool = true) {
+        guard destination === mainPlayer || destination === secondPlayer, let catalog,
+              let entry = playableEntry(selection, suggested: suggested) else { return }
+        if destination === mainPlayer {
             if detailID == nil {
                 openDetail(entry.id)
             } else if detailID != entry.id {
-                // Switching from More to Watch keeps Back anchored to the original collection.
                 visit = BrowseVisit(shelf: shelf, detailID: entry.id)
             }
-            playback.open(entry: entry, startAt: position ?? entry.resume, previewDirectory: previewDirectory(entry), catalog: catalog)
-            playing = true
-            reload()
-        } catch { message = error.localizedDescription }
+            if !playing, secondPlayer?.playback.isAudible == true, !playback.muted { playback.toggleMute() }
+        }
+        destination.open(entry, at: position, model: self, catalog: catalog)
+        reload()
+    }
+
+    func playOnDisplay(_ selection: CatalogEntry, screen: NSScreen, cinema: [CatalogEntry] = []) {
+        guard let catalog, let entry = playableEntry(selection, suggested: !cinema.isEmpty),
+              NSScreen.screens.contains(where: { $0.displayID == screen.displayID }) else { return }
+        let destination = PlayerSession()
+        if playback.isAudible { destination.playback.toggleMute() }
+        closeSecondPlayer()
+        secondPlayer = destination
+        if !cinema.isEmpty { destination.setCinema(cinema, collection: shelf) }
+        destination.open(entry, at: nil, model: self, catalog: catalog)
+        playerDisplay.present(destination, model: self, on: screen)
+    }
+
+    func startCinema(on screen: NSScreen) {
+        guard shelf.isVideoCollection, detailID == nil else { return }
+        let queue = visibleVideos
+        if let first = queue.first(where: Self.cinemaPlayable) { playOnDisplay(first, screen: screen, cinema: queue) }
+    }
+
+    func movePlayer(_ source: PlayerSession, to screen: NSScreen) {
+        guard phase == .ready, source.entryID != nil,
+              NSScreen.screens.contains(where: { $0.displayID == screen.displayID }) else { return }
+        if source === mainPlayer { detachMainPlayer() }
+        guard source === secondPlayer else { return }
+        playerDisplay.present(source, model: self, on: screen)
+    }
+
+    func detachMainPlayer() {
+        guard playing else { return }
+        closeSecondPlayer()
+        secondPlayer = mainPlayer
+        mainPlayer = PlayerSession()
+        goBack()
+    }
+
+    func closeSecondPlayer(refresh: Bool = true) {
+        guard let secondPlayer else { return }
+        secondPlayer.stop()
+        playerDisplay.dismiss()
+        self.secondPlayer = nil
+        if refresh { reload() }
     }
 
     func hasAlternatives(to current: CatalogEntry) -> Bool {
@@ -723,11 +786,12 @@ final class LibraryModel {
         play(suggestion, suggested: true)
     }
 
-    func startPlaylistCinema() {
-        guard case .playlist = shelf, detailID == nil,
-              let first = videosInCollection.first(where: Self.cinemaPlayable) else { return }
+    func startCinema() {
+        guard shelf.isVideoCollection, detailID == nil else { return }
+        let queue = visibleVideos
+        guard let first = queue.first(where: Self.cinemaPlayable) else { return }
         play(first, suggested: true)
-        cinemaMode = playing && detailID == first.id
+        if playing && detailID == first.id { mainPlayer.setCinema(queue, collection: shelf) }
     }
 
     nonisolated static func cinemaPlayable(_ entry: CatalogEntry) -> Bool {
@@ -735,9 +799,7 @@ final class LibraryModel {
     }
 
     func endPlayback() {
-        playback.stop()
-        playing = false
-        cinemaMode = false
+        mainPlayer.stop()
         reload()
     }
 

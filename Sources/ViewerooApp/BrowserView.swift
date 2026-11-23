@@ -63,12 +63,14 @@ struct BrowserView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
-                    if playlistID != nil {
-                        Button(action: model.startPlaylistCinema) {
+                    if model.shelf.isVideoCollection {
+                        Menu {
+                            DisplayChoices { model.startCinema(on: $0) }
+                        } label: {
                             Label("Cinema Mode", systemImage: "play.rectangle")
-                        }
-                        .disabled(!model.videosInCollection.contains(where: LibraryModel.cinemaPlayable))
-                        .help("Play this playlist in Cinema Mode")
+                        } primaryAction: { model.startCinema() }
+                        .disabled(!records.contains(where: LibraryModel.cinemaPlayable))
+                        .help("Play the visible videos in order")
                     }
                     if case let .studio(_, id?) = model.shelf, let account = model.studioDirectory.site(id)?.creator {
                         CreatorProfileView(account: account)
@@ -130,6 +132,10 @@ struct BrowserView: View {
                                 if selection == nil {
                                     Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
                                         .disabled(entry.availability != .available)
+                                    Menu("Play on Display") {
+                                        DisplayChoices { model.playOnDisplay(entry, screen: $0) }
+                                    }
+                                    .disabled(entry.availability != .available)
                                     if model.shelf == .frequent, entry.resume > 0 {
                                         Button("Play from Beginning") { model.play(entry, at: 0) }
                                             .disabled(entry.availability != .available)

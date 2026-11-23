@@ -81,7 +81,7 @@ struct EntryView: View {
                 }
             }
             if model.playing {
-                PlayerScreen(model: model, window: window)
+                PlayerScreen(model: model, session: model.mainPlayer, window: window)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 playPoster
@@ -163,6 +163,13 @@ struct EntryView: View {
 
     private func detailActions(_ revealVideo: @escaping () -> Void) -> some View {
         HStack(spacing: VSpace.tight) {
+            if !model.playing {
+                Menu {
+                    DisplayChoices { model.playOnDisplay(entry, screen: $0) }
+                } label: { Label("Play on Display", systemImage: "display.2").labelStyle(.iconOnly) }
+                .help("Play on Display")
+                .disabled(!available)
+            }
             HistoryButton(model: model, entry: entry, stats: stats, revealVideo: revealVideo)
             Button { showingLibrary = true } label: {
                 Label("Library Details", systemImage: "info.circle").labelStyle(.iconOnly)
