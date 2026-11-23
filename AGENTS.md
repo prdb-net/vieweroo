@@ -12,6 +12,8 @@ During early development, start work directly and track outstanding tasks as Mar
 
 With the initial app scaffold, document three commands in the README that work from a fresh checkout on a supported Mac: build the app, run the tests, and package the release ZIP. Use the same commands locally and in CI. For app changes, build the app, run the relevant checks, and exercise the changed behavior. For documentation-only changes, check the wording, links, and any commands affected by the edit.
 
+On the local development Mac, finish each verified app change by installing the resulting `dist/Vieweroo.app` in `/Applications/Vieweroo.app` so Finder opens the current build. Verify the installed signature and compare the installed executable with the build. If Vieweroo was running, quit it normally before replacing it and reopen the installed copy afterward.
+
 Use a temporary SQLite database, isolated preferences, a Keychain substitute, generated synthetic media, and local PRDB responses in automated tests. Exercise destructive operations and migrations against disposable test data. Verify OSHash against PRDB's published test vectors. For behavior that requires hardware, such as AirPlay to a video receiver, report the actual hardware result or identify the check as outstanding.
 
 ## Privacy and public artifacts
