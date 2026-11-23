@@ -25,8 +25,11 @@ struct PlayerScreen: View {
                 picture
                     .background(.black)
                     .overlay(alignment: .bottom) {
-                        CinemaControls(model: model, window: window)
-                            .environment(\.colorScheme, .dark)
+                        GeometryReader { viewport in
+                            CinemaControls(model: model, window: window, playerHeight: viewport.size.height)
+                                .frame(maxHeight: .infinity, alignment: .bottom)
+                                .environment(\.colorScheme, .dark)
+                        }
                     }
             } else if window.fullScreen {
                 picture
@@ -135,8 +138,9 @@ struct PlayerScreen: View {
 }
 
 private struct CinemaControls: View {
-    let model: LibraryModel
+    @Bindable var model: LibraryModel
     @ObservedObject var window: PlayerWindow
+    let playerHeight: CGFloat
     @State private var adjustingVolume = false
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -147,55 +151,70 @@ private struct CinemaControls: View {
             let entry = playlist[index]
             let previous = playlist[..<index].last(where: LibraryModel.cinemaPlayable)
             let next = playlist.dropFirst(index + 1).first(where: LibraryModel.cinemaPlayable)
-            VStack(spacing: VSpace.tight) {
-                HStack(spacing: VSpace.control) {
-                    Button {
-                        window.leavePlayer()
-                        model.goBack()
-                    } label: { Label("Return to Playlist", systemImage: "chevron.left") }
-                    .labelStyle(.iconOnly)
-                    .keyboardShortcut(.escape, modifiers: [])
-                    .help("Return to Playlist (Esc)")
+            VStack(alignment: .trailing, spacing: 0) {
+                if model.showsCinemaSuggestions {
+                    let preferredCount = model.cinemaRecommendationCount.rawValue
+                    CinemaSuggestions(model: model, entry: entry, playlist: playlist,
+                                      limit: playerHeight < 640 ? min(preferredCount, 4) : preferredCount)
+                        .padding(.trailing, VSpace.section)
+                }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.title).font(.headline)
-                        Text("\(model.collectionTitle) · \(index + 1) of \(playlist.count)")
-                            .font(.caption)
+                VStack(spacing: VSpace.tight) {
+                    HStack(spacing: VSpace.control) {
+                        Button {
+                            window.leavePlayer()
+                            model.goBack()
+                        } label: { Label("Return to Playlist", systemImage: "chevron.left") }
+                        .labelStyle(.iconOnly)
+                        .keyboardShortcut(.escape, modifiers: [])
+                        .help("Return to Playlist (Esc)")
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.title).font(.headline)
+                            Text("\(model.collectionTitle) · \(index + 1) of \(playlist.count)")
+                                .font(.caption)
+                        }
+                        .lineLimit(1)
+                        .frame(maxWidth: 200, alignment: .leading)
+                        .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
+
+                        PlayerTimeline(controller: model.playback)
+                            .id(entry.id)
+                        PlaybackTime(controller: model.playback)
                     }
-                    .lineLimit(1)
-                    .frame(maxWidth: 200, alignment: .leading)
-                    .shadow(color: .black.opacity(0.8), radius: 2, y: 1)
 
-                    PlayerTimeline(controller: model.playback)
-                        .id(entry.id)
-                    PlaybackTime(controller: model.playback)
+                    HStack(spacing: VSpace.tight) {
+                        step("Previous Video", symbol: "backward.end.fill", to: previous)
+                        PlaybackButtons(controller: model.playback)
+                        step("Next Video", symbol: "forward.end.fill", to: next)
+                        Spacer(minLength: VSpace.group)
+                        EntryReactions(model: model, entry: entry)
+                        Toggle(isOn: $model.showsCinemaSuggestions) {
+                            Label("More to Watch", systemImage: "sidebar.right")
+                        }
+                        .toggleStyle(.button)
+                        .labelStyle(.iconOnly)
+                        .help(model.showsCinemaSuggestions ? "Hide video recommendations" : "Show video recommendations")
+                        PlayerOptions(controller: model.playback, window: window, adjustingVolume: $adjustingVolume,
+                                      cinema: true)
+                            .padding(.leading, VSpace.control)
+                    }
                 }
-
-                HStack(spacing: VSpace.tight) {
-                    step("Previous Video", symbol: "backward.end.fill", to: previous)
-                    PlaybackButtons(controller: model.playback)
-                    step("Next Video", symbol: "forward.end.fill", to: next)
-                    Spacer(minLength: VSpace.group)
-                    EntryReactions(model: model, entry: entry)
-                    PlayerOptions(controller: model.playback, window: window, adjustingVolume: $adjustingVolume,
-                                  cinema: true)
-                        .padding(.leading, VSpace.control)
-                }
-            }
-            .padding(.horizontal, VSpace.section)
-            .padding(.bottom, VSpace.group)
-            .padding(.top, VSpace.section)
-            .foregroundStyle(.white)
-            .tint(.white)
-            .background {
-                if reduceTransparency {
-                    Color.black
-                } else {
-                    LinearGradient(stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black.opacity(0.38), location: 0.35),
-                        .init(color: .black.opacity(0.54), location: 1)
-                    ], startPoint: .top, endPoint: .bottom)
+                .padding(.horizontal, VSpace.section)
+                .padding(.bottom, VSpace.group)
+                .padding(.top, VSpace.section)
+                .foregroundStyle(.white)
+                .tint(.white)
+                .background {
+                    if reduceTransparency {
+                        Color.black
+                    } else {
+                        LinearGradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.38), location: 0.35),
+                            .init(color: .black.opacity(0.54), location: 1)
+                        ], startPoint: .top, endPoint: .bottom)
+                    }
                 }
             }
         }

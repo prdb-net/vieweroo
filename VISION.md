@@ -36,7 +36,7 @@ Sometimes you want to watch an entire video. Other times you have a particular s
 
 Enter full screen from the player to give the video the whole window. The controls recede during uninterrupted playback and return on pointer movement. Leave full screen to browse other titles while watching.
 
-Choose **Cinema Mode** in a playlist to watch in the library window, with the video extending behind the Mac window buttons. Previous and Next move through playable titles in playlist order. Playback controls and icon-only reactions stay visible along the bottom, with the picture showing through the controls. Returning to the playlist restores your browsing position.
+Choose **Cinema Mode** in a playlist to watch in the library window, with the video extending behind the Mac window buttons. Previous and Next move through playable titles in playlist order. Playback controls and icon-only reactions stay visible along the bottom, with the picture showing through the controls. Returning to the playlist restores your browsing position. A transparent overlay on the right offers other playable videos from the playlist. Choose 2, 4 or 6 recommendations in Settings. The default is 4, and smaller player windows show at most 4. Select a title to resume it or hide the list from the bottom bar. Vieweroo remembers your preference.
 
 AirPlay is part of the MVP. You can choose an Apple TV or another compatible AirPlay receiver from the player and watch the video on that screen while controlling playback from your Mac.
 

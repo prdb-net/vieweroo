@@ -5,6 +5,10 @@ import Foundation
 import Observation
 import ViewerooCore
 
+enum CinemaRecommendationCount: Int, CaseIterable {
+    case two = 2, four = 4, six = 6
+}
+
 enum Gate { case starting, setup, locked, ready, failed }
 
 enum Shelf: Hashable {
@@ -61,6 +65,14 @@ final class LibraryModel {
     var detailID: Int64? { visit.detailID }
     var canGoBack: Bool { !backHistory.isEmpty }
     private(set) var cinemaMode = false
+    var showsCinemaSuggestions: Bool {
+        didSet { preferences.set(showsCinemaSuggestions, forKey: Self.cinemaSuggestionsKey) }
+    }
+    var cinemaRecommendationCount: CinemaRecommendationCount {
+        didSet { preferences.set(cinemaRecommendationCount.rawValue, forKey: Self.cinemaCountKey) }
+    }
+    private static let cinemaCountKey = "cinemaRecommendationCount"
+    private static let cinemaSuggestionsKey = "showsCinemaSuggestions"
     var playing = false
     var scanBusy = false
     private(set) var scanningFolder: String?
@@ -89,6 +101,8 @@ final class LibraryModel {
          artworkURL: @escaping (URL?) -> URL? = { $0 }, prepareCatalog: ((Catalog) throws -> Void)? = nil) {
         self.access = access ?? AccessController(directory: directory)
         self.client = client
+        self.cinemaRecommendationCount = CinemaRecommendationCount(rawValue: preferences.integer(forKey: Self.cinemaCountKey)) ?? .four
+        self.showsCinemaSuggestions = preferences.object(forKey: Self.cinemaSuggestionsKey) as? Bool ?? true
         self.preferences = preferences
         self.directory = directory
         self.cache = cache

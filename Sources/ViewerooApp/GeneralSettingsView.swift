@@ -6,7 +6,7 @@ struct GeneralSettingsView: View {
         var id: Self { self }
     }
 
-    let model: LibraryModel
+    @Bindable var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @State private var editor: Editor?
 
@@ -24,6 +24,21 @@ struct GeneralSettingsView: View {
             if let status = model.networkStatus {
                 Text(status).font(.callout).foregroundStyle(.secondary)
                 if model.subscriptionRequired { IconActionButton(.refresh, "Retry PRDB", action: model.retrySubscription) }
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: VSpace.tight) {
+                LabeledContent("Cinema recommendations") {
+                    Picker("Cinema recommendations", selection: $model.cinemaRecommendationCount) {
+                        ForEach(CinemaRecommendationCount.allCases, id: \.self) { count in
+                            Text(String(count.rawValue)).tag(count)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 120)
+                }
+                Text("Smaller player windows show up to 4 videos.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
