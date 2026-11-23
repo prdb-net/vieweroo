@@ -16,6 +16,16 @@ public enum PRDBError: Error, LocalizedError, Equatable {
         case .invalidResponse: "PRDB returned an unexpected response."
         }
     }
+
+    /// A rejection tied to the request content rather than to the account, the network or
+    /// the service's availability. Retrying the same request soon would fail again.
+    public var isRequestSpecific: Bool {
+        switch self {
+        case .invalidResponse: true
+        case let .service(status): (400..<500).contains(status) && ![408, 425].contains(status)
+        case .invalidKey, .subscriptionRequired, .rateLimited: false
+        }
+    }
 }
 
 private final class NoRedirects: NSObject, URLSessionTaskDelegate {
@@ -182,7 +192,9 @@ public struct PRDBClient: Sendable {
         try Task.checkCancellation()
         let (data, response) = try await transport(request)
         switch response.statusCode {
-        case 200: return try JSONDecoder().decode(T.self, from: data)
+        case 200:
+            do { return try JSONDecoder().decode(T.self, from: data) }
+            catch is DecodingError { throw PRDBError.invalidResponse }
         case 401: throw PRDBError.invalidKey
         case 403: throw PRDBError.subscriptionRequired
         case 429:

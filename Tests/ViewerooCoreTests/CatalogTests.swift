@@ -151,6 +151,66 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(entries.contains(where: \.needsLookup))
     }
 
+    func testRequestSpecificLookupFailuresDoNotHoldBackOtherVideos() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        for (index, name) in ["Alpha.mp4", "Bravo.mp4", "Broken.mp4", "Charlie.mp4", "Delta.mp4"].enumerated() {
+            try fixture.add(name, data: Data([UInt8(index)]))
+        }
+        try fixture.scan()
+        final class Requests: @unchecked Sendable {
+            let lock = NSLock()
+            var paths: [String] = []
+            var serviceDown = false
+            func log(_ entry: String) { lock.withLock { paths.append(entry) } }
+        }
+        let requests = Requests()
+        let client = PRDBClient { request in
+            let url = try XCTUnwrap(request.url)
+            func reply(_ status: Int, _ body: Any) throws -> (Data, HTTPURLResponse) {
+                (try JSONSerialization.data(withJSONObject: body),
+                 try XCTUnwrap(HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)))
+            }
+            if requests.lock.withLock({ requests.serviceDown }) { return try reply(503, [:]) }
+            if url.path == "/videos/identify" {
+                let json = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any]
+                let files = try XCTUnwrap(json?["files"] as? [[String: Any]])
+                let names = files.compactMap { $0["filename"] as? String }
+                requests.log("identify " + names.joined(separator: ","))
+                if names.contains("Broken.mp4") { return try reply(400, ["error": "invalid"]) }
+                return try reply(200, ["results": files.map { ["ref": $0["ref"]!, "confidence": 0, "candidates": []] }])
+            }
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "Search" }?.value ?? ""
+            requests.log("search " + query)
+            if query == "Charlie" { return try reply(200, ["items": "unexpected"]) }
+            let item: [String: Any] = ["id": "t-" + query, "title": query, "siteId": "s", "siteTitle": "Studio", "actors": []]
+            return try reply(200, ["items": [item], "totalCount": 1])
+        }
+        let failures = LibraryJobs.Failures()
+        func run() async throws {
+            try await LibraryJobs.identify(libraryID: fixture.library.id, catalog: fixture.catalog, key: "fixture",
+                                           client: client, failures: failures, searchPacing: .zero, updated: {})
+        }
+        try await run()
+        let pending = try fixture.catalog.entries(libraryID: fixture.library.id).filter(\.needsLookup).map(\.filename)
+        XCTAssertEqual(Set(pending), ["Broken.mp4", "Charlie.mp4"])
+        XCTAssertEqual(failures.count, 2)
+        XCTAssertFalse(requests.paths.contains("search Broken"))
+
+        requests.lock.withLock { requests.paths.removeAll() }
+        try await run()
+        XCTAssertEqual(requests.paths, [], "Suspended videos must not be requested again right away")
+
+        requests.lock.withLock { requests.serviceDown = true }
+        let retry = LibraryJobs.Failures()
+        do {
+            try await LibraryJobs.identify(libraryID: fixture.library.id, catalog: fixture.catalog, key: "fixture",
+                                           client: client, failures: retry, searchPacing: .zero, updated: {})
+            XCTFail("An unavailable service must stop the lookup run")
+        } catch PRDBError.service(503) {}
+        XCTAssertEqual(retry.count, 0)
+    }
+
     func testUpgradeRechecksCachedStudiosWithoutRepeatingTitleLookups() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

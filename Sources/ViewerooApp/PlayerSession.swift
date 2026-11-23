@@ -1,3 +1,4 @@
+import Combine
 import Observation
 import ViewerooCore
 
@@ -9,9 +10,11 @@ final class PlayerSession {
     private(set) var cinemaQueue: [CatalogEntry] = []
     private(set) var collection: Shelf?
     var cinemaMode: Bool { !cinemaQueue.isEmpty }
+    @ObservationIgnored private var recording: AnyCancellable?
 
     func open(_ entry: CatalogEntry, at position: Double?, model: LibraryModel, catalog: Catalog) {
         entryID = entry.id
+        recording = playback.recordedInterval.sink { [weak model] _ in model?.playbackRecorded() }
         playback.open(entry: entry, startAt: position ?? entry.resume,
                       previewDirectory: model.previewDirectory(entry), catalog: catalog)
     }
@@ -41,6 +44,7 @@ final class PlayerSession {
 
     func stop() {
         playback.stop()
+        recording = nil
         entryID = nil
         cinemaQueue = []
         collection = nil

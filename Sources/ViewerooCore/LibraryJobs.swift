@@ -1,4 +1,5 @@
 import Foundation
+import os
 import GRDB
 
 public enum LibraryJobs {
@@ -55,10 +56,35 @@ public enum LibraryJobs {
         }
     }
 
+    /// Lookups that PRDB rejected for request-specific reasons. Other pending videos keep
+    /// moving, and each rejected video is retried once its suspension ends.
+    public final class Failures: Sendable {
+        private let suspended = OSAllocatedUnfairLock(initialState: [Int64: Date]())
+        private let suspension: TimeInterval
+
+        public init(suspension: TimeInterval = 6 * 3600) { self.suspension = suspension }
+
+        public var count: Int { suspended.withLock { $0.count } }
+
+        func isSuspended(_ id: Int64, now: Date = Date()) -> Bool {
+            suspended.withLock { failures in
+                guard let until = failures[id] else { return false }
+                if until > now { return true }
+                failures[id] = nil
+                return false
+            }
+        }
+
+        func record(_ id: Int64) { suspended.withLock { $0[id] = Date().addingTimeInterval(suspension) } }
+        func clear(_ id: Int64) { _ = suspended.withLock { $0.removeValue(forKey: id) } }
+    }
+
     public static func identify(libraryID: Int64, catalog: Catalog, key: String, client: PRDBClient,
+                                failures: Failures = Failures(), searchPacing: Duration = .milliseconds(250),
                                 updated: @Sendable () async -> Void) async throws {
         let recognition = StudioRecognition(studios: try catalog.studios())
-        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: true) { batch in
+        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: true) { pending in
+            let batch = pending.filter { !failures.isSuspended($0.id) }
             var files: [PRDBFile] = []
             for entry in batch {
                 try Task.checkCancellation()
@@ -70,7 +96,8 @@ public enum LibraryJobs {
                 }
                 files.append(PRDBFile(ref: String(entry.id), filename: entry.url.lastPathComponent, filesize: entry.fileSize, osHash: hash))
             }
-            let results = try await client.identify(files, key: key)
+            guard !files.isEmpty else { return }
+            let results = try await identifyIsolating(files, key: key, client: client, failures: failures)
             var fallback: [(LookupEntry, PRDBStudio?)] = []
             for entry in batch {
                 try Task.checkCancellation()
@@ -84,19 +111,45 @@ public enum LibraryJobs {
                 } else {
                     let match = PRDBMatch(autoTitle: result.autoTitle, candidates: result.candidates, studio: studio)
                     try catalog.applyMatch(entryID: entry.id, result: match, fileSize: entry.fileSize, modified: entry.modified)
+                    failures.clear(entry.id)
                 }
             }
             await updated()
             guard !fallback.isEmpty else { return }
-            for (entry, studio) in fallback {
+            for (index, (entry, studio)) in fallback.enumerated() {
                 try Task.checkCancellation()
+                if index > 0, searchPacing > .zero { try await Task.sleep(for: searchPacing) }
                 let title = entry.url.deletingPathExtension().lastPathComponent
-                let candidates = try await client.search(title, key: key)
+                let candidates: [PRDBTitle]
+                do { candidates = try await client.search(title, key: key) }
+                catch let error as PRDBError where error.isRequestSpecific {
+                    failures.record(entry.id)
+                    continue
+                }
                 try Task.checkCancellation()
                 try catalog.applyMatch(entryID: entry.id, result: PRDBMatch(candidates: candidates, studio: studio),
                                        fileSize: entry.fileSize, modified: entry.modified)
+                failures.clear(entry.id)
             }
             await updated()
+        }
+    }
+
+    /// Narrow a request-specific rejection down to the files that cause it, so one
+    /// problematic video cannot hold back the rest of its batch.
+    private static func identifyIsolating(_ files: [PRDBFile], key: String, client: PRDBClient,
+                                          failures: Failures) async throws -> [String: PRDBMatch] {
+        do {
+            return try await client.identify(files, key: key)
+        } catch let error as PRDBError where error.isRequestSpecific {
+            guard files.count > 1 else {
+                if let id = files.first.flatMap({ Int64($0.ref) }) { failures.record(id) }
+                return [:]
+            }
+            let middle = files.count / 2
+            let first = try await identifyIsolating(Array(files[..<middle]), key: key, client: client, failures: failures)
+            let second = try await identifyIsolating(Array(files[middle...]), key: key, client: client, failures: failures)
+            return first.merging(second) { current, _ in current }
         }
     }
 }

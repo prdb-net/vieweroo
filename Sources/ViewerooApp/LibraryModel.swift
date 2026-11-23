@@ -95,6 +95,8 @@ final class LibraryModel {
     }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var playbackRefresh: Task<Void, Never>?
+    @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
     @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
@@ -250,6 +252,8 @@ final class LibraryModel {
         automaticCovers = nil
         snapshotTask?.cancel()
         snapshotTask = nil
+        playbackRefresh?.cancel()
+        playbackRefresh = nil
         videoInfoTask?.cancel()
         worker?.cancel(); availabilityTask?.cancel(); scanTask?.cancel(); previewTask?.cancel()
         mainPlayer.stop()
@@ -870,6 +874,19 @@ final class LibraryModel {
         entry.availability == .available && entry.playbackFailure == nil
     }
 
+    /// Recorded intervals change Watch History, play counts and the Unplayed filter.
+    /// Coalesce the periodic writes of both players into one snapshot.
+    func playbackRecorded() {
+        guard phase == .ready, playbackRefresh == nil else { return }
+        let stamp = session
+        playbackRefresh = Task {
+            try? await Task.sleep(for: .seconds(2))
+            playbackRefresh = nil
+            guard session == stamp, !Task.isCancelled else { return }
+            reload()
+        }
+    }
+
     func endPlayback() {
         mainPlayer.stop()
         reload()
@@ -910,7 +927,8 @@ final class LibraryModel {
                     }
                     if let id, entries.contains(where: { $0.needsLookup && $0.availability == .available }) {
                         lookupActivity = "Matching videos…"
-                        try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client) {
+                        try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client,
+                                                      failures: lookupFailures) {
                             await MainActor.run { if self.session == stamp { _ = self.reload() } }
                         }
                     }
