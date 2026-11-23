@@ -884,6 +884,33 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(try catalog.entry(id)?.playCount, 2)
     }
 
+    func testHistoryWriterRecordsInOrderAndContinuesAfterRemoval() throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("Queued.mp4")
+        try fixture.scan()
+        let catalog = fixture.catalog
+        let id = try XCTUnwrap(catalog.entries(libraryID: fixture.library.id).first).id
+        let writer = PlaybackHistoryWriter(catalog: catalog, entryID: id)
+        let failures = OSAllocatedUnfairLock(initialState: 0)
+        let check: @Sendable (Error?) -> Void = { error in if error != nil { failures.withLock { $0 += 1 } } }
+        let session = try catalog.beginSession(entryID: id)
+        writer.append(session: session, start: 0, end: 12, completion: check)
+        writer.resume(at: 12, completion: check)
+        writer.flush()
+        XCTAssertEqual(try catalog.entry(id)?.playCount, 1)
+        XCTAssertEqual(try catalog.entry(id)?.resume, 12)
+
+        _ = try catalog.editVideos(in: fixture.library.id, entryIDs: [id], edit: .removeHistory)
+        writer.append(session: session, start: 12, end: 20, completion: check)
+        writer.append(session: session, start: 20, end: 25, completion: check)
+        writer.flush()
+        XCTAssertEqual(failures.withLock { $0 }, 0)
+        let entry = try XCTUnwrap(catalog.entry(id))
+        XCTAssertEqual(entry.playCount, 1, "Both intervals continue in one replacement session")
+        XCTAssertEqual(entry.watchTime, 13, accuracy: 1e-9)
+    }
+
     func testShortSessionsStayOutOfHistoryAndPreserveResume() throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }

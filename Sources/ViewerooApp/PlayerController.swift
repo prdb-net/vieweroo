@@ -20,6 +20,7 @@ final class PlayerController: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var previewDirectory: URL?
     private var history: PlaybackHistory?
+    private var historyWriter: PlaybackHistoryWriter?
     private var reportUnsupported: ((String) throws -> Void)?
     private var observations: [NSKeyValueObservation] = []
     private var notifications: [NSObjectProtocol] = []
@@ -45,17 +46,27 @@ final class PlayerController: ObservableObject {
 
     func open(entry: CatalogEntry, startAt: Double, previewDirectory: URL, catalog: Catalog) {
         let id = entry.id
+        let writer = PlaybackHistoryWriter(catalog: catalog, entryID: id)
+        // Completions arrive on the writer queue. Ignore those of an item that was replaced.
+        let finished: @Sendable (Error?, Bool) -> Void = { [weak self] error, interval in
+            Task { @MainActor in
+                guard let self, self.historyWriter === writer else { return }
+                if let error { self.error = "Viewing history could not be saved. \(error.localizedDescription)" }
+                else if interval { self.recordedInterval.send(id) }
+            }
+        }
         let history = PlaybackHistory(begin: { [weak self] in
             if entry.duration == nil, let duration = self?.duration, duration > 0 {
                 try catalog.setDuration(duration, for: entry)
             }
             return try catalog.beginSession(entryID: id)
-        }, append: { [weak self] session, start, end in
-            try catalog.recordInterval(sessionID: session, start: start, end: end)
-            self?.recordedInterval.send(id)
-        },
-           resume: { try catalog.setResume(entryID: id, seconds: $0) })
+        }, append: { session, start, end in
+            writer.append(session: session, start: start, end: end) { finished($0, true) }
+        }, resume: { seconds in
+            writer.resume(at: seconds) { finished($0, false) }
+        })
         open(url: entry.url, title: entry.title, startAt: startAt, previewDirectory: previewDirectory, history: history)
+        historyWriter = writer
         reportUnsupported = { try catalog.setPlaybackFailure(entryID: id, message: $0, fileSize: entry.fileSize, modified: entry.modified) }
     }
 
@@ -390,6 +401,9 @@ final class PlayerController: ObservableObject {
         waiting = false
         error = nil
         history = nil
+        // Stopping also covers quitting and locking. Keep the final position.
+        historyWriter?.flush()
+        historyWriter = nil
         reportUnsupported = nil
         position = 0
         duration = 0
