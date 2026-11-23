@@ -14,9 +14,13 @@ final class AirPlayMediaServer: @unchecked Sendable {
     private let host: String
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var stopped = false
+    private let stallTimeout: TimeInterval
 
-    init(movie: URL, host: String? = nil) throws {
+    /// A receiver that stops reading for `stallTimeout` loses its connection. Receivers
+    /// request the remaining bytes again with a range request when playback continues.
+    init(movie: URL, host: String? = nil, stallTimeout: TimeInterval = 120) throws {
         self.movie = movie
+        self.stallTimeout = stallTimeout
         guard let address = host ?? Self.lanHost() else { throw URLError(.notConnectedToInternet) }
         self.host = address
         let ext = movie.pathExtension.lowercased()
@@ -80,8 +84,8 @@ final class AirPlayMediaServer: @unchecked Sendable {
             }
             let id = ObjectIdentifier(connection)
             self.connections[id] = connection
-            let request = MovieRequest(connection: connection, source: source,
-                                      path: self.path, contentType: self.contentType)
+            let request = MovieRequest(connection: connection, source: source, path: self.path,
+                                      contentType: self.contentType, stallTimeout: self.stallTimeout)
             request.start { [weak self] in
                 self?.queue.async { [weak self] in self?.connections.removeValue(forKey: id) }
             }
@@ -135,12 +139,26 @@ private final class MovieRequest: @unchecked Sendable {
     private let contentType: String
     private var header = Data()
     private var receivedHeader = false
+    private let stallTimeout: TimeInterval
+    private var lastProgress = DispatchTime.now()
 
-    init(connection: NWConnection, source: MovieSource, path: String, contentType: String) {
+    init(connection: NWConnection, source: MovieSource, path: String, contentType: String, stallTimeout: TimeInterval) {
         self.connection = connection
         self.source = source
         self.path = path
         self.contentType = contentType
+        self.stallTimeout = stallTimeout
+    }
+
+    /// Close a transfer whose receiver has not accepted data for `stallTimeout`. Otherwise
+    /// the connection, its slot and the open file stay held until the player closes the stream.
+    private func watchForStall() {
+        let interval = max(0.05, min(stallTimeout / 4, 30))
+        queue.asyncAfter(deadline: .now() + interval) { [weak self] in
+            guard let self, self.connection.state == .ready else { return }
+            let idle = Double(DispatchTime.now().uptimeNanoseconds - self.lastProgress.uptimeNanoseconds) / 1e9
+            if idle >= self.stallTimeout { self.connection.cancel() } else { self.watchForStall() }
+        }
     }
 
     func start(onClose: @escaping @Sendable () -> Void) {
@@ -202,7 +220,11 @@ private final class MovieRequest: @unchecked Sendable {
         let status = rangeHeaders.isEmpty ? "200 OK" : "206 Partial Content"
         sendHead(status, fields: fields, length: count) { [self] in
             if request[0] == "HEAD" { connection.cancel() }
-            else { sendFile(at: offset, remaining: count) }
+            else {
+                lastProgress = .now()
+                watchForStall()
+                sendFile(at: offset, remaining: count)
+            }
         }
     }
 
@@ -227,8 +249,9 @@ private final class MovieRequest: @unchecked Sendable {
             return
         }
         connection.send(content: data, completion: .contentProcessed { [self] error in
-            if error == nil { sendFile(at: offset + UInt64(data.count), remaining: remaining - UInt64(data.count)) }
-            else { connection.cancel() }
+            guard error == nil else { connection.cancel(); return }
+            lastProgress = .now()
+            sendFile(at: offset + UInt64(data.count), remaining: remaining - UInt64(data.count))
         })
     }
 

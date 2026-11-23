@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+import Network
+import os
 import Testing
 @testable import ViewerooApp
 import ViewerooCore
@@ -114,4 +116,49 @@ private func waitUntil(_ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(10)
     while !condition() && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(30)) }
     try #require(condition())
+}
+
+@Test func airPlayClosesATransferWhoseReceiverStopsReading() async throws {
+    let movie = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".mp4")
+    let size = 64 << 20
+    try Data(count: size).write(to: movie)
+    defer { try? FileManager.default.removeItem(at: movie) }
+    let server = try AirPlayMediaServer(movie: movie, host: "127.0.0.1", stallTimeout: 0.3)
+    defer { server.stop() }
+    let url = try await withCheckedThrowingContinuation { continuation in
+        server.start { continuation.resume(with: $0) }
+    }
+    let port = try #require(url.port.flatMap { NWEndpoint.Port(rawValue: UInt16($0)) })
+    let client = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+    let queue = DispatchQueue(label: "airplay-stall-test")
+    defer { client.cancel() }
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        client.stateUpdateHandler = { state in
+            let result: Result<Void, Error>?
+            switch state {
+            case .ready: result = .success(())
+            case .failed(let error): result = .failure(error)
+            default: result = nil
+            }
+            guard let result, resumed.withLock({ defer { $0 = true }; return !$0 }) else { return }
+            continuation.resume(with: result)
+        }
+        client.start(queue: queue)
+    }
+    client.send(content: Data("GET \(url.path) HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".utf8), completion: .idempotent)
+    // Leave the response unread until the socket buffers fill and the server gives up.
+    try await Task.sleep(for: .seconds(1.5))
+    var received = 0
+    var closed = false
+    while !closed {
+        let (count, complete) = await withCheckedContinuation { continuation in
+            client.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, complete, error in
+                continuation.resume(returning: (data?.count ?? 0, complete || error != nil))
+            }
+        }
+        received += count
+        closed = complete || count == 0
+    }
+    #expect(received < size, "The server must close the stalled transfer instead of sending the whole movie")
 }
