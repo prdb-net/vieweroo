@@ -2,7 +2,7 @@ import SwiftUI
 import ViewerooCore
 
 private enum StudioEdit: Identifiable, Hashable {
-    case create, rename(String)
+    case create, rename(String), cover(StudioOption)
     var id: Self { self }
 }
 
@@ -22,10 +22,15 @@ struct StudioDirectoryView: View {
 
     var body: some View {
         let platformNames = model.studioPlatforms
+        let members = entry == nil ? Dictionary(grouping: model.entries) { model.studioDirectory.studio(for: $0).id } : [:]
+        let counts = members.mapValues(\.count)
+        let directoryIDs = Set(model.studioOptions.map(\.id))
+        let localGroups = members.compactMap { key, videos -> StudioOption? in
+            guard !directoryIDs.contains(key), let first = videos.first else { return nil }
+            return model.studioDirectory.studio(for: first)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let matches = model.studioOptions.filter { filters.includes($0, favorites: model.favoriteStudioIDs, term: term) }
-        let counts = entry == nil ? model.entries.reduce(into: [String: Int]()) { result, video in
-            result[model.studioDirectory.studio(for: video).id, default: 0] += 1
-        } : [:]
+        let localMatches = localGroups.filter { filters.includes($0, favorites: model.favoriteStudioIDs, term: term) }
         let groups = Dictionary(grouping: matches, by: { $0.creator?.platform })
         let canCreate = !term.isEmpty && term.caseInsensitiveCompare("Unknown Studio") != .orderedSame &&
             !model.studioOptions.contains { $0.name.caseInsensitiveCompare(term) == .orderedSame }
@@ -46,6 +51,7 @@ struct StudioDirectoryView: View {
             }
             if !filters.isEmpty { FilterChips(filters: $filters) }
             List {
+                section("In This Library", studios: localMatches, counts: counts)
                 section("My Studios", studios: matches.filter(\.isCustom), counts: counts)
                 section("PRDB Studios", studios: matches.filter { !$0.isCustom && $0.creator == nil }, counts: counts)
                 ForEach(platformNames, id: \.self) { platform in
@@ -54,7 +60,7 @@ struct StudioDirectoryView: View {
             }
             .listStyle(.inset)
             .overlay {
-                if matches.isEmpty {
+                if matches.isEmpty && localMatches.isEmpty {
                     Text(term.isEmpty && filters.isEmpty ? "No studios yet" : "No matching studios").foregroundStyle(.secondary)
                 }
             }
@@ -78,6 +84,8 @@ struct StudioDirectoryView: View {
                     if saved { filters = CollectionFilters(group: .custom); reveal(name) }
                     return saved
                 }
+            case let .cover(studio):
+                CollectionCoverPicker(model: model, collection: model.coverCollection(for: studio, in: libraryID))
             case let .rename(oldName):
                 NameForm(title: "Rename Studio", action: "Rename", name: oldName) { name, onFailure in
                     let saved = model.renameStudio(oldName, to: name, in: libraryID, onFailure: onFailure)
@@ -124,6 +132,10 @@ struct StudioDirectoryView: View {
                             let count = counts[studio.id, default: 0]
                             Text(count == 1 ? "1 video" : "\(count) videos")
                                 .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                            Button("Choose Cover…", systemImage: "photo") { editing = .cover(studio) }
+                                .labelStyle(.iconOnly).buttonStyle(.bordered).help("Choose Cover…")
+                                .accessibilityLabel("Choose cover for \(studio.name)")
+                                .disabled(count == 0)
                             if studio.isCustom {
                                 IconActionButton(.edit, "Rename Studio…", targetLabel: "Rename Studio “\(studio.name)”") {
                                     editing = .rename(studio.name)

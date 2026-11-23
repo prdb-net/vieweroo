@@ -6,10 +6,7 @@ public struct CatalogTag: Identifiable, Sendable {
     public let name: String
     /// Assignment order determines which cached still to try first for an automatic cover.
     public let memberIDs: [Int64]
-    public let coverEntryID: Int64?
-    public let coverTime: Double?
-    public let coverRevision: String?
-    public let hasCustomCover: Bool
+    public let cover: CatalogCover?
 }
 
 extension Catalog {
@@ -54,8 +51,7 @@ extension Catalog {
             """, arguments: [libraryID]).map { row in
             let id: Int64 = row["id"]
             return CatalogTag(id: id, name: row["name"], memberIDs: members[id]?.map { $0["entryID"] } ?? [],
-                              coverEntryID: row["entryID"], coverTime: row["time"], coverRevision: row["revision"],
-                              hasCustomCover: row["custom"] ?? false)
+                              cover: CatalogCover(row))
         }
     }
 
@@ -95,29 +91,5 @@ extension Catalog {
         try db.execute(sql: "INSERT INTO tagItem(libraryID,tagID,entryID) VALUES (?,?,?) ON CONFLICT(tagID,entryID) DO NOTHING",
                        arguments: [libraryID, id, entryID])
         return db.changesCount == 1 ? db.lastInsertedRowID : nil
-    }
-
-    public func tagCoverImage(_ id: Int64) async throws -> Data? {
-        try await database.read { db in try Data.fetchOne(db, sql: "SELECT image FROM tagCover WHERE tagID = ?", arguments: [id]) }
-    }
-
-    @discardableResult
-    public func saveTagCover(_ id: Int64, entryID: Int64, time: Double, image: Data, custom: Bool) throws -> Bool {
-        guard time.isFinite, time >= 0, !image.isEmpty else { throw CatalogError.invalidValue }
-        return try database.write { db in
-            // Never overwrite a user's choice with a background preview.
-            let conflict = custom ? "DO UPDATE SET entryID=excluded.entryID, time=excluded.time, image=excluded.image, revision=excluded.revision, custom=1" : "DO NOTHING"
-            try db.execute(sql: """
-                INSERT INTO tagCover(tagID,entryID,time,image,revision,custom)
-                SELECT tagID,entryID,?,?,?,? FROM tagItem WHERE tagID = ? AND entryID = ?
-                ON CONFLICT(tagID) \(conflict)
-                """, arguments: [time, image, UUID().uuidString, custom, id, entryID])
-            if custom && db.changesCount == 0 { throw CatalogError.invalidValue }
-            return db.changesCount > 0
-        }
-    }
-
-    public func resetTagCover(_ id: Int64) throws {
-        try database.write { db in try db.execute(sql: "DELETE FROM tagCover WHERE tagID = ?", arguments: [id]) }
     }
 }

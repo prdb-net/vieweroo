@@ -46,6 +46,7 @@ final class LibraryModel {
     var libraries: [CatalogLibrary] = []
     var sources: [CatalogSource] = []
     var entries: [CatalogEntry] = []
+    var studioCovers: [String: CatalogCover] = [:]
     var favoriteStudioIDs: Set<String> = []
     var studioDirectory = StudioDirectory()
     var studioOptions: [StudioOption] { studioDirectory.options }
@@ -85,7 +86,7 @@ final class LibraryModel {
     }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
-    @ObservationIgnored private var automaticCovers: AutomaticTagCovers?
+    @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
     var setupReason: String?
@@ -262,6 +263,7 @@ final class LibraryModel {
     }
 
     private func resetNavigation() {
+        studioCovers.removeAll()
         favoriteStudioIDs.removeAll()
         backHistory.removeAll()
         lastCollections.removeAll()
@@ -405,6 +407,7 @@ final class LibraryModel {
                         snapshot.entries.lazy.filter { $0.availability == .available }.count
                     entries = snapshot.entries
                     if availabilityChanged { generatePreviews() }
+                    studioCovers = snapshot.studioCovers
                     favoriteStudioIDs = snapshot.favoriteStudioIDs
                     studioDirectory = StudioDirectory(snapshot.studioOptions)
                     tags = snapshot.tags
@@ -426,7 +429,7 @@ final class LibraryModel {
                     }
                     loadPlaylist()
                     if cinemaMode, let detailID, !orderedIDs.contains(detailID) { goBack() }
-                    let covers = AutomaticTagCovers(tags: tags, entries: entries, cache: cache)
+                    let covers = AutomaticCollectionCovers(tags: tags, playlists: playlists, entries: entries, cache: cache)
                     if covers != automaticCovers {
                         automaticCovers = covers
                         if try await covers.prepare(in: catalog) {

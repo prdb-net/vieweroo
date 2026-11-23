@@ -1,20 +1,21 @@
 import Foundation
 import ViewerooCore
 
-/// Fill only missing covers, in assignment order, using locally published video stills.
-struct AutomaticTagCovers: Equatable, Sendable {
+/// Fill only missing covers, in collection order, using locally published video stills.
+struct AutomaticCollectionCovers: Equatable, Sendable {
     struct Candidate: Equatable {
         let id: Int64
         let directory: URL
     }
-    let candidates: [Int64: [Candidate]]
+    let candidates: [CoverCollectionID: [Candidate]]
 
-    init(tags: [CatalogTag], entries: [CatalogEntry], cache: PreviewCache) {
-        let pending = tags.filter { $0.coverRevision == nil && !$0.memberIDs.isEmpty }
+    init(tags: [CatalogTag], playlists: [CatalogPlaylist], entries: [CatalogEntry], cache: PreviewCache) {
+        let collections = tags.map(CoverCollection.init) + playlists.map(CoverCollection.init)
+        let pending = collections.filter { $0.cover?.revision == nil && !$0.memberIDs.isEmpty }
         guard !pending.isEmpty else { candidates = [:]; return }
         let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        candidates = Dictionary(uniqueKeysWithValues: pending.map { tag in
-            (tag.id, tag.memberIDs.compactMap { id in
+        candidates = Dictionary(uniqueKeysWithValues: pending.map { collection in
+            (collection.id, collection.memberIDs.compactMap { id in
                 byID[id].map { Candidate(id: id, directory: cache.directory(for: $0)) }
             })
         })
@@ -28,7 +29,7 @@ struct AutomaticTagCovers: Equatable, Sendable {
                 let frames = PreviewCache.frames(in: entry.directory)
                 guard let frame = frames.dropFirst().first ?? frames.first,
                       let image = try? Data(contentsOf: frame.url) else { continue }
-                if try catalog.saveTagCover(id, entryID: entry.id, time: frame.time, image: image, custom: false) {
+                if try catalog.saveCover(id, entryID: entry.id, time: frame.time, image: image, custom: false) {
                     changed = true
                 }
                 break

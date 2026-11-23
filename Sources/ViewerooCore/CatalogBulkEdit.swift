@@ -5,12 +5,13 @@ public enum BulkVideoEdit: Sendable {
     case favorite(Bool)
     case rating(Int)
     case addToPlaylist(Int64)
+    case removeFromPlaylist(Int64)
     case addTags([String])
     case removeTag(Int64)
     case removeHistory
 }
 
-fileprivate struct RemovedTagCover: FetchableRecord, Decodable, Sendable {
+fileprivate struct RemovedCover: FetchableRecord, Decodable, Sendable {
     let time: Double
     let image: Data
     let custom: Bool
@@ -21,11 +22,18 @@ public struct BulkEditReceipt: Sendable {
         case favorite(previous: Bool)
         case rating(previous: Int, applied: Int)
         case playlist(Int64)
+        case removedPlaylistItem(RemovedCover?)
         case tags([Int64])
-        case removedTag(id: Int64, assignment: Int64, cover: RemovedTagCover?)
+        case removedTag(id: Int64, assignment: Int64, cover: RemovedCover?)
         case history([RemovedPlaybackSession])
     }
 
+    fileprivate struct PlaylistRemoval: Sendable {
+        let playlistID: Int64
+        let originalOrder: [Int64]
+    }
+
+    fileprivate var playlistRemoval: PlaylistRemoval?
     public let libraryID: Int64
     fileprivate var changes: [Int64: Change] = [:]
     public var changedCount: Int { changes.count }
@@ -36,6 +44,11 @@ extension Catalog {
     public func editVideos(in libraryID: Int64, entryIDs: [Int64], edit: BulkVideoEdit) throws -> BulkEditReceipt {
         try database.write { db in
             var receipt = BulkEditReceipt(libraryID: libraryID)
+            if case let .removeFromPlaylist(playlistID) = edit {
+                guard try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlist WHERE id = ? AND libraryID = ?)",
+                                        arguments: [playlistID, libraryID]) == true else { throw CatalogError.invalidValue }
+                receipt.playlistRemoval = .init(playlistID: playlistID, originalOrder: try Self.playlistEntryIDs(db, playlistID))
+            }
             for id in entryIDs {
                 guard let row = try Row.fetchOne(db, sql: "SELECT favorite, rating FROM entry WHERE libraryID = ? AND id = ?",
                                                  arguments: [libraryID, id]) else { throw CatalogError.invalidValue }
@@ -56,6 +69,11 @@ extension Catalog {
                     if try Self.appendToPlaylist(db, playlistID: playlistID, entryID: id) {
                         receipt.changes[id] = .playlist(playlistID)
                     }
+                case let .removeFromPlaylist(playlistID):
+                    let args: StatementArguments = [playlistID, id]
+                    let cover = try RemovedCover.fetchOne(db, sql: "SELECT time,image,custom FROM playlistCover WHERE playlistID = ? AND entryID = ?", arguments: args)
+                    try db.execute(sql: "DELETE FROM playlistItem WHERE playlistID = ? AND entryID = ?", arguments: args)
+                    if db.changesCount == 1 { receipt.changes[id] = .removedPlaylistItem(cover) }
                 case .removeHistory:
                     let sessions = try Self.removeHistory(db, entryID: id)
                     if !sessions.isEmpty { receipt.changes[id] = .history(sessions) }
@@ -65,7 +83,7 @@ extension Catalog {
                 case let .removeTag(tagID):
                     let args: StatementArguments = [tagID, id]
                     if let assignment = try Int64.fetchOne(db, sql: "SELECT id FROM tagItem WHERE tagID = ? AND entryID = ?", arguments: args) {
-                        let cover = try RemovedTagCover.fetchOne(db, sql: "SELECT time,image,custom FROM tagCover WHERE tagID = ? AND entryID = ?", arguments: args)
+                        let cover = try RemovedCover.fetchOne(db, sql: "SELECT time,image,custom FROM tagCover WHERE tagID = ? AND entryID = ?", arguments: args)
                         try db.execute(sql: "DELETE FROM tagItem WHERE id = ?", arguments: [assignment])
                         receipt.changes[id] = .removedTag(id: tagID, assignment: assignment, cover: cover)
                     }
@@ -77,6 +95,10 @@ extension Catalog {
 
     public func undoVideoEdit(_ receipt: BulkEditReceipt) throws {
         try database.write { db in
+            if let removal = receipt.playlistRemoval {
+                try Self.restorePlaylistItems(db, receipt: receipt, removal: removal)
+                return
+            }
             for (id, change) in receipt.changes {
                 switch change {
                 case let .favorite(previous):
@@ -85,6 +107,7 @@ extension Catalog {
                 case let .rating(previous, applied):
                     try db.execute(sql: "UPDATE entry SET rating = ? WHERE id = ? AND libraryID = ? AND rating = ?",
                                    arguments: [previous, id, receipt.libraryID, applied])
+                case .removedPlaylistItem: break // Restored together in playlist order above.
                 case let .playlist(playlistID):
                     try db.execute(sql: "DELETE FROM playlistItem WHERE libraryID = ? AND playlistID = ? AND entryID = ?",
                                    arguments: [receipt.libraryID, playlistID, id])
@@ -110,5 +133,43 @@ extension Catalog {
                 }
             }
         }
+    }
+
+    private static func restorePlaylistItems(_ db: Database, receipt: BulkEditReceipt,
+                                             removal: BulkEditReceipt.PlaylistRemoval) throws {
+        let playlist = removal.playlistID
+        let current = try playlistEntryIDs(db, playlist)
+        let present = Set(current)
+        // Reinsert each missing run after its nearest surviving predecessor. This also
+        // preserves later appends, reorders and videos independently added back.
+        var predecessor: Int64?
+        var restoredAfter: [Int64?: [Int64]] = [:]
+        for id in removal.originalOrder {
+            if present.contains(id) {
+                predecessor = id
+            } else if case let .removedPlaylistItem(cover) = receipt.changes[id] {
+                try db.execute(sql: """
+                    INSERT INTO playlistItem(libraryID,playlistID,entryID,position)
+                    SELECT p.libraryID,p.id,e.id,0 FROM playlist p JOIN entry e ON e.libraryID = p.libraryID
+                    WHERE p.id = ? AND e.id = ? AND p.libraryID = ?
+                    """, arguments: [playlist, id, receipt.libraryID])
+                guard db.changesCount == 1 else { continue }
+                restoredAfter[predecessor, default: []].append(id)
+                if let cover {
+                    try db.execute(sql: """
+                        INSERT INTO playlistCover(playlistID,entryID,time,image,revision,custom) VALUES (?,?,?,?,?,?)
+                        ON CONFLICT(playlistID) DO UPDATE SET entryID=excluded.entryID, time=excluded.time,
+                            image=excluded.image, revision=excluded.revision, custom=excluded.custom WHERE NOT playlistCover.custom
+                        """, arguments: [playlist, id, cover.time, cover.image, UUID().uuidString, cover.custom])
+                }
+            }
+        }
+        guard !restoredAfter.isEmpty else { return }
+        var order = restoredAfter[nil] ?? []
+        for id in current {
+            order.append(id)
+            if let restored = restoredAfter[id] { order.append(contentsOf: restored) }
+        }
+        try writePlaylistOrder(db, playlistID: playlist, entryIDs: order)
     }
 }

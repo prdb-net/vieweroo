@@ -70,6 +70,7 @@ public struct LibrarySnapshot: Sendable {
     public let libraries: [CatalogLibrary]
     public let sources: [CatalogSource]
     public let entries: [CatalogEntry]
+    public let studioCovers: [String: CatalogCover]
     public let favoriteStudioIDs: Set<String>
     public let studioOptions: [StudioOption]
     public let tags: [CatalogTag]
@@ -118,6 +119,7 @@ extension Catalog {
             return try LibrarySnapshot(libraries: Self.fetchLibraries(db),
                                 sources: libraryID.map { try Self.fetchSources(db, libraryID: $0) } ?? [],
                                 entries: libraryID.map { try Self.fetchEntries(db, libraryID: $0) } ?? [],
+                                studioCovers: libraryID.map { try Self.studioCovers(db, libraryID: $0) } ?? [:],
                                 favoriteStudioIDs: libraryID.map {
                                     try Self.favoriteStudioIDs(db, libraryID: $0, options: options)
                                 } ?? [],
@@ -151,7 +153,10 @@ extension Catalog {
             try db.execute(sql: """
                 UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ? AND needsLookup
                 """, arguments: [name, entryID, fileSize, modified])
-            if db.changesCount > 0 { try Self.rememberStudio(db, name) }
+            if db.changesCount > 0 {
+                try Self.rememberStudio(db, name)
+                try Self.reconcileStudioCovers(db, entryID: entryID)
+            }
         }
     }
 
@@ -179,8 +184,10 @@ extension Catalog {
                 """, arguments: [matchData, candidateData, result.studio?.name, entryID, fileSize, modified])
             if db.changesCount > 0 {
                 try Self.rememberStudio(db, result.studio?.name)
+                let before = db.totalChangesCount
                 try Self.rememberSite(db, result.autoTitle?.studio)
                 for title in result.candidates { try Self.rememberSite(db, title.studio) }
+                try Self.reconcileStudioCovers(db, entryID: db.totalChangesCount == before ? entryID : nil)
             }
         }
     }
@@ -191,15 +198,19 @@ extension Catalog {
             try db.execute(sql: "UPDATE entry SET matchData = ?, confirmed = 1, needsLookup = 0 WHERE id = ?",
                            arguments: [data, entryID])
             guard db.changesCount == 1 else { throw CatalogError.invalidValue }
+            let before = db.totalChangesCount
             try Self.rememberSite(db, title?.studio)
+            try Self.reconcileStudioCovers(db, entryID: db.totalChangesCount == before ? entryID : nil)
         }
     }
 
     public func saveStudios(_ studios: [PRDBStudio]) throws {
         try database.write { db in
+            let before = db.totalChangesCount
             for studio in studios {
                 try Self.saveSite(db, studio)
             }
+            if db.totalChangesCount != before { try Self.reconcileStudioCovers(db) }
         }
     }
 
@@ -218,6 +229,7 @@ extension Catalog {
         try db.execute(sql: """
             INSERT INTO studio(id,name,creatorData) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name, creatorData = excluded.creatorData
+            WHERE studio.name IS NOT excluded.name OR studio.creatorData IS NOT excluded.creatorData
             """, arguments: [studio.id, studio.name, data])
     }
 

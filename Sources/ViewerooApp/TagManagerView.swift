@@ -1,44 +1,6 @@
 import SwiftUI
 import ViewerooCore
 
-struct TagTile: View {
-    let model: LibraryModel
-    let tag: CatalogTag
-    let chooseCover: () -> Void
-    @State private var image: NSImage?
-
-    var body: some View {
-        let selected = model.visit.selectedTile == .tag(tag.id)
-        Button { model.browse(.tag(tag.id), from: .tag(tag.id)) } label: {
-            VStack(alignment: .leading, spacing: VSpace.tight) {
-                RoundedRectangle(cornerRadius: VSpace.tight).fill(.quaternary.opacity(0.5))
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .overlay {
-                        if let image { Image(nsImage: image).resizable().scaledToFill() }
-                        else { Image(systemName: "tag").font(.title).foregroundStyle(.secondary) }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: VSpace.tight))
-                    .overlay {
-                        if selected { RoundedRectangle(cornerRadius: VSpace.tight).strokeBorder(Color.accentColor, lineWidth: 2) }
-                    }
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: VSpace.unit) {
-                    Text(tag.name).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                    Text(tag.videoCountLabel).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }.contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .contextMenu { Button("Choose Cover…", action: chooseCover).disabled(tag.memberIDs.isEmpty) }
-        .task(id: tag.coverRevision) {
-            guard tag.coverRevision != nil else { image = nil; return }
-            let bytes = try? await model.catalog?.tagCoverImage(tag.id)
-            if !Task.isCancelled { image = bytes.flatMap(NSImage.init(data:)) }
-        }
-    }
-}
-
 private extension CatalogTag {
     var videoCountLabel: String { memberIDs.count == 1 ? "1 video" : "\(memberIDs.count) videos" }
 }
@@ -114,7 +76,7 @@ struct TagManagerView: View {
                     return saved
                 }
             case let .cover(tag):
-                TagCoverPicker(model: model, tag: tag)
+                CollectionCoverPicker(model: model, collection: CoverCollection(tag))
             }
         }
         .alert("Delete “\(deletion?.name ?? "")”?", isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } }),

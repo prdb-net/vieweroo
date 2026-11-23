@@ -14,7 +14,7 @@ struct BrowserView: View {
         let tileWidth = min(320, floor((width - CGFloat(count - 1) * VSpace.group) / CGFloat(count)))
         return Array(repeating: GridItem(.fixed(tileWidth), spacing: VSpace.group, alignment: .topLeading), count: count)
     }
-    @State private var coverTag: CatalogTag?
+    @State private var coverCollection: CoverCollection?
     @Environment(\.colorScheme) private var scheme
     private var studioIndex: Bool { model.shelf == .studios }
     private var playlistID: Int64? {
@@ -22,9 +22,12 @@ struct BrowserView: View {
         return nil
     }
     var body: some View {
-        let records = studioIndex || model.shelf == .tags ? [] : model.visibleVideos
+        let records = model.shelf.isVideoCollection ? model.visibleVideos : []
         VStack(spacing: 0) {
-            if selection != nil {
+            if selection != nil, model.shelf == .playlists, let libraryID = model.libraryID {
+                PlaylistEditBar(model: model, libraryID: libraryID, selection: $selection,
+                                shortcutsEnabled: selectionShortcuts)
+            } else if selection != nil, model.shelf.isVideoCollection {
                 BulkEditBar(model: model, selection: $selection, visibleIDs: records.map(\.id),
                             shortcutsEnabled: selectionShortcuts)
             }
@@ -32,21 +35,29 @@ struct BrowserView: View {
                 collection(columns: columns(for: viewport.size.width), records: records)
             }
         }
-        .sheet(item: $coverTag) { tag in
-            TagCoverPicker(model: model, tag: tag)
+        .sheet(item: $coverCollection) { collection in
+            CollectionCoverPicker(model: model, collection: collection)
         }
     }
 
     private func collection(columns: [GridItem], records: [CatalogEntry]) -> some View {
         let studios = studioIndex ? model.visibleStudios : []
-        let tagIndex = model.shelf == .tags
-        let tags = tagIndex ? model.tags.filter { model.visit.filters.includes($0, term: model.searchTerm) } : []
+        let collections: [CoverCollection]
         let count: Int
         let noun: String
         switch model.shelf {
-        case .tags: (count, noun) = (tags.count, "tag")
-        case .studios: (count, noun) = (studios.count, "studio")
-        default: (count, noun) = (records.count, "video")
+        case .tags:
+            collections = model.tags.filter { model.visit.filters.includes($0, term: model.searchTerm) }.map(CoverCollection.init)
+            (count, noun) = (collections.count, "tag")
+        case .playlists:
+            collections = model.visiblePlaylists.map(CoverCollection.init)
+            (count, noun) = (collections.count, "playlist")
+        case .studios:
+            collections = []
+            (count, noun) = (studios.count, "studio")
+        default:
+            collections = []
+            (count, noun) = (records.count, "video")
         }
         let unit = count == 1 ? noun : noun + "s"
         return ScrollView {
@@ -64,10 +75,12 @@ struct BrowserView: View {
                     }
                 }
                 if count == 0 { empty }
-                else if tagIndex {
+                else if !collections.isEmpty {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: VSpace.section) {
-                        ForEach(tags) { tag in
-                            TagTile(model: model, tag: tag) { coverTag = tag }
+                        ForEach(collections) { collection in
+                            CollectionCoverTile(model: model, collection: collection, selection: $selection) {
+                                coverCollection = collection
+                            }
                         }
                     }
                 }
@@ -97,14 +110,7 @@ struct BrowserView: View {
                             .accessibilityAddTraits(isSelected(.video(entry.id)) ? .isSelected : [])
                             .overlay(alignment: .topTrailing) {
                                 if let selection {
-                                    let checked = selection.contains(entry.id)
-                                    Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundStyle(.white, Color.accentColor)
-                                        .background(.black.opacity(0.72), in: Circle())
-                                        .padding(VSpace.tight)
-                                        .allowsHitTesting(false)
-                                        .accessibilityHidden(true)
+                                    SelectionCheckmark(checked: selection.contains(entry.id))
                                 } else if entry.availability == .available {
                                     let action = entry.resume > 0 ? "Resume" : "Play"
                                     Button { model.play(entry) } label: {
@@ -133,7 +139,7 @@ struct BrowserView: View {
                                     Divider()
                                     PlaylistMenu(model: model, entryID: entry.id, inContextMenu: true)
                                 }
-                                if let id = playlistID {
+                                if selection == nil, let id = playlistID {
                                     Divider()
                                     Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
                                     Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
@@ -156,7 +162,16 @@ struct BrowserView: View {
                 ZStack(alignment: Alignment(horizontal: .trailing, vertical: .studioTitle)) {
                     Button { model.browse(.studio(studio.name, siteID: studio.siteID), from: tile) } label: {
                         VStack(alignment: .leading, spacing: VSpace.tight) {
-                            if let cover = item.cover {
+                            if let custom = model.studioCovers[studio.id], let libraryID = model.libraryID {
+                                CollectionCoverImage(model: model, id: .studio(libraryID: libraryID, studioID: studio.id),
+                                                     cover: custom, symbol: "film.stack")
+                                    .overlay {
+                                        if isSelected(tile) {
+                                            RoundedRectangle(cornerRadius: VSpace.tight).strokeBorder(Color.accentColor, lineWidth: 2)
+                                        }
+                                    }
+                                    .accessibilityHidden(true)
+                            } else if let cover = item.cover {
                                 poster(cover, tile: tile)
                             } else {
                                 RoundedRectangle(cornerRadius: VSpace.tight)
@@ -174,6 +189,11 @@ struct BrowserView: View {
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     .accessibilityAddTraits(model.visit.selectedTile == tile ? .isSelected : [])
+                    .contextMenu {
+                        Button("Choose Cover…") {
+                            if let libraryID = model.libraryID { coverCollection = model.coverCollection(for: studio, in: libraryID) }
+                        }.disabled(item.count == 0)
+                    }
                     let favorite = model.favoriteStudioIDs.contains(studio.id)
                     Button { model.toggleStudioFavorite(studio) } label: {
                         Image(systemName: favorite ? "heart.fill" : "heart")
@@ -219,7 +239,11 @@ struct BrowserView: View {
         model.change("Playlist order saved") { try $0.reorderPlaylist(playlist, entryIDs: ids) }
     }
     @ViewBuilder private var empty: some View {
-        if model.shelf == .tags {
+        if model.shelf == .playlists {
+            ContentUnavailableView(model.narrowed ? "No matching playlists" : "No playlists yet",
+                                   systemImage: model.narrowed ? "magnifyingglass" : "list.and.film",
+                                   description: Text(model.narrowed ? "Try a different search or clear a filter." : selection == nil ? "Click the edit pencil to create your first playlist." : "Click New Playlist to create your first playlist."))
+        } else if model.shelf == .tags {
             ContentUnavailableView(model.narrowed ? "No matching tags" : "No tags yet",
                                    systemImage: model.narrowed ? "magnifyingglass" : "tag",
                                    description: Text(model.narrowed ? "Try a different search or clear a filter." : "Create a tag in Manage Tags or add one to a video."))

@@ -166,6 +166,7 @@ public struct CatalogScanner: Sendable {
                     detectedStudio = NULL, needsLookup = NOT confirmed
                 WHERE entry.fileSize <> excluded.fileSize OR entry.modified <> excluded.modified
                 """, arguments: [source.libraryID, path, size, modified])
+            let entryChanged = db.changesCount > 0
             let id = try Int64.fetchOne(db, sql: "SELECT id FROM entry WHERE libraryID = ? AND path = ?",
                                         arguments: [source.libraryID, path])!
             try db.execute(sql: """
@@ -175,6 +176,7 @@ public struct CatalogScanner: Sendable {
                     AND instr(rtrim(s.path, '/') || '/', rtrim(?, '/') || '/') = 1
                 ON CONFLICT(sourceID, entryID) DO UPDATE SET present = 1, generation = excluded.generation
                 """, arguments: [id, source.libraryID, path, boundary])
+            if entryChanged { try Catalog.reconcileStudioCovers(db, entryID: id) }
             return try Catalog.fetchEntry(db, id: id)!
         }
     }

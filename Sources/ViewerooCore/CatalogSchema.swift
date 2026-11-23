@@ -176,6 +176,27 @@ extension Catalog {
                 """)
         }
         migrator.registerMigration("library-tags-v13", migrate: migrateTags)
+        migrator.registerMigration("playlist-covers-v14") { db in
+            try db.execute(sql: """
+                CREATE TABLE playlistCover (
+                    playlistID INTEGER PRIMARY KEY, entryID INTEGER NOT NULL,
+                    time REAL NOT NULL CHECK(time >= 0), image BLOB NOT NULL,
+                    revision TEXT NOT NULL, custom INTEGER NOT NULL,
+                    FOREIGN KEY(playlistID, entryID) REFERENCES playlistItem(playlistID, entryID) ON DELETE CASCADE
+                )
+                """)
+        }
+        migrator.registerMigration("studio-covers-v15") { db in
+            try db.execute(sql: """
+                CREATE TABLE studioCover (
+                    libraryID INTEGER NOT NULL, studioID TEXT NOT NULL, entryID INTEGER NOT NULL,
+                    time REAL NOT NULL CHECK(time >= 0), image BLOB NOT NULL, revision TEXT NOT NULL,
+                    PRIMARY KEY(libraryID, studioID),
+                    FOREIGN KEY(libraryID, entryID) REFERENCES entry(libraryID, id) ON DELETE CASCADE
+                );
+                CREATE INDEX studio_cover_source ON studioCover(entryID);
+                """)
+        }
         return migrator
     }
 }

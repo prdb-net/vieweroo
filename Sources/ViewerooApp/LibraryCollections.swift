@@ -29,6 +29,11 @@ extension LibraryModel {
 
     var studioPlatforms: [String] { Set(studioOptions.compactMap { $0.creator?.platform }).sorted() }
 
+    func coverCollection(for studio: StudioOption, in libraryID: Int64) -> CoverCollection {
+        let members = entries.lazy.filter { self.studioDirectory.studio(for: $0).id == studio.id }.map(\.id)
+        return CoverCollection(studio: studio, libraryID: libraryID, memberIDs: Array(members), cover: studioCovers[studio.id])
+    }
+
     var visibleStudios: [StudioTile] {
         let groups = Dictionary(grouping: entries) { studioDirectory.studio(for: $0).id }
         var options = groups.compactMapValues { $0.first.map(studioDirectory.studio(for:)) }

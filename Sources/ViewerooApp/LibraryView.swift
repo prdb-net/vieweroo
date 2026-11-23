@@ -2,7 +2,7 @@ import SwiftUI
 import ViewerooCore
 
 private enum EditSheet: String, Identifiable {
-    case library, playlists, settings, studios, tags, videoFilters
+    case library, settings, studios, tags, videoFilters
     var id: Self { self }
 }
 
@@ -48,8 +48,6 @@ struct LibraryView: View {
                 if let id = model.libraryID { StudioDirectoryView(model: model, libraryID: id) }
             case .tags:
                 if let id = model.libraryID { TagManagerView(model: model, libraryID: id) }
-            case .playlists:
-                if let id = model.libraryID { PlaylistManagerView(model: model, libraryID: id) }
             case .library:
                 NameForm(title: "New Library") { name, onFailure in
                     model.createLibrary(name, onFailure: onFailure)
@@ -92,14 +90,12 @@ struct LibraryView: View {
                                     NSApp.keyWindow?.makeFirstResponder(nil)
                                     bulkSelection = []
                                 }
-                                .disabled(model.visibleVideos.isEmpty)
+                                .disabled(model.shelf != .playlists && model.visibleVideos.isEmpty)
                             }
                             if model.shelf == .studios {
                                 manageButton("Manage Studios", sheet: .studios)
                             } else if model.shelf == .tags {
                                 manageButton("Manage Tags", sheet: .tags)
-                            } else if model.shelf == .playlists {
-                                manageButton("Manage Playlists", sheet: .playlists)
                             }
                         }
                     }
@@ -109,8 +105,6 @@ struct LibraryView: View {
                     Group {
                         if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
                             EntryView(model: model, entry: entry, window: playerWindow)
-                        } else if model.shelf == .playlists {
-                            PlaylistsView(model: model)
                         } else if model.shelf == .settings,
                                   let library = model.libraries.first(where: { $0.id == model.libraryID }) {
                             LibrarySettingsView(model: model, library: library)

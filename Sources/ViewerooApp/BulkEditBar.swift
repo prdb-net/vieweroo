@@ -14,23 +14,11 @@ struct BulkEditBar: View {
 
     var body: some View {
         let ids = targets
-        VStack(spacing: VSpace.tight) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: VSpace.tight) {
-                    selectionControls(count: ids.count)
-                    Spacer()
-                    HStack(spacing: VSpace.tight) { editActions(ids) }.fixedSize()
-                }
-                VStack(alignment: .leading, spacing: VSpace.tight) {
-                    HStack { selectionControls(count: ids.count); Spacer() }
-                    ChipRows { editActions(ids) }
-                }
-            }
-            .padding(.horizontal, VSpace.section)
-            Divider()
+        SelectionActionBar(selection: $selection, visibleIDs: visibleIDs, count: ids.count,
+                           shortcutsEnabled: shortcutsEnabled && !editingTags) {
+            editActions(ids)
+            Button("Done") { selection = nil }
         }
-        .padding(.top, VSpace.control)
-        .onChange(of: visibleIDs, initial: true) { selection?.formIntersection(visibleIDs) }
         .alert("Remove from Watch History?", isPresented: Binding(
             get: { !historyRemoval.isEmpty }, set: { if !$0 { historyRemoval = [] } }
         ), presenting: historyRemoval) { pending in
@@ -49,16 +37,6 @@ struct BulkEditBar: View {
         }
     }
 
-    private func selectionControls(count: Int) -> some View {
-        HStack(spacing: VSpace.tight) {
-            Text("\(count) selected").monospacedDigit()
-            Button("Select All") { selection = Set(visibleIDs) }
-                .keyboardShortcut(shortcutsEnabled && !editingTags ? KeyboardShortcut("a") : nil)
-                .disabled(visibleIDs.isEmpty)
-        }
-        .fixedSize()
-    }
-
     @ViewBuilder
     private func editActions(_ ids: [Int64]) -> some View {
         Group {
@@ -74,6 +52,10 @@ struct BulkEditBar: View {
                     Button("Clear Like") {
                         if apply(.rating(0), to: ids) { selection = [] }
                     }
+                case let .playlist(id):
+                    Button("Remove from Playlist") {
+                        if apply(.removeFromPlaylist(id), to: ids) { selection = [] }
+                    }
                 case let .tag(id):
                     Button("Remove Tag from Selected Videos") {
                         if apply(.removeTag(id), to: ids) { selection = [] }
@@ -88,7 +70,6 @@ struct BulkEditBar: View {
             }
         }
         .disabled(ids.isEmpty)
-        Button("Done") { selection = nil }
     }
 
     @ViewBuilder
@@ -128,6 +109,7 @@ struct BulkEditBar: View {
         case .rating(-1): text = count > 0 ? "Disliked \(videos)" : "Already disliked"
         case .rating: text = count > 0 ? "Liked \(videos)" : "Already liked"
         case .addToPlaylist: text = count > 0 ? "Added \(videos) to playlist" : "Already in playlist"
+        case .removeFromPlaylist: text = "Removed \(videos) from playlist"
         case .removeHistory: text = "Removed \(videos) from Watch History"
         case .removeTag: text = "Removed tag from \(videos)"
         case .addTags: text = count > 0 ? "Tagged \(videos)" : "Tags already applied"
@@ -204,4 +186,44 @@ private struct BulkTagSheet: View {
         }
         draft = ""
     }
+}
+
+
+struct SelectionActionBar<Actions: View>: View {
+    @Binding var selection: Set<Int64>?
+    let visibleIDs: [Int64]
+    let count: Int
+    let shortcutsEnabled: Bool
+    @ViewBuilder let actions: Actions
+
+    var body: some View {
+        VStack(spacing: VSpace.tight) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: VSpace.tight) {
+                    selectionControls(count: count)
+                    Spacer()
+                    HStack(spacing: VSpace.tight) { actions }.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: VSpace.tight) {
+                    HStack { selectionControls(count: count); Spacer() }
+                    ChipRows { actions }
+                }
+            }
+            .padding(.horizontal, VSpace.section)
+            Divider()
+        }
+        .padding(.top, VSpace.control)
+        .onChange(of: visibleIDs, initial: true) { selection?.formIntersection(visibleIDs) }
+    }
+
+    private func selectionControls(count: Int) -> some View {
+        HStack(spacing: VSpace.tight) {
+            Text("\(count) selected").monospacedDigit()
+            Button("Select All") { selection = Set(visibleIDs) }
+                .keyboardShortcut(shortcutsEnabled ? KeyboardShortcut("a") : nil)
+                .disabled(visibleIDs.isEmpty)
+        }
+        .fixedSize()
+    }
+
 }

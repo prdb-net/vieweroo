@@ -2,24 +2,36 @@ import SwiftUI
 import AVFoundation
 import ViewerooCore
 
-struct TagCoverPicker: View {
+struct CollectionCoverPicker: View {
     let model: LibraryModel
-    let tag: CatalogTag
+    let collection: CoverCollection
     @Environment(\.dismiss) private var dismiss
     @State private var selected: Int64?
     @State private var error: String?
 
-    init(model: LibraryModel, tag: CatalogTag) {
+    init(model: LibraryModel, collection: CoverCollection) {
         self.model = model
-        self.tag = tag
-        _selected = State(initialValue: tag.coverEntryID ?? tag.memberIDs.first)
+        self.collection = collection
+        _selected = State(initialValue: collection.cover?.entryID ?? collection.memberIDs.first)
+    }
+
+    private var entries: [CatalogEntry] {
+        switch collection.id {
+        case let .studio(_, studioID):
+            return model.entries.filter { model.studioDirectory.studio(for: $0).id == studioID }
+        case .tag:
+            let members = Set(collection.memberIDs)
+            return model.entries.filter { members.contains($0.id) }
+        case .playlist:
+            let byID = Dictionary(uniqueKeysWithValues: model.entries.map { ($0.id, $0) })
+            return collection.memberIDs.compactMap { byID[$0] }
+        }
     }
 
     var body: some View {
-        let members = Set(tag.memberIDs)
-        let entries = model.entries.filter { members.contains($0.id) }
+        let entries = self.entries
         VStack(alignment: .leading, spacing: VSpace.group) {
-            Text("Choose Cover for “\(tag.name)”").font(.title2.bold()).lineLimit(2)
+            Text("Choose Cover for “\(collection.name)”").font(.title2.bold()).lineLimit(2)
             HStack(alignment: .top, spacing: VSpace.group) {
                 List(entries, selection: $selected) { entry in
                     HStack(spacing: VSpace.tight) {
@@ -33,13 +45,13 @@ struct TagCoverPicker: View {
                         }
                     }.tag(entry.id)
                 }
-                .accessibilityLabel("Tagged videos")
+                .accessibilityLabel("Videos in \(collection.name)")
                 .listStyle(.inset)
                 .frame(minWidth: 170, idealWidth: 220, maxWidth: 260)
                 if let entry = entries.first(where: { $0.id == selected }) {
-                    FrameEditor(model: model, tag: tag, entry: entry) { frame in
-                        if model.change("Tag cover saved", onFailure: { error = $0 }, {
-                            try $0.saveTagCover(tag.id, entryID: entry.id, time: frame.time.seconds, image: frame.image, custom: true)
+                    FrameEditor(model: model, collection: collection, entry: entry) { frame in
+                        if model.change("Cover saved", onFailure: { error = $0 }, {
+                            try $0.saveCover(collection.id, entryID: entry.id, time: frame.time.seconds, image: frame.image, custom: true)
                         }) { dismiss() }
                     }.id(entry.id)
                 } else {
@@ -49,8 +61,8 @@ struct TagCoverPicker: View {
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
                 Button("Use Automatic Cover") {
-                    if model.change("Automatic cover restored", onFailure: { error = $0 }, { try $0.resetTagCover(tag.id) }) { dismiss() }
-                }.disabled(!tag.hasCustomCover)
+                    if model.change("Automatic cover restored", onFailure: { error = $0 }, { try $0.resetCover(collection.id) }) { dismiss() }
+                }.disabled(collection.cover?.isCustom != true)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             }
@@ -67,7 +79,7 @@ private struct FrameEditor: View {
     }
 
     let model: LibraryModel
-    let tag: CatalogTag
+    let collection: CoverCollection
     let entry: CatalogEntry
     let save: (TagFrameReader.Frame) -> Void
     @State private var reader: TagFrameReader?
@@ -123,7 +135,7 @@ private struct FrameEditor: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .task(id: entry.availability) {
             reader = nil; frame = nil; loaded = nil; error = nil
-            if tag.coverEntryID == entry.id, let bytes = try? await model.catalog?.tagCoverImage(tag.id), !Task.isCancelled {
+            if collection.cover?.entryID == entry.id, let bytes = try? await model.catalog?.coverImage(collection.id), !Task.isCancelled {
                 image = NSImage(data: bytes)
             }
             guard entry.availability == .available else {
@@ -133,7 +145,7 @@ private struct FrameEditor: View {
             do {
                 let source = try await TagFrameReader(url: entry.url)
                 try Task.checkCancellation()
-                seek(tag.coverEntryID == entry.id ? tag.coverTime ?? 0 : 0)
+                seek(collection.cover?.entryID == entry.id ? collection.cover?.time ?? 0 : 0)
                 reader = source
             } catch { if !Task.isCancelled { self.error = "This video could not be opened." } }
         }

@@ -31,6 +31,13 @@ public struct StudioDirectory: Sendable {
 
     public func site(_ id: String) -> StudioOption? { sites[id] }
 
+    /// A name-only identity may become a site identity after a directory update.
+    func currentID(for savedID: String) -> String {
+        guard savedID.hasPrefix("name:"), let matches = names[String(savedID.dropFirst(5))],
+              matches.count == 1 else { return savedID }
+        return matches[0].id
+    }
+
     public func studio(for entry: CatalogEntry) -> StudioOption {
         let matched = entry.manualStudio == nil ? entry.match?.studio : nil
         if let id = entry.manualSiteID ?? matched?.id {
@@ -156,6 +163,37 @@ extension Catalog {
         }
     }
 
+    static func studioCovers(_ db: Database, libraryID: Int64) throws -> [String: CatalogCover] {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT studioID, entryID, time, revision, 1 AS custom FROM studioCover WHERE libraryID = ?
+            """, arguments: [libraryID])
+        return rows.reduce(into: [:]) { $0[$1["studioID"]] = CatalogCover($1) }
+    }
+
+    /// Studio membership is derived from matches, assignments and the directory.
+    /// Only the sources of saved frames need checking after one of those changes.
+    static func reconcileStudioCovers(_ db: Database, entryID: Int64? = nil) throws {
+        let scope = entryID == nil ? "" : " WHERE entryID = ?"
+        let rows = try Row.fetchAll(db, sql: "SELECT libraryID, studioID, entryID FROM studioCover" + scope,
+                                    arguments: entryID.map { [$0] } ?? [])
+        let libraries = Dictionary(grouping: rows) { $0["libraryID"] as Int64 }
+        for (libraryID, covers) in libraries {
+            let directory = try StudioDirectory(studioOptions(db, libraryID: libraryID))
+            for row in covers {
+                let oldID: String = row["studioID"]
+                let source: Int64 = row["entryID"]
+                guard let entry = try fetchEntry(db, id: source) else { continue }
+                let currentID = directory.studio(for: entry).id
+                if oldID == currentID { continue }
+                if directory.currentID(for: oldID) == currentID {
+                    try db.execute(sql: "UPDATE OR IGNORE studioCover SET studioID = ? WHERE libraryID = ? AND studioID = ?",
+                                   arguments: [currentID, libraryID, oldID])
+                }
+                try db.execute(sql: "DELETE FROM studioCover WHERE libraryID = ? AND studioID = ?", arguments: [libraryID, oldID])
+            }
+        }
+    }
+
     public func createStudio(libraryID: Int64, name: String) throws {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         try database.write { db in
@@ -187,6 +225,7 @@ extension Catalog {
                 }
             }
             try db.execute(sql: "UPDATE entry SET manualStudio = ?, manualSiteID = ? WHERE id = ?", arguments: [selection, siteID, entryID])
+            try Self.reconcileStudioCovers(db, entryID: entryID)
         }
     }
 
@@ -203,6 +242,8 @@ extension Catalog {
                     AND NOT EXISTS (SELECT 1 FROM prdbStudioName WHERE name = ?)
                 """, arguments: [clean, libraryID, name, name])
             guard db.changesCount == 1 else { throw CatalogError.studioUnavailable }
+            try db.execute(sql: "UPDATE studioCover SET studioID = ? WHERE libraryID = ? AND studioID = ?",
+                           arguments: [StudioOption(name: clean, isCustom: true).id, libraryID, StudioOption(name: name, isCustom: true).id])
             try db.execute(sql: "UPDATE studioFavorite SET studioID = ? WHERE libraryID = ? AND studioID = ?",
                            arguments: [StudioOption(name: clean, isCustom: true).id, libraryID, StudioOption(name: name, isCustom: true).id])
             try db.execute(sql: """
@@ -218,6 +259,8 @@ extension Catalog {
                     AND NOT EXISTS (SELECT 1 FROM prdbStudioName WHERE name = ?)
                 """, arguments: [libraryID, name, name])
             guard db.changesCount == 1 else { throw CatalogError.studioUnavailable }
+            try db.execute(sql: "DELETE FROM studioCover WHERE libraryID = ? AND studioID = ?",
+                           arguments: [libraryID, StudioOption(name: name, isCustom: true).id])
             try db.execute(sql: "DELETE FROM studioFavorite WHERE libraryID = ? AND studioID = ?",
                            arguments: [libraryID, StudioOption(name: name, isCustom: true).id])
             try db.execute(sql: """
