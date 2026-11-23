@@ -1,24 +1,32 @@
 import Foundation
 import Network
 
-/// One authenticated HTTP request per connection. Listener, clients and catalog requests
-/// share one serial queue so stop() also revokes requests already being received.
+/// One authenticated HTTP request per connection. Listener and client state share one
+/// serial queue so stop() also revokes requests already being received. Catalog work runs
+/// on its own queue, so stop() never waits for a database write to finish.
 package final class CatalogAPIServer: @unchecked Sendable {
     package static let defaultPort: UInt16 = 47832
+    typealias Responder = @Sendable (_ method: String, _ target: String, _ body: Data) -> CatalogResponse
     private let queue = DispatchQueue(label: "net.prdb.vieweroo.catalog-api", qos: .utility)
+    private let work = DispatchQueue(label: "net.prdb.vieweroo.catalog-api.work", qos: .utility)
     private let listener: NWListener
     private let key: String
-    private let api: CatalogAPI
+    private let respond: Responder
     private var clients: [ObjectIdentifier: NWConnection] = [:]
     private var stopped = false
 
-    package init(catalog: Catalog, key: String, port: UInt16 = defaultPort) throws {
+    package convenience init(catalog: Catalog, key: String, port: UInt16 = defaultPort) throws {
+        let api = CatalogAPI(catalog: catalog)
+        try self.init(key: key, port: port) { api.respond(method: $0, target: $1, body: $2) }
+    }
+
+    init(key: String, port: UInt16, respond: @escaping Responder) throws {
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
         listener = try NWListener(using: parameters)
         self.key = key
-        api = CatalogAPI(catalog: catalog)
+        self.respond = respond
     }
 
     package func start(state: @escaping @Sendable (Result<UInt16, Error>) -> Void,
@@ -84,9 +92,17 @@ package final class CatalogAPIServer: @unchecked Sendable {
             }
             if let method = request.method, request.buffer.count >= request.length {
                 guard request.buffer.count == request.length else { request.reject("400 Bad Request"); return }
-                let response = api.respond(method: method, target: request.target, body: request.buffer)
-                if let library = response.changedLibrary { changed(library) }
-                request.send(response)
+                let target = request.target, body = request.buffer
+                work.async { [weak self] in
+                    guard let self else { return }
+                    let response = respond(method, target, body)
+                    queue.async { [weak self] in
+                        // A completed edit is committed even when the server stopped meanwhile.
+                        if let library = response.changedLibrary { changed(library) }
+                        guard let self, !stopped else { return }
+                        request.send(response)
+                    }
+                }
             } else if eof { request.reject("400 Bad Request") }
             else { receive(request, changed: changed) }
         }
