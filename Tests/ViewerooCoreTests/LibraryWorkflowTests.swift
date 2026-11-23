@@ -763,3 +763,87 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     #expect(model.secondPlayer == nil && !model.playing)
     #expect(detached.playback.player.currentItem == nil && model.playback.player.currentItem == nil)
 }
+
+@MainActor
+@Test func catalogAPIKeyCoversEveryLibraryAndFollowsTheAccessGate() async throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "vieweroo.catalog-api." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let secrets = WorkflowSecrets()
+    let server = WorkflowServer()
+    let model = LibraryModel(access: AccessController(store: secrets, authenticate: { false }),
+                             client: PRDBClient { try await server.respond(to: $0) }, preferences: preferences,
+                             directory: root, cache: PreviewCache(root: root.appending(path: "Previews")), catalogPort: 0)
+    model.start()
+    try await model.configure(key: "fixture-prdb")
+    #expect(!model.catalogAPIEnabled && model.catalogAPIURL == nil)
+    model.createLibrary("First")
+    let first = try #require(model.libraryID)
+    model.setCatalogAPIEnabled(true)
+    defer { model.stopCatalogAPI() }
+    try await until { model.catalogAPIURL != nil }
+    var base = try #require(model.catalogAPIURL)
+    let key = try #require(try model.access.catalogKey())
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    func request(_ route: String, _ token: String?, patch: [String: String]? = nil) async throws -> (Int, Data) {
+        var request = URLRequest(url: try #require(URL(string: base + route)), timeoutInterval: 3)
+        if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+        if let patch {
+            request.httpMethod = "PATCH"
+            request.httpBody = try JSONEncoder().encode(patch)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await session.data(for: request)
+        return (try #require(response as? HTTPURLResponse).statusCode, data)
+    }
+    #expect(try await request("/libraries", nil).0 == 401)
+    #expect(try await request("/libraries", "fixture-prdb").0 == 401)
+    let catalog = try #require(model.catalog)
+    let second = try catalog.createLibrary(name: "Later")
+    let list = try await request("/libraries", key)
+    #expect(list.0 == 200)
+    let names = try #require(JSONSerialization.jsonObject(with: list.1) as? [[String: Any]])
+    #expect(names.compactMap { $0["id"] as? Int64 } == [first, second.id])
+    let media = root.appending(path: "Media")
+    try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+    try await writeColorMovie(to: media.appending(path: "Colors.mp4"))
+    let source = try catalog.addSource(libraryID: second.id, url: media)
+    try CatalogScanner(catalog: catalog).scan(source: source)
+    let entry = try #require(try catalog.entries(libraryID: second.id).first)
+    let route = "/libraries/\(second.id)/entries/\(entry.id)"
+    func revision() async throws -> String {
+        let (_, body) = try await request(route, key)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["path"] == nil && json["watchTime"] == nil)
+        return try #require(json["revision"] as? String)
+    }
+    let updated = try await request(route, key, patch: ["title": "Imported", "revision": try await revision()])
+    #expect(updated.0 == 200 && model.libraryID == first)
+    model.selectLibrary(second.id)
+    try await until { model.entries.first?.title == "Imported" && model.entries.first?.needsLookup == false }
+    let next = try await request(route, key, patch: ["title": "Corrected", "revision": try await revision()])
+    #expect(next.0 == 200)
+    try await until { model.entries.first?.title == "Corrected" }
+    try model.access.setPIN(current: nil, new: "1234")
+    model.pinEnabled = true
+    model.lock()
+    #expect(model.catalogAPIURL == nil)
+    await #expect(throws: URLError.self) { _ = try await request("/libraries", key) }
+    try model.unlock(pin: "1234")
+    try await until { model.catalogAPIURL != nil }
+    base = try #require(model.catalogAPIURL)
+    #expect(try await request(route, key).0 == 200)
+    model.setCatalogAPIEnabled(false)
+    #expect(try model.access.catalogKey() == nil && model.catalogAPIURL == nil)
+    model.setCatalogAPIEnabled(true)
+    try await until { model.catalogAPIURL != nil }
+    base = try #require(model.catalogAPIURL)
+    #expect(try await request(route, key).0 == 401)
+    #expect(try await request(route, model.access.catalogKey()).0 == 200)
+    model.setCatalogAPIEnabled(false)
+    model.lock()
+}

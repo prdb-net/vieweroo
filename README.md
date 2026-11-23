@@ -58,6 +58,10 @@ To update, quit Vieweroo and replace the app in Applications with the new copy. 
 - Select a title under **More to Watch** to play it at its saved position. Back returns to the original collection, even after switching suggestions.
 - Choose **Refresh Library** (⌘R) after adding or moving files. Disconnected sources and missing files retain their entries and personal data. **Source Folders** lets you see the effect of removing a source before you confirm.
 
+## Connect a metadata app
+
+Open **Vieweroo → Settings…** (⌘,), enable **Local catalog API** and choose **Copy Key**. A companion app on this Mac can list all your libraries and enrich their videos while Vieweroo is open and unlocked. Turning the API off revokes the key. See the [catalog API reference](CATALOG_API_IDEA.md) for endpoints, pagination and an example update.
+
 ## Privacy and access
 
 PRDB receives the filename, file size, and available OSHash for identification. Folder names are evaluated on your Mac. PRDB also supplies candidate titles, artwork, studios, and cast. Ratings, tags, playlists, match corrections, and viewing history stay local.

@@ -30,10 +30,16 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
 
     public var url: URL { URL(fileURLWithPath: path, isDirectory: false) }
     public var filename: String { url.lastPathComponent }
-    public var title: String { match?.title ?? url.deletingPathExtension().lastPathComponent }
+    public let localTitle: String?
+    public let localDescription: String?
+    public let posterRevision: String?
+    public var title: String { localTitle ?? match?.title ?? url.deletingPathExtension().lastPathComponent }
     public var studio: String? { manualStudio ?? match?.studio?.name ?? detectedStudio }
 
     init(_ row: Row) throws {
+        localTitle = row["localTitle"]
+        localDescription = row["localDescription"]
+        posterRevision = row["posterRevision"]
         id = row["id"]
         libraryID = row["libraryID"]
         path = row["path"]

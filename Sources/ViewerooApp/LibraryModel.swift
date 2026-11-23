@@ -45,6 +45,11 @@ final class LibraryModel {
     @ObservationIgnored private var panel: NSOpenPanel?
     @ObservationIgnored private var previewToken = UUID()
     var phase = Gate.starting
+    @ObservationIgnored private var catalogServer: CatalogAPIServer?
+    @ObservationIgnored private let catalogPort: UInt16
+    private(set) var catalogAPIEnabled = false
+    private(set) var catalogAPIURL: String?
+    private(set) var catalogAPIError: String?
     var pinEnabled = false
     var libraries: [CatalogLibrary] = []
     var sources: [CatalogSource] = []
@@ -103,7 +108,9 @@ final class LibraryModel {
          preferences: UserDefaults = .standard,
          directory: URL = URL.applicationSupportDirectory.appending(path: "net.prdb.vieweroo"),
          cache: PreviewCache = PreviewCache(root: URL.cachesDirectory.appending(path: "net.prdb.vieweroo/Previews")),
+         catalogPort: UInt16 = CatalogAPIServer.defaultPort,
          artworkURL: @escaping (URL?) -> URL? = { $0 }, prepareCatalog: ((Catalog) throws -> Void)? = nil) {
+        self.catalogPort = catalogPort
         self.access = access ?? AccessController(directory: directory)
         self.client = client
         self.cinemaRecommendationCount = CinemaRecommendationCount(rawValue: preferences.integer(forKey: Self.cinemaCountKey)) ?? .four
@@ -177,8 +184,62 @@ final class LibraryModel {
         catalog = database
         libraries = try database.libraries()
         phase = .ready
+        startCatalogAPI()
         let last = (preferences.object(forKey: lastLibrary) as? NSNumber)?.int64Value
         selectLibrary(libraries.first { $0.id == last }?.id ?? libraries.first?.id)
+    }
+
+    func startCatalogAPI() {
+        guard phase == .ready, let catalog else { return }
+        stopCatalogAPI()
+        catalogAPIError = nil
+        do {
+            guard let key = try access.catalogKey() else { catalogAPIEnabled = false; return }
+            catalogAPIEnabled = true
+            let server = try CatalogAPIServer(catalog: catalog, key: key, port: catalogPort)
+            catalogServer = server
+            server.start { [weak self, weak server] result in
+                Task { @MainActor in
+                    guard let self, let server, self.catalogServer === server else { return }
+                    switch result {
+                    case .success(let port): self.catalogAPIURL = "http://127.0.0.1:\(port)/v1"
+                    case .failure:
+                        self.stopCatalogAPI()
+                        self.catalogAPIError = "Couldn’t start the local catalog API. Check whether its port is in use and retry."
+                    }
+                }
+            } changed: { [weak self] library in
+                Task { @MainActor in
+                    guard let self, self.phase == .ready, self.libraryID == library else { return }
+                    self.editRevision &+= 1
+                    self.reload()
+                }
+            }
+        } catch { catalogAPIError = error.localizedDescription }
+    }
+
+    func stopCatalogAPI() {
+        catalogServer?.stop()
+        catalogServer = nil
+        catalogAPIURL = nil
+    }
+
+    func setCatalogAPIEnabled(_ enabled: Bool) {
+        guard phase == .ready else { return }
+        do {
+            if enabled { try access.enableCatalogAPI() }
+            else { try access.revokeCatalogKey() }
+            startCatalogAPI()
+        } catch { catalogAPIError = error.localizedDescription }
+    }
+
+    func copyCatalogKey() throws {
+        guard phase == .ready, let key = try access.catalogKey() else { throw AccessError.unavailable }
+        let item = NSPasteboardItem()
+        item.setString(key, forType: .string)
+        item.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.writeObjects([item]) else { throw AccessError.unavailable }
     }
 
     private func stopWork() {
@@ -203,6 +264,7 @@ final class LibraryModel {
     }
 
     private func conceal(_ gate: Gate) {
+        stopCatalogAPI()
         stopWork()
         phase = gate
         message = nil; libraryID = nil

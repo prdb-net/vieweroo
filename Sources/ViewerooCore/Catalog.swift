@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import os
 
-public struct CatalogLibrary: Identifiable, Hashable, Sendable {
+public struct CatalogLibrary: Encodable, Identifiable, Hashable, Sendable {
     public let id: Int64
     public let name: String
 }

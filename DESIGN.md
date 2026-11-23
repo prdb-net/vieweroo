@@ -19,7 +19,7 @@ In the library window, carry the native sidebar divider to the top of the title 
 
 Keep the area from the end of the library menu to the trailing window edge available for native window gestures. Use the system title bar background so clicks reach the window, including above scrollable content.
 
-Place activity, the PIN lock and refresh at the foot of the sidebar. Click the activity label to inspect scans, PRDB matching and preview progress. Show **Ready** when idle and surface conditions that need attention. Use **Vieweroo → Settings…** (⌘,) for PIN and PRDB access. End the Library section with **Settings**, where users can rename the active library, open **Manage Folders**, or confirm deletion of the library.
+Place activity, the PIN lock and refresh at the foot of the sidebar. Click the activity label to inspect scans, PRDB matching and preview progress. Show **Ready** when idle and surface conditions that need attention. Use **Vieweroo → Settings…** (⌘,) for PIN protection, PRDB access and the local catalog API. End the Library section with **Settings**, where users can rename the active library, open **Manage Folders**, or confirm deletion of the library.
 
 Align the poster, title, actions and section headings to the same leading edge. Set collection titles in the system large title, the selected video in title bold and section headings in title 3. Use body or headline weight for a title in a list. Use secondary system text for metadata and monospaced digits for a moving clock. A compact row may truncate a title at two lines. The detail view gives the full title room to wrap.
 

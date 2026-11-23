@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: LibraryModel?
 
     func applicationWillTerminate(_ notification: Notification) {
+        model?.stopCatalogAPI()
         model?.mainPlayer.stop()
         model?.closeSecondPlayer(refresh: false)
     }

@@ -197,6 +197,17 @@ extension Catalog {
                 CREATE INDEX studio_cover_source ON studioCover(entryID);
                 """)
         }
+        migrator.registerMigration("catalog-enrichment-v16") { db in
+            try db.execute(sql: """
+                ALTER TABLE entry ADD COLUMN localTitle TEXT;
+                ALTER TABLE entry ADD COLUMN localDescription TEXT;
+                ALTER TABLE entry ADD COLUMN posterRevision TEXT;
+                CREATE TABLE entryPoster (
+                    entryID INTEGER PRIMARY KEY REFERENCES entry ON DELETE CASCADE,
+                    image BLOB NOT NULL
+                );
+                """)
+        }
         return migrator
     }
 }

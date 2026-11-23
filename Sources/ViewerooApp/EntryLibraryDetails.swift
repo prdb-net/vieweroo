@@ -63,6 +63,9 @@ struct EntryLibraryDetails: View {
                               entry.playbackFailure ?? "Playback unavailable", systemImage: "exclamationmark.triangle")
                             .font(.callout)
                     }
+                    if let description = entry.localDescription {
+                        Text(description).textSelection(.enabled)
+                    }
                     EntryPerformers(model: model, entry: entry)
                     Divider()
                     EntryTagEditor(model: model, entry: entry)

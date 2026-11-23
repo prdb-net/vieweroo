@@ -118,6 +118,25 @@ public final class AccessController {
         if try apiKey() == key { try store.write(nil, account: Self.keyAccount) }
     }
 
+    private static let catalogAccount = "Local catalog API key"
+
+    public func catalogKey() throws -> String? {
+        guard let data = try store.read(Self.catalogAccount) else { return nil }
+        guard data.count == 32 else { throw AccessError.unavailable }
+        return data.base64EncodedString()
+    }
+
+    public func enableCatalogAPI() throws {
+        if try catalogKey() != nil { return }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw AccessError.unavailable
+        }
+        try store.write(Data(bytes), account: Self.catalogAccount)
+    }
+
+    public func revokeCatalogKey() throws { try store.write(nil, account: Self.catalogAccount) }
+
     public var hasPIN: Bool { get throws { try store.read(Self.pinAccount) != nil } }
 
     public func unlock(pin: String) throws {

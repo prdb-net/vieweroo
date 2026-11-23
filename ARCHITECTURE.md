@@ -72,11 +72,13 @@ Rank Watch History by the sum of weighted plays. For each qualifying session, co
 
 Persist the local movie duration when playback begins. Backfill available movies with qualifying history from older catalogs in the background. Until the duration is known, count only the time component using the 30-minute threshold.
 
-### 7. Limit PIN protection to the app interface and playback
+### 7. Gate the interface, playback and catalog API with the app lock
 
 When PIN protection is enabled, require the PIN on launch and after manual locking. Locking stops local and AirPlay playback and conceals library content and previews. The PIN is an app access control. The catalog, viewing history, and image cache use ordinary local storage without app-level encryption.
 
 Require the current PIN to change it. To reset a forgotten PIN, require successful local macOS user authentication before accepting a new PIN. Resetting the PIN preserves the catalog. If authentication fails or is canceled, keep the app locked and the existing PIN in place.
+
+The optional [local catalog API](CATALOG_API_IDEA.md) binds to IPv4 loopback only while the app is ready. A dedicated random bearer key in the global settings store authorizes metadata access across all libraries. Turning it off deletes the credential. Leaving the ready state closes the listener and its connections. Address entries by library and stable entry ID. Check the metadata revision and apply each partial edit in a single catalog transaction. Imported poster bytes live in a separate catalog table and load on demand. Local display titles take precedence over PRDB titles and filenames.
 
 ### 8. Require a personal PRDB API key and use read-only lookups in the MVP
 

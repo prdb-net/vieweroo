@@ -64,6 +64,8 @@ Open **Vieweroo → Settings…** for PIN protection and PRDB access across libr
 
 Use your current PIN to change it. If you forget it, authenticate with your macOS user account to set a new PIN and keep your library.
 
+A companion app on the same Mac can enrich the catalog when you enable **Local catalog API** in Vieweroo’s global settings. One revocable key covers all libraries. The app can discover libraries and entries, correct a display title, supply a description or poster, add tags, and create or assign a studio. Local metadata survives rescans and is available offline. Locking Vieweroo suspends API access.
+
 ## After the MVP
 
 These ideas are planned for after the minimum viable product (MVP). During development, an individual feature can move into the MVP if it fits naturally with work already underway.

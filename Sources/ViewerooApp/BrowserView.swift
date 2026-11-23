@@ -327,10 +327,15 @@ struct Poster: View {
         Rectangle().fill(.quaternary.opacity(0.5))
             .aspectRatio(16/9, contentMode: .fit)
             .overlay {
-                AsyncImage(url: model.artworkURL(entry.match?.previewURL)) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
-                    else if let local { Image(nsImage: local).resizable().scaledToFill() }
-                    else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
+                if let imported = entry.posterRevision {
+                    ImportedPoster(catalog: model.catalog, entryID: entry.id)
+                        .id(imported)
+                } else {
+                    AsyncImage(url: model.artworkURL(entry.match?.previewURL)) { phase in
+                        if let image = phase.image { image.resizable().scaledToFill() }
+                        else if let local { Image(nsImage: local).resizable().scaledToFill() }
+                        else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
+                    }
                 }
             }.clipped()
             .overlay {
@@ -351,4 +356,25 @@ struct Poster: View {
             }.accessibilityHidden(true)
     }
     private struct ImageRequest: Equatable { var directory: URL; var revision: Int }
+}
+
+
+/// Load imported artwork only for posters actually on screen.
+private struct ImportedPoster: View {
+    let catalog: Catalog?
+    let entryID: Int64
+    @State private var image: NSImage?
+
+    var body: some View {
+        Color.clear.overlay {
+            if let image { Image(nsImage: image).resizable().scaledToFill() }
+        }
+        .task(id: entryID) {
+            image = nil
+            let data = await Task.detached(priority: .utility) { [catalog, entryID] in
+                try? catalog?.importedPoster(entryID: entryID)
+            }.value
+            if !Task.isCancelled { image = data.flatMap(NSImage.init(data:)) }
+        }
+    }
 }

@@ -10,6 +10,8 @@ struct GeneralSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editor: Editor?
 
+    @State private var copyStatus: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: VSpace.group) {
             Text("Settings").font(.title2.bold())
@@ -24,6 +26,30 @@ struct GeneralSettingsView: View {
             if let status = model.networkStatus {
                 Text(status).font(.callout).foregroundStyle(.secondary)
                 if model.subscriptionRequired { IconActionButton(.refresh, "Retry PRDB", action: model.retrySubscription) }
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: VSpace.tight) {
+                Toggle("Local catalog API", isOn: Binding(get: { model.catalogAPIEnabled }, set: {
+                    copyStatus = nil
+                    model.setCatalogAPIEnabled($0)
+                }))
+                Text("One key grants metadata access to all libraries on this Mac. Turning this off revokes the key.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let url = model.catalogAPIURL {
+                    HStack {
+                        Text(verbatim: url).font(.caption.monospaced()).textSelection(.enabled)
+                        Spacer()
+                        Button("Copy Key") {
+                            do { try model.copyCatalogKey(); copyStatus = "Key copied" }
+                            catch { copyStatus = error.localizedDescription }
+                        }
+                    }
+                    if let copyStatus { Text(copyStatus).font(.caption).foregroundStyle(.secondary) }
+                }
+                if let error = model.catalogAPIError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                    Button("Retry", action: model.startCatalogAPI)
+                }
             }
             Divider()
             VStack(alignment: .leading, spacing: VSpace.tight) {

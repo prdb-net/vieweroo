@@ -197,6 +197,7 @@ extension Catalog {
     public func createStudio(libraryID: Int64, name: String) throws {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         try database.write { db in
+            try Self.requireLibrary(db, libraryID)
             guard try Self.existingStudio(db, libraryID: libraryID, name: name) == nil else {
                 throw CatalogError.duplicateStudio
             }
@@ -205,28 +206,32 @@ extension Catalog {
     }
 
     public func setManualStudio(entryID: Int64, name: String?, siteID: String? = nil) throws {
-        let clean = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         try database.write { db in
             guard let libraryID = try Int64.fetchOne(db, sql: "SELECT libraryID FROM entry WHERE id = ?", arguments: [entryID]) else {
                 throw CatalogError.invalidValue
             }
-            var selection: String?
-            if let siteID {
-                guard let name = try String.fetchOne(db, sql: "SELECT name FROM studio WHERE id = ?", arguments: [siteID]) else {
-                    throw CatalogError.studioUnavailable
-                }
-                selection = name
-            } else if !clean.isEmpty {
-                if let existing = try Self.existingStudio(db, libraryID: libraryID, name: clean) {
-                    selection = existing
-                } else {
-                    try Self.insertStudio(db, libraryID: libraryID, name: clean)
-                    selection = clean
-                }
-            }
-            try db.execute(sql: "UPDATE entry SET manualStudio = ?, manualSiteID = ? WHERE id = ?", arguments: [selection, siteID, entryID])
-            try Self.reconcileStudioCovers(db, entryID: entryID)
+            try Self.setManualStudio(db, libraryID: libraryID, entryID: entryID, name: name, siteID: siteID)
         }
+    }
+
+    static func setManualStudio(_ db: Database, libraryID: Int64, entryID: Int64, name: String?, siteID: String?) throws {
+        let clean = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var selection: String?
+        if let siteID {
+            guard let name = try String.fetchOne(db, sql: "SELECT name FROM studio WHERE id = ?", arguments: [siteID]) else {
+                throw CatalogError.studioUnavailable
+            }
+            selection = name
+        } else if !clean.isEmpty {
+            if let existing = try Self.existingStudio(db, libraryID: libraryID, name: clean) {
+                selection = existing
+            } else {
+                try Self.insertStudio(db, libraryID: libraryID, name: clean)
+                selection = clean
+            }
+        }
+        try db.execute(sql: "UPDATE entry SET manualStudio = ?, manualSiteID = ? WHERE id = ?", arguments: [selection, siteID, entryID])
+        try Self.reconcileStudioCovers(db, entryID: entryID)
     }
 
     public func renameCustomStudio(libraryID: Int64, name: String, to newName: String) throws {
