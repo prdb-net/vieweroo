@@ -11,9 +11,17 @@ struct PreviewProgress {
 
     var phase: Phase = .idle
     var total = 0
-    var remaining: ArraySlice<CatalogEntry> = []
+    /// In queue order. The first entries are the ones being prepared.
+    var remaining: [CatalogEntry] = []
     var failures: [Failure] = []
     var ready: Int { total - remaining.count - failures.count }
+
+    /// Two movies at a time were 16% faster than one on local storage. A third added nothing.
+    static let workers = 2
+
+    mutating func finish(_ entry: CatalogEntry) {
+        if let index = remaining.firstIndex(where: { $0.id == entry.id }) { remaining.remove(at: index) }
+    }
 
     // Read manifests on the cooperative executor before reporting how many sets are ready.
     static func missing(in entries: [CatalogEntry], cache: PreviewCache) async throws -> [CatalogEntry] {

@@ -701,30 +701,54 @@ final class LibraryModel {
         work[.previews] = Task(priority: .utility) {
             guard let missing = try? await PreviewProgress.missing(in: pending, cache: cache),
                   previewToken == token else { return }
-            previews = PreviewProgress(phase: .preparing, total: pending.count, remaining: missing[...])
+            previews = PreviewProgress(phase: .preparing, total: pending.count, remaining: missing)
             var failuresChanged = false
-            for entry in missing {
-                guard !Task.isCancelled else { return }
-                let directory = previewDirectory(entry)
-                do {
-                    _ = try await cache.prepare(media: entry.url, directory: directory)
-                    guard previewToken == token else { return }
-                    posterPrepared.send(directory)
-                    if automaticCovers?.candidates.values.contains(where: { $0.contains(where: { $0.id == entry.id }) }) == true {
-                        automaticCovers = nil
-                        reload()
+            let finished = await withTaskGroup(of: (CatalogEntry, URL, (any Error)?).self) { group in
+                var queue = missing.makeIterator()
+                var running = 0
+                while true {
+                    while running < PreviewProgress.workers, let entry = queue.next() {
+                        let directory = previewDirectory(entry)
+                        running += 1
+                        group.addTask { [cache] in
+                            do {
+                                _ = try await cache.prepare(media: entry.url, directory: directory)
+                                return (entry, directory, nil)
+                            } catch { return (entry, directory, error) }
+                        }
                     }
-                } catch {
-                    guard previewToken == token, !Task.isCancelled else { return }
-                    previews.failures.append(.init(entry: entry, reason: error.localizedDescription))
-                    if case PreviewError.unsupportedVideo = error, entry.playbackFailure != error.localizedDescription {
-                        failuresChanged = true
-                        try? catalog.setPlaybackFailure(entryID: entry.id, message: error.localizedDescription,
-                                                        fileSize: entry.fileSize, modified: entry.modified)
+                    guard let (entry, directory, failure) = await group.next() else { return true }
+                    running -= 1
+                    guard previewToken == token, !Task.isCancelled else {
+                        group.cancelAll()
+                        return false
                     }
+                    if let failure {
+                        previews.failures.append(.init(entry: entry, reason: failure.localizedDescription))
+                        if case PreviewError.unsupportedVideo = failure, entry.playbackFailure != failure.localizedDescription {
+                            failuresChanged = true
+                            let message = failure.localizedDescription
+                            // The catalog write must not hold up the main thread behind a scan.
+                            _ = try? await Task.detached(priority: .utility) {
+                                try catalog.setPlaybackFailure(entryID: entry.id, message: message,
+                                                               fileSize: entry.fileSize, modified: entry.modified)
+                            }.value
+                            guard previewToken == token, !Task.isCancelled else {
+                                group.cancelAll()
+                                return false
+                            }
+                        }
+                    } else {
+                        posterPrepared.send(directory)
+                        if automaticCovers?.candidates.values.contains(where: { $0.contains(where: { $0.id == entry.id }) }) == true {
+                            automaticCovers = nil
+                            reload()
+                        }
+                    }
+                    previews.finish(entry)
                 }
-                previews.remaining.removeFirst()
             }
+            guard finished, previewToken == token else { return }
             previews.phase = .idle
             previews.remaining = []
             if failuresChanged { reload() }
