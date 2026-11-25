@@ -38,8 +38,19 @@ public struct PreviewCache: Sendable {
 
     public func directory(for media: URL, size: Int64, modificationDate: Date) -> URL {
         let signature = "\(media.standardizedFileURL.path)\u{0}\(size)\u{0}\(modificationDate.timeIntervalSince1970.bitPattern)"
-        let digest = SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
-        return root.appendingPathComponent(digest, isDirectory: true)
+        return root.appendingPathComponent(Self.hex(SHA256.hash(data: Data(signature.utf8))), isDirectory: true)
+    }
+
+    /// Lowercase hexadecimal. Views ask for a directory in every poster update, and
+    /// formatting each byte through `String(format:)` cost about 16 µs per entry.
+    static func hex(_ bytes: some Sequence<UInt8>) -> String {
+        let digits = Array("0123456789abcdef".utf8)
+        var text = [UInt8]()
+        for byte in bytes {
+            text.append(digits[Int(byte >> 4)])
+            text.append(digits[Int(byte & 15)])
+        }
+        return String(decoding: text, as: UTF8.self)
     }
 
     /// Consider only our own directories older than a day. Snapshot the cache before the

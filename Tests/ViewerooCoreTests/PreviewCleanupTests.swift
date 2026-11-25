@@ -77,3 +77,13 @@ import Testing
     #expect(files.fileExists(atPath: stuck.path))
     #expect(!files.fileExists(atPath: orphan.path))
 }
+
+@Test func previewDirectoryNamesKeepTheirPublishedSpelling() {
+    // Existing caches are addressed by this name. It must not change with the encoder.
+    let bytes = (0...255).map(UInt8.init)
+    #expect(PreviewCache.hex(bytes) == bytes.map { String(format: "%02x", $0) }.joined())
+    let cache = PreviewCache(root: URL(fileURLWithPath: "/previews", isDirectory: true))
+    let directory = cache.directory(for: URL(fileURLWithPath: "/media/Clip.mov"), size: 3,
+                                    modificationDate: Date(timeIntervalSince1970: 1_700_000_000))
+    #expect(directory.lastPathComponent == "bfaf7033eb00561e9f55d86b24943091450e37252ee1fc9a8f4ed969e8b28ec0")
+}
