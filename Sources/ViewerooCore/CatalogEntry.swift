@@ -13,7 +13,8 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     /// A manual title decision, including an explicit choice to leave the entry unmatched.
     public let confirmed: Bool
     public let match: PRDBTitle?
-    public let candidates: [PRDBTitle]
+    /// Suggested titles stay in the catalog until a view asks for them with `Catalog.candidates`.
+    public let hasCandidates: Bool
     public let manualSiteID: String?
     public let manualStudio: String?
     public let detectedStudio: String?
@@ -76,7 +77,8 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         }
         videoInfo = cached(VideoInfo.self, "videoInfo")
         match = cached(PRDBTitle.self, "matchData")
-        candidates = cached([PRDBTitle].self, "candidateData") ?? []
+        // An empty list is stored as the two bytes of "[]".
+        hasCandidates = (row["candidateBytes"] as Int? ?? 0) > 2
         let decoder = JSONDecoder()
         let tagJSON: String = row["tags"]
         tags = try decoder.decode([String].self, from: Data(tagJSON.utf8))
@@ -108,7 +110,7 @@ public struct StudioOptionsCache: Sendable {
 
 extension Catalog {
     static let entryQuery = """
-        SELECT e.*,
+        SELECT e.*, length(e.candidateData) AS candidateBytes,
             (SELECT json_group_array(name) FROM
                 (SELECT t.name FROM tagItem i JOIN tag t ON t.id = i.tagID WHERE i.entryID = e.id ORDER BY t.name)) AS tags,
             (SELECT COUNT(*) FROM \(visibleSessions) s WHERE s.entryID = e.id) AS playCount,
@@ -129,6 +131,16 @@ extension Catalog {
 
     static func fetchEntry(_ db: Database, id: Int64) throws -> CatalogEntry? {
         try Row.fetchOne(db, sql: entryQuery + " WHERE e.id = ?", arguments: [id]).map(CatalogEntry.init)
+    }
+
+    /// Titles suggested for an unmatched entry. Decoding them for every entry of a library
+    /// made up almost half of a snapshot, and only the match dialog shows them.
+    public func candidates(entryID: Int64) throws -> [PRDBTitle] {
+        guard let data = try database.read({ db in
+            try Data.fetchOne(db, sql: "SELECT candidateData FROM entry WHERE id = ?", arguments: [entryID])
+        }) else { return [] }
+        // Unreadable suggestions read as absent, like other cached metadata.
+        return (try? JSONDecoder().decode([PRDBTitle].self, from: data)) ?? []
     }
 
     public func entries(libraryID: Int64) throws -> [CatalogEntry] {

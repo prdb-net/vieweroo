@@ -242,8 +242,7 @@ struct EntryLibraryDetails: View {
                 Text("Automatic title matching is off for this video.")
                     .font(.callout).foregroundStyle(.secondary)
             } else {
-                Text(entry.candidates.isEmpty ? "No title linked" :
-                        entry.candidates.count == 1 ? "1 suggested title" : "\(entry.candidates.count) suggested titles")
+                Text(entry.hasCandidates ? "Suggested titles available" : "No title linked")
                     .foregroundStyle(.secondary)
             }
             if let matchError { Text(matchError).font(.callout).foregroundStyle(.red) }

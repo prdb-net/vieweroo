@@ -273,7 +273,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(entries.map(\.filename), ["Damaged.mp4", "Intact.mp4"])
         let damaged = try XCTUnwrap(entries.first)
         XCTAssertNil(damaged.match)
-        XCTAssertEqual(damaged.candidates, [])
+        XCTAssertFalse(damaged.hasCandidates)
+        XCTAssertEqual(try fixture.catalog.candidates(entryID: damaged.id), [])
         XCTAssertNil(damaged.videoInfo)
     }
 
@@ -727,7 +728,8 @@ final class CatalogTests: XCTestCase {
             XCTAssertFalse(cleared.needsLookup)
             XCTAssertNil(cleared.match)
             XCTAssertEqual(cleared.title, "Workshop")
-            XCTAssertEqual(cleared.candidates, [manual])
+            XCTAssertTrue(cleared.hasCandidates)
+            XCTAssertEqual(try catalog.candidates(entryID: entry.id), [manual])
             XCTAssertEqual(cleared.tags, ["Keep"])
             XCTAssertTrue(cleared.favorite)
             XCTAssertEqual(cleared.resume, 12)

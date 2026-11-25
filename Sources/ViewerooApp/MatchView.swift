@@ -29,6 +29,7 @@ struct MatchView: View {
     @State private var notice: String?
     @State private var saving: Task<Void, Never>?
     @State private var saveError: String?
+    @State private var suggested: [PRDBTitle] = []
 
     private struct Request: Equatable {
         let search: TitleSearch
@@ -43,7 +44,7 @@ struct MatchView: View {
     }
 
     private var titles: [PRDBTitle] {
-        if request.search.isEmpty { return entry.candidates }
+        if request.search.isEmpty { return suggested }
         return loaded == request ? results : []
     }
 
@@ -76,7 +77,7 @@ struct MatchView: View {
                 Text(request.search.isEmpty ? "Suggested titles" : "Search results").font(.headline)
                 Spacer()
                 if request.search.isEmpty || (loaded == request && notice == nil) {
-                    let count = request.search.isEmpty ? entry.candidates.count : total
+                    let count = request.search.isEmpty ? suggested.count : total
                     Text(count == 1 ? "1 title" : "\(count) titles").foregroundStyle(.secondary)
                 }
             }
@@ -105,6 +106,9 @@ struct MatchView: View {
         .interactiveDismissDisabled(saving != nil || directory != nil)
         .onChange(of: draft) { page = 1 }
         .task(id: request) { await load(request) }
+        .task(id: entry.hasCandidates) {
+            suggested = entry.hasCandidates ? (try? model.catalog?.candidates(entryID: entry.id)) ?? [] : []
+        }
         .onDisappear { saving?.cancel() }
     }
 
