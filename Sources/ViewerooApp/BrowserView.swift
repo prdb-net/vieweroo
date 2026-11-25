@@ -171,6 +171,7 @@ struct BrowserView: View {
                     }
                     .help("\(action) · \(entry.title)")
                     .accessibilityLabel("\(action) \(entry.title)")
+                    .accessibilityValue(tileFacts(entry))
                 }
                 Hovering { hovered in
                     Button { model.openDetail(entry.id) } label: {
@@ -183,6 +184,16 @@ struct BrowserView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// The poster badges in words.
+    private func tileFacts(_ entry: CatalogEntry) -> String {
+        var facts: [String] = []
+        if entry.favorite { facts.append("Favorite") }
+        if entry.rating != 0 { facts.append(entry.rating > 0 ? "Liked" : "Disliked") }
+        if let duration = entry.duration { facts.append(clockLabel(duration) + " long") }
+        if entry.resume > 0 { facts.append("resumes at " + clockLabel(entry.resume)) }
+        return facts.joined(separator: ", ")
     }
 
     private func tileCaption(_ entry: CatalogEntry, underlined: Bool) -> some View {
@@ -262,6 +273,10 @@ struct BrowserView: View {
     private func poster(_ entry: CatalogEntry, tile: BrowseTile) -> some View {
         Poster(model: model, entry: entry, scrubbable: selection == nil && tile == .video(entry.id))
             .overlay {
+                // A studio tile borrows the poster of its first video, without that video's state.
+                if tile == .video(entry.id) { TileBadges(entry: entry) }
+            }
+            .overlay {
                 if isSelected(tile) {
                     RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous)
                         .strokeBorder(Color.accentColor, lineWidth: 2)
@@ -274,7 +289,9 @@ struct BrowserView: View {
         if entry.availability == .missing { return "File missing" }
         if entry.playbackFailure != nil { return "Playback unavailable" }
         if model.shelf == .frequent { return nil }
-        return entry.studio ?? "Unknown Studio"
+        // "Unknown Studio" under every tile of an unmatched library says nothing. Show what is known.
+        let known = [entry.studio, entry.videoInfo?.quality].compactMap { $0 }
+        return known.isEmpty ? nil : known.joined(separator: " · ")
     }
     private func move(_ entry: CatalogEntry, by delta: Int, among visible: [CatalogEntry], playlist: Int64) {
         var ids = model.orderedIDs
@@ -306,6 +323,60 @@ struct BrowserView: View {
             ContentUnavailableView("No videos here yet", systemImage: "film",
                                    description: Text(playlistID != nil ? "Right-click a video in your library and choose Add to Playlist." : "Videos appear here when they belong to this collection."))
         }
+    }
+}
+
+/// What a tile says about its video at a glance: reactions, duration and the resume position.
+private struct TileBadges: View {
+    let entry: CatalogEntry
+
+    private var progress: Double? {
+        guard entry.resume > 0, let duration = entry.duration, duration > 0 else { return nil }
+        return min(1, entry.resume / duration)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(alignment: .bottom, spacing: VSpace.unit) {
+                if entry.favorite || entry.rating != 0 {
+                    // The dark-appearance tints, for contrast on the dark badge in both appearances.
+                    HStack(spacing: 3) {
+                        if entry.favorite {
+                            Image(systemName: "heart.fill").foregroundStyle(VideoReaction.favorite.tint(in: .dark))
+                        }
+                        if entry.rating > 0 {
+                            Image(systemName: "hand.thumbsup.fill").foregroundStyle(VideoReaction.like.tint(in: .dark))
+                        } else if entry.rating < 0 {
+                            Image(systemName: "hand.thumbsdown.fill").foregroundStyle(VideoReaction.dislike.tint(in: .dark))
+                        }
+                    }
+                    .modifier(TileBadge())
+                }
+                Spacer(minLength: 0)
+                if let duration = entry.duration {
+                    Text(clockLabel(duration)).monospacedDigit().foregroundStyle(.white).modifier(TileBadge())
+                }
+            }
+            .padding(6)
+            if let progress {
+                Rectangle().fill(.black.opacity(0.55)).frame(height: 3)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(.tint).scaleEffect(x: progress, y: 1, anchor: .leading)
+                    }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct TileBadge: ViewModifier {
+    func body(content: Content) -> some View {
+        content.font(.caption2.weight(.semibold))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(.black.opacity(0.72), in: Capsule())
     }
 }
 
