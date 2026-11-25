@@ -30,7 +30,18 @@ struct PlayerScreen: View {
     }
 
     private var hideControls: Bool {
-        window.fullScreen && playing && idle && !adjustingSlider && !voiceOver
+        window.fullScreen && hideSuggestions
+    }
+
+    /// The recommendations lie over the picture. They fade during idle playback in a window
+    /// as well, where the transport along the lower edge stays.
+    private var hideSuggestions: Bool {
+        playing && idle && !adjustingSlider && !voiceOver
+    }
+
+    private struct IdleTimer: Equatable {
+        let activity: Date
+        let playing: Bool
     }
 
     var body: some View {
@@ -39,7 +50,8 @@ struct PlayerScreen: View {
             .overlay {
                 GeometryReader { viewport in
                     CinemaControls(model: model, session: session, window: window, leave: leave, move: move,
-                                   playerHeight: viewport.size.height, adjustingSlider: $adjustingSlider)
+                                   playerHeight: viewport.size.height, suggestionsHidden: hideSuggestions,
+                                   adjustingSlider: $adjustingSlider)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                 }
                 .environment(\.colorScheme, .dark)
@@ -49,7 +61,7 @@ struct PlayerScreen: View {
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hideControls)
             }
             .onContinuousHover { phase in
-                if window.fullScreen, case .active = phase { revealControls() }
+                if case .active = phase { revealControls() }
             }
             .onReceive(session.playback.$playing.removeDuplicates()) { active in
                 if playing != active { playing = active; revealControls() }
@@ -59,8 +71,9 @@ struct PlayerScreen: View {
             .onChange(of: window.fullScreen) {
                 revealControls()
             }
-            .task(id: lastActivity) {
-                guard window.fullScreen && playing else { return }
+            // Resuming playback restarts the timer even right after the last pointer movement.
+            .task(id: IdleTimer(activity: lastActivity, playing: playing)) {
+                guard playing else { return }
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 idle = true
             }
@@ -100,9 +113,11 @@ private struct CinemaControls: View {
     let leave: () -> Void
     let move: (NSScreen) -> Void
     let playerHeight: CGFloat
+    let suggestionsHidden: Bool
     @Binding var adjustingSlider: Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let queue = session.cinemaQueue
@@ -121,6 +136,10 @@ private struct CinemaControls: View {
                         model.play(entry, in: session)
                     }
                         .padding(.trailing, VSpace.section)
+                        .opacity(suggestionsHidden ? 0 : 1)
+                        .allowsHitTesting(!suggestionsHidden)
+                        .accessibilityHidden(suggestionsHidden)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: suggestionsHidden)
                 }
 
                 VStack(spacing: VSpace.tight) {
