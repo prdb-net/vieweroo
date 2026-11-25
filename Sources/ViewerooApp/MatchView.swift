@@ -130,7 +130,9 @@ struct MatchView: View {
                 Text(request.search.isEmpty ? "Search by title, studio or performer." : "Try another title or clear a filter.")
             } actions: {
                 if request.search.isEmpty {
-                    Button("Search File Name") { draft.term = entry.url.deletingPathExtension().lastPathComponent }
+                    Button("Search File Name") {
+                        draft.term = SearchTerm.clean(entry.url.deletingPathExtension().lastPathComponent, studio: entry.studio)
+                    }
                 }
             }
         } else {

@@ -165,6 +165,19 @@ final class LibraryModel {
         notify("PRDB key verified")
     }
 
+    /// Videos whose finished lookup found no title and that the user has not decided on.
+    var unmatchedCount: Int {
+        entries.lazy.filter { $0.match == nil && !$0.confirmed && !$0.needsLookup && $0.availability == .available }.count
+    }
+
+    func retryUnmatched() {
+        guard phase == .ready, let libraryID else { return }
+        var queued = 0
+        guard change(nil, { queued = try $0.retryUnmatched(libraryID: libraryID) }) else { return }
+        notify(queued == 1 ? "Checking 1 video again" : "Checking \(queued) videos again")
+        if queued > 0 { startLookups() }
+    }
+
     func retrySubscription() {
         guard phase == .ready, subscriptionRequired else { return }
         validated = false

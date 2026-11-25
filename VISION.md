@@ -12,7 +12,7 @@ Each library keeps its own tags, playlists, favorites, ratings, and viewing hist
 
 The MVP catalogs MP4, M4V, and MOV files. If a file uses an unsupported codec, its entry explains why playback is unavailable. Removing a folder shows how many entries would lose their source and lets you keep or remove them. Removing folders or deleting a library leaves your original videos on disk.
 
-Vieweroo automatically links a video to its PRDB title when its file hash produces a unique match through the public prdb.net API. Otherwise, it suggests titles for you to confirm. Vieweroo remembers your choice on the next scan. You can search PRDB by title, studio or performer and correct a match while keeping your rating and viewing history. You can remove a linked title and leave the video unmatched across rescans until you choose another title. You can also play, tag, and add unmatched videos to playlists.
+Vieweroo automatically links a video to its PRDB title when its file hash produces a unique match through the public prdb.net API. Otherwise, it suggests titles for you to confirm. Vieweroo remembers your choice on the next scan. You can search PRDB by title, studio or performer and correct a match while keeping your rating and viewing history. You can remove a linked title and leave the video unmatched across rescans until you choose another title. You can also play, tag, and add unmatched videos to playlists. PRDB keeps growing. Choose **Check Again** in the library activity to look up the videos that still have no title.
 
 ## Exploring by studio and performer
 

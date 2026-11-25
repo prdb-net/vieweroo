@@ -72,6 +72,17 @@ private struct LibraryActivityView: View {
                         Text(model.networkStatus ?? model.lookupActivity ?? "Idle")
                         let pending = model.entries.lazy.filter { $0.needsLookup && $0.availability == .available }.count
                         if pending > 0 { Text("\(pending) awaiting lookup").foregroundStyle(.secondary) }
+                        let unmatched = model.unmatchedCount
+                        if unmatched > 0 {
+                            HStack {
+                                Text(unmatched == 1 ? "1 video without a title" : "\(unmatched) videos without a title")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Check Again", systemImage: ActionSymbol.refresh.rawValue, action: model.retryUnmatched)
+                                    .help("Ask PRDB again for videos without a title")
+                                    .disabled(model.subscriptionRequired)
+                            }
+                        }
                         if model.subscriptionRequired {
                             HStack {
                                 IconActionButton(.refresh, "Retry PRDB", action: model.retrySubscription)

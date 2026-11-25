@@ -119,7 +119,8 @@ public enum LibraryJobs {
             for (index, (entry, studio)) in fallback.enumerated() {
                 try Task.checkCancellation()
                 if index > 0, searchPacing > .zero { try await Task.sleep(for: searchPacing) }
-                let title = entry.url.deletingPathExtension().lastPathComponent
+                // A release-style file name matches no title until it is reduced to its words.
+                let title = SearchTerm.clean(entry.url.deletingPathExtension().lastPathComponent, studio: studio?.name)
                 let candidates: [PRDBTitle]
                 do { candidates = try await client.search(title, key: key) }
                 catch let error as PRDBError where error.isRequestSpecific {

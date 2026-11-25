@@ -248,6 +248,19 @@ extension Catalog {
         }
     }
 
+    /// Ask PRDB again about videos whose earlier lookup found no title. PRDB keeps growing,
+    /// and a finished lookup is otherwise repeated only after the file changes.
+    @discardableResult
+    public func retryUnmatched(libraryID: Int64) throws -> Int {
+        try database.write { db in
+            try db.execute(sql: """
+                UPDATE entry SET needsLookup = 1
+                WHERE libraryID = ? AND NOT confirmed AND matchData IS NULL AND NOT needsLookup
+                """, arguments: [libraryID])
+            return db.changesCount
+        }
+    }
+
     public func confirmMatch(entryID: Int64, title: PRDBTitle?) throws {
         let data = try title.map { try JSONEncoder().encode($0) }
         try database.write { db in
