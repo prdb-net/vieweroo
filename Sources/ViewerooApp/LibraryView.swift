@@ -77,7 +77,8 @@ struct LibraryView: View {
                     HStack(spacing: VSpace.tight) {
                         backButton
                         Spacer()
-                        if model.detailID == nil, let prompt = model.shelf.searchPrompt {
+                        // The controls stay beside open details. Using one closes the details first.
+                        if let prompt = model.shelf.searchPrompt {
                             // An explicit setter avoids a Swift 6.1 compiler crash in release builds.
                             CollectionSearchField(prompt: prompt, text: Binding(get: { model.query }, set: { model.search($0) }),
                                                   focusChanged: { searchFocused = $0 })
@@ -93,6 +94,7 @@ struct LibraryView: View {
                             if model.shelf.supportsBulkEdit, bulkSelection == nil {
                                 IconActionButton(.edit, "Edit \(model.collectionTitle)") {
                                     NSApp.keyWindow?.makeFirstResponder(nil)
+                                    if model.detailID != nil { model.goBack() }
                                     bulkSelection = []
                                 }
                                 .disabled(model.shelf != .playlists && model.visibleVideos.isEmpty)
@@ -107,33 +109,31 @@ struct LibraryView: View {
                     .padding(.horizontal, VSpace.section)
                     .padding(.top, VSpace.control)
 
-                    Group {
-                        if model.shelf == .settings,
-                           let library = model.libraries.first(where: { $0.id == model.libraryID }) {
-                            LibrarySettingsView(model: model, library: library)
-                        } else if model.shelf == .sources {
-                            SourcesView(model: model)
-                        } else {
-                            BrowserView(model: model, selection: $bulkSelection,
-                                        selectionShortcuts: !searchFocused && sheet == nil)
-                        }
-                    }
-                    .id(ObjectIdentifier(model.visit.scroll))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .trailing) {
-                        if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
-                            GeometryReader { bounds in
+                    GeometryReader { bounds in
+                        // The details sit beside the collection, which reflows into the remaining width.
+                        HStack(spacing: 0) {
+                            Group {
+                                if model.shelf == .settings,
+                                   let library = model.libraries.first(where: { $0.id == model.libraryID }) {
+                                    LibrarySettingsView(model: model, library: library)
+                                } else if model.shelf == .sources {
+                                    SourcesView(model: model)
+                                } else {
+                                    BrowserView(model: model, selection: $bulkSelection,
+                                                selectionShortcuts: !searchFocused && sheet == nil)
+                                }
+                            }
+                            .id(ObjectIdentifier(model.visit.scroll))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if let id = model.detailID, let entry = model.entries.first(where: { $0.id == id }) {
+                                Divider()
                                 EntryLibraryDetails(model: model, entry: entry)
                                     .id(id)
-                                    .frame(width: min(396, bounds.size.width * 0.62))
+                                    .frame(width: Self.detailsWidth(beside: bounds.size.width))
                                     .frame(maxHeight: .infinity, alignment: .top)
-                                    .background {
-                                        Color(nsColor: .windowBackgroundColor)
-                                            .shadow(color: .black.opacity(0.16), radius: 8, x: -3)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .background(Color(nsColor: .windowBackgroundColor))
+                                    .transition(.move(edge: .trailing))
                             }
-                            .transition(.move(edge: .trailing))
                         }
                     }
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.detailID != nil)
@@ -145,11 +145,18 @@ struct LibraryView: View {
             bulkSelection = nil
             if sheet == .videoFilters { sheet = nil }
         }
-        .onChange(of: model.detailID) { bulkSelection = nil }
+        .onChange(of: model.detailID) { _, opened in
+            if opened != nil { bulkSelection = nil }
+        }
         .onChange(of: model.libraryID) { sheet = nil; bulkSelection = nil }
         .toolbar {
             ToolbarItem(placement: .navigation) { libraryMenu }
         }
+    }
+
+    /// Leave the collection at least one comfortable column at the minimum window size.
+    static func detailsWidth(beside width: CGFloat) -> CGFloat {
+        min(396, max(280, (width * 0.45).rounded()))
     }
 
     private func manageButton(_ title: String, sheet destination: EditSheet) -> some View {

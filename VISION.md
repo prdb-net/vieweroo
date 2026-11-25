@@ -26,7 +26,7 @@ From the studio overview, you can create a named studio in the active library be
 
 The interface should feel familiar on a Mac and invite you to browse. Large thumbnails and legible titles help you choose what to watch. After playback, you return to your previous place in the studio view, search results, or playlist.
 
-Click a video thumbnail to start or resume that video in Cinema Mode. Click its title or choose **Details** from its context menu to open a panel over the right side of the collection. You can explore its studio and cast, react to the video and organize it there. Selecting another title updates the same panel. An unavailable thumbnail opens its details and explains why playback is unavailable. In edit mode the entire tile selects the video.
+Click a video thumbnail to start or resume that video in Cinema Mode. Click its title or choose **Details** from its context menu to open its details beside the collection, which stays in view and usable. You can play the video, explore its studio and cast, react to it and organize it there. Selecting another title updates the same panel. An unavailable thumbnail opens its details and explains why playback is unavailable. In edit mode the entire tile selects the video.
 
 Video tiles use a PRDB preview when available or a still from the local file. As soon as the first scan finishes, Vieweroo automatically starts preparing timeline previews in the background. You can browse or play a video while the previews are being generated. Move the pointer across a video thumbnail to see cached moments and their times. Previewing is silent and preserves playback history and resume positions. The sidebar shows how many are ready. Click the status to see what is being prepared, waiting or unavailable.
 

@@ -427,7 +427,13 @@ final class LibraryModel {
     }
 
     func refine(query: String, filters: CollectionFilters) {
-        guard phase == .ready, libraryID != nil, detailID == nil else { return }
+        guard phase == .ready, libraryID != nil else { return }
+        if detailID != nil {
+            // A search or filter belongs to the collection. Close the details beside it first.
+            guard !playing, query != visit.query || filters != visit.filters else { return }
+            goBack()
+            guard detailID == nil else { return }
+        }
         defer { history.rememberCollection() }
         guard query != visit.query || filters != visit.filters else { return }
         if visit.query.isEmpty && visit.filters.isEmpty {

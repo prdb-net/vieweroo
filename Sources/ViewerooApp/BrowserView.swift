@@ -66,7 +66,7 @@ struct BrowserView: View {
             (count, noun) = (records.count, "video")
         }
         let unit = count == 1 ? noun : noun + "s"
-        return ScrollView {
+        return ScrollViewReader { proxy in ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
                     if model.shelf.isVideoCollection {
@@ -133,6 +133,13 @@ struct BrowserView: View {
             .background(BrowseScrollAnchor(position: model.visit.scroll))
         }
         .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+        .onChange(of: model.detailID == nil) {
+            // Details opening or closing beside the grid changes its columns.
+            // Keep the video they belong to in view.
+            guard case let .video(id) = model.visit.selectedTile else { return }
+            DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
+        }
+        }
     }
 
     @ViewBuilder private func videoTile(_ entry: CatalogEntry) -> some View {
@@ -344,8 +351,8 @@ private struct TileBadges: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
+        // The resume line lies under the badges, so they sit at the same height on every tile.
+        ZStack(alignment: .bottom) {
             HStack(alignment: .bottom, spacing: VSpace.unit) {
                 if entry.favorite || entry.rating != 0 {
                     // The dark-appearance tints, for contrast on the dark badge in both appearances.
@@ -374,6 +381,7 @@ private struct TileBadges: View {
                     }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
         .allowsHitTesting(false)
         .accessibilityHidden(true)

@@ -279,7 +279,18 @@ struct CollectionHeading<Actions: View>: View {
                 actions().fixedSize()
             }
             VStack(alignment: .leading, spacing: VSpace.tight) {
-                HStack { heading; Spacer(minLength: 0); actions().fixedSize() }
+                HStack {
+                    heading.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    actions().fixedSize()
+                }
+                if !filters.isEmpty { FilterChips(filters: $filters) }
+            }
+            // Beside open details the collection can be one tile wide. Give the title its own
+            // line there, so it wraps between words.
+            VStack(alignment: .leading, spacing: VSpace.tight) {
+                heading
+                actions().fixedSize()
                 if !filters.isEmpty { FilterChips(filters: $filters) }
             }
         }

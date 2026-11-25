@@ -15,7 +15,15 @@ struct EntryLibraryDetails: View {
     @State private var basename = ""
     @State private var renameError: String?
     @State private var savingName = false
+    @State private var matchExpanded: Bool
     @FocusState private var nameFocused: Bool
+
+    init(model: LibraryModel, entry: CatalogEntry) {
+        self.model = model
+        self.entry = entry
+        // Finding a title or a studio is the next step for a video that has none.
+        _matchExpanded = State(initialValue: entry.match == nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,21 +51,30 @@ struct EntryLibraryDetails: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: VSpace.group) {
+                    let playable = LibraryModel.cinemaPlayable(entry)
+                    HStack(spacing: VSpace.tight) {
+                        Button { model.play(entry) } label: {
+                            Label(entry.resume > 0 ? "Resume at \(clockLabel(entry.resume))" : "Play", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .help(entry.resume > 0 ? "Resume in Cinema Mode" : "Play in Cinema Mode")
+                        Menu {
+                            if entry.resume > 0 {
+                                Button("Play from Beginning") { model.play(entry, at: 0) }
+                            }
+                            Menu("Play on Display") { DisplayChoices { model.playOnDisplay(entry, screen: $0) } }
+                        } label: { Label("More playback options", systemImage: "ellipsis") }
+                        .labelStyle(.iconOnly).fixedSize().help("More playback options")
+                        Spacer()
+                    }
+                    .disabled(!playable)
                     HStack(spacing: VSpace.tight) {
                         EntryReactions(model: model, entry: entry)
                         PlaylistMenu(model: model, entryID: entry.id)
                             .labelStyle(.iconOnly).help("Add to Playlist")
                         Spacer()
-                        Menu {
-                            Button(entry.resume > 0 ? "Resume" : "Play") { model.play(entry) }
-                            if entry.resume > 0 {
-                                Button("Play from Beginning") { model.play(entry, at: 0) }
-                            }
-                            Menu("Play on Display") { DisplayChoices { model.playOnDisplay(entry, screen: $0) } }
-                        } label: { Label("Playback options", systemImage: "play.rectangle") }
-                        .labelStyle(.iconOnly).help("Playback options").disabled(!LibraryModel.cinemaPlayable(entry))
                     }
-                    if !LibraryModel.cinemaPlayable(entry) {
+                    if !playable {
                         Label(entry.availability == .offline ? "Reconnect the source drive to play this video." :
                               entry.availability == .missing ? "This file is missing from its source folder." :
                               entry.playbackFailure ?? "Playback unavailable", systemImage: "exclamationmark.triangle")
@@ -74,7 +91,7 @@ struct EntryLibraryDetails: View {
                     Divider()
                     DisclosureGroup("File", isExpanded: $fileExpanded) { fileSection }
                     Divider()
-                    DisclosureGroup("PRDB Match and Studio") {
+                    DisclosureGroup("PRDB Match and Studio", isExpanded: $matchExpanded) {
                         VStack(alignment: .leading, spacing: VSpace.group) {
                             matchSection
                             studioSection
