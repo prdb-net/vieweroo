@@ -9,6 +9,7 @@ struct BulkEditBar: View {
     @State private var editingTags = false
     @State private var choosingStudio = false
     @State private var historyRemoval: [Int64] = []
+    @State private var saving = false
 
     // Preserve collection order and exclude anything hidden by a filter or a catalog refresh.
     private var targets: [Int64] { visibleIDs.filter { selection?.contains($0) == true } }
@@ -24,22 +25,20 @@ struct BulkEditBar: View {
             get: { !historyRemoval.isEmpty }, set: { if !$0 { historyRemoval = [] } }
         ), presenting: historyRemoval) { pending in
             Button("Cancel", role: .cancel) {}
-            Button("Remove History", role: .destructive) {
-                if apply(.removeHistory, to: pending) { selection = [] }
-            }
+            Button("Remove History", role: .destructive) { run(.removeHistory, on: pending, clearing: true) }
         } message: { pending in
             let scope = pending.count == 1 ? "this video" : "these \(pending.count) videos"
             Text("Clear play counts, watch time and watched segments for \(scope)? Saved playback positions are kept.")
         }
         .sheet(isPresented: $editingTags) {
-            BulkTagSheet(videoCount: ids.count, libraryTags: model.tags.map(\.name)) { tags, onFailure in
-                apply(.addTags(tags), to: ids, onFailure: onFailure)
+            BulkTagSheet(videoCount: ids.count, libraryTags: model.tags.map(\.name)) { tags in
+                await apply(.addTags(tags), to: ids)
             }
         }
         .sheet(isPresented: $choosingStudio) {
             if let library = model.libraryID {
-                StudioDirectoryView(model: model, libraryID: library, videoCount: ids.count) { name, siteID, onFailure in
-                    apply(.studio(name: name, siteID: siteID), to: ids, onFailure: onFailure)
+                StudioDirectoryView(model: model, libraryID: library, videoCount: ids.count) { name, siteID in
+                    await apply(.studio(name: name, siteID: siteID), to: ids)
                 }
             }
         }
@@ -53,21 +52,13 @@ struct BulkEditBar: View {
             } else {
                 switch model.shelf {
                 case .favorites:
-                    Button("Remove from Favorites") {
-                        if apply(.favorite(false), to: ids) { selection = [] }
-                    }
+                    Button("Remove from Favorites") { run(.favorite(false), on: ids, clearing: true) }
                 case .liked:
-                    Button("Clear Like") {
-                        if apply(.rating(0), to: ids) { selection = [] }
-                    }
+                    Button("Clear Like") { run(.rating(0), on: ids, clearing: true) }
                 case let .playlist(id):
-                    Button("Remove from Playlist") {
-                        if apply(.removeFromPlaylist(id), to: ids) { selection = [] }
-                    }
+                    Button("Remove from Playlist") { run(.removeFromPlaylist(id), on: ids, clearing: true) }
                 case let .tag(id):
-                    Button("Remove Tag from Selected Videos") {
-                        if apply(.removeTag(id), to: ids) { selection = [] }
-                    }
+                    Button("Remove Tag from Selected Videos") { run(.removeTag(id), on: ids, clearing: true) }
                 case .frequent:
                     Button("Remove from Watch History…") { historyRemoval = ids }
                 default:
@@ -77,23 +68,23 @@ struct BulkEditBar: View {
                     .fixedSize()
             }
         }
-        .disabled(ids.isEmpty)
+        .disabled(ids.isEmpty || saving)
     }
 
     @ViewBuilder
     private func additionalActions(_ ids: [Int64]) -> some View {
         if model.shelf != .favorites {
-            Button("Add to Favorites") { apply(.favorite(true), to: ids) }
+            Button("Add to Favorites") { run(.favorite(true), on: ids) }
         }
         if model.shelf != .liked {
-            Button("Like Videos") { apply(.rating(1), to: ids) }
+            Button("Like Videos") { run(.rating(1), on: ids) }
         }
         if model.shelf.offersAllBulkActions {
-            Button("Dislike Videos") { apply(.rating(-1), to: ids) }
+            Button("Dislike Videos") { run(.rating(-1), on: ids) }
         }
         Menu("Add to Playlist") {
             ForEach(model.playlists) { playlist in
-                Button(playlist.name) { apply(.addToPlaylist(playlist.id), to: ids) }
+                Button(playlist.name) { run(.addToPlaylist(playlist.id), on: ids) }
             }
         }
         .fixedSize()
@@ -102,12 +93,17 @@ struct BulkEditBar: View {
         Button("Set Studio…") { choosingStudio = true }
     }
 
+    /// Returns nil when the edit was saved, otherwise the reason to show at the control.
     @discardableResult
-    private func apply(_ edit: BulkVideoEdit, to ids: [Int64], onFailure: ((String) -> Void)? = nil) -> Bool {
-        guard let library = model.libraryID, !ids.isEmpty else { return false }
-        var receipt: BulkEditReceipt?
-        guard model.change(onFailure: onFailure, { receipt = try $0.editVideos(in: library, entryIDs: ids, edit: edit) }),
-              let receipt else { return false }
+    private func apply(_ edit: BulkVideoEdit, to ids: [Int64]) async -> String? {
+        guard !ids.isEmpty, !saving else { return "" }
+        saving = true
+        defer { saving = false }
+        let receipt: BulkEditReceipt
+        switch await model.editVideos(ids, edit: edit) {
+        case let .success(saved): receipt = saved
+        case let .failure(failure): return failure.description
+        }
         let count = receipt.changedCount
         let videos = count == 1 ? "1 video" : "\(count) videos"
         let text: String
@@ -127,7 +123,17 @@ struct BulkEditBar: View {
         }
         if case .studio = edit, count > 0 { model.recognizeStudios() }
         model.notice = ActionNotice(text: text, kind: .success, undo: count > 0 ? receipt : nil)
-        return true
+        return nil
+    }
+
+    /// Apply from a button. A failure appears as a notice, and `clearing` empties the selection
+    /// after edits that take the videos out of the open collection.
+    private func run(_ edit: BulkVideoEdit, on ids: [Int64], clearing: Bool = false) {
+        Task {
+            if let failure = await apply(edit, to: ids) {
+                if !failure.isEmpty { model.notify(failure, kind: .error) }
+            } else if clearing { selection = [] }
+        }
     }
 }
 
@@ -141,18 +147,13 @@ extension Shelf {
     }
 }
 
-extension LibraryModel {
-    func undoBulkEdit(_ notice: ActionNotice) {
-        guard self.notice?.id == notice.id, let receipt = notice.undo, libraryID == receipt.libraryID else { return }
-        change("Edit undone") { try $0.undoVideoEdit(receipt) }
-    }
-}
-
 private struct BulkTagSheet: View {
     let videoCount: Int
     let libraryTags: [String]
-    let apply: ([String], @escaping (String) -> Void) -> Bool
+    /// Returns nil when the tags were saved, otherwise the reason.
+    let apply: ([String]) async -> String?
     @Environment(\.dismiss) private var dismiss
+    @State private var saving = false
     @State private var selected: [String] = []
     @State private var draft = ""
     @State private var error: String?
@@ -192,10 +193,15 @@ private struct BulkTagSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Add Tags") {
                     stageDraft()
-                    if apply(selected, { error = $0 }) { dismiss() }
+                    saving = true
+                    Task {
+                        let failure = await apply(selected)
+                        saving = false
+                        if let failure { error = failure.isEmpty ? nil : failure } else { dismiss() }
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(videoCount == 0 || (selected.isEmpty && pending.isEmpty))
+                .disabled(saving || videoCount == 0 || (selected.isEmpty && pending.isEmpty))
             }
         }
         .frame(width: 380).padding(VSpace.section)

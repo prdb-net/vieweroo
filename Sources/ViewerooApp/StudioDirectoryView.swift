@@ -12,7 +12,8 @@ struct StudioDirectoryView: View {
     var entry: CatalogEntry?
     /// Assigns the chosen studio to a selection of videos. No studio returns them to automatic assignment.
     var videoCount = 0
-    var choose: ((_ name: String?, _ siteID: String?, _ onFailure: @escaping (String) -> Void) -> Bool)?
+    /// Returns nil when the studio was saved, otherwise the reason.
+    var choose: ((_ name: String?, _ siteID: String?) async -> String?)?
     @Environment(\.dismiss) private var dismiss
     @State private var editing: StudioEdit?
     @State private var filters = CollectionFilters()
@@ -20,6 +21,7 @@ struct StudioDirectoryView: View {
     @State private var error: String?
     @State private var pendingDeletion: StudioOption?
     @State private var confirmingDeletion = false
+    @State private var saving = false
 
     private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// Manage the directory, or choose a studio for one video or a selection.
@@ -83,6 +85,7 @@ struct StudioDirectoryView: View {
             }
         }
         .padding(VSpace.section)
+        .disabled(saving)
         .frame(minWidth: managing ? 600 : 470, idealWidth: managing ? 700 : 470,
                maxWidth: managing ? 1000 : 470, minHeight: managing ? 420 : 365,
                idealHeight: managing ? 525 : 365, maxHeight: managing ? 900 : 365)
@@ -177,7 +180,13 @@ struct StudioDirectoryView: View {
 
     private func assign(_ name: String?, siteID: String? = nil) {
         if let choose {
-            if choose(name, siteID, { error = $0 }) { dismiss() }
+            guard !saving else { return }
+            saving = true
+            Task {
+                let failure = await choose(name, siteID)
+                saving = false
+                if let failure { error = failure.isEmpty ? nil : failure } else { dismiss() }
+            }
         } else if let entry, model.change("Studio updated", onFailure: { error = $0 }, {
             try $0.setManualStudio(entryID: entry.id, name: name, siteID: siteID)
         }) {

@@ -2,6 +2,11 @@ import Accessibility
 import SwiftUI
 import ViewerooCore
 
+/// Why an edit was not saved, worded for the place that reports it.
+struct ActionFailure: Error {
+    let description: String
+}
+
 struct ActionNotice: Identifiable {
     enum Kind {
         case success, favorite, error

@@ -215,13 +215,13 @@ struct EntryReaction: View {
         switch reaction {
         case .favorite:
             let confirmation = selected ? "Removed from Favorites" : "Added to Favorites"
-            return model.change(model.cinemaMode ? nil : confirmation, kind: selected ? .success : .favorite) {
+            return model.change(model.cinemaMode ? nil : confirmation, kind: selected ? .success : .favorite, entryIDs: [entry.id]) {
                 try $0.setFavorite(entryID: entry.id, value: !selected)
             }
         case .like, .dislike:
             let rating = selected ? 0 : (reaction == .like ? 1 : -1)
             let confirmation = selected ? "Rating cleared" : (reaction == .like ? "Marked as liked" : "Marked as disliked")
-            return model.change(model.cinemaMode ? nil : confirmation) {
+            return model.change(model.cinemaMode ? nil : confirmation, entryIDs: [entry.id]) {
                 try $0.setRating(entryID: entry.id, value: rating)
             }
         }

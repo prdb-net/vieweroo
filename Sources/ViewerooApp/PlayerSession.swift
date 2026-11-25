@@ -14,7 +14,7 @@ final class PlayerSession {
 
     func open(_ entry: CatalogEntry, at position: Double?, model: LibraryModel, catalog: Catalog) {
         entryID = entry.id
-        recording = playback.recordedInterval.sink { [weak model] _ in model?.playbackRecorded() }
+        recording = playback.recordedInterval.sink { [weak model] id in model?.playbackRecorded(id) }
         playback.open(entry: entry, startAt: position ?? entry.resume,
                       previewDirectory: model.previewDirectory(entry), catalog: catalog)
     }

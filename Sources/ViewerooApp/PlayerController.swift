@@ -58,10 +58,9 @@ final class PlayerController: ObservableObject {
             }
         }
         let history = PlaybackHistory(begin: { [weak self] in
-            if entry.duration == nil, let duration = self?.duration, duration > 0 {
-                try catalog.setDuration(duration, for: entry)
-            }
-            return try catalog.beginSession(entryID: id)
+            // The writer stores the session, and a duration the entry lacks, on its own queue.
+            let duration = entry.duration == nil ? self?.duration : nil
+            return writer.begin(duration: duration.flatMap { $0 > 0 ? $0 : nil }, of: entry)
         }, append: { session, start, end in
             writer.append(session: session, start: start, end: end) { finished($0, true) }
         }, resume: { seconds in

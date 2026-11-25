@@ -101,6 +101,8 @@ final class LibraryModel {
     @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
+    /// Entries with newly recorded playback, until the next coalesced refresh.
+    @ObservationIgnored private var recordedEntryIDs = Set<Int64>()
     var setupReason: String?
     var notice: ActionNotice?
     var message: String?
@@ -268,6 +270,7 @@ final class LibraryModel {
         mainPlayer.stop()
         closeSecondPlayer(refresh: false)
         panel?.cancel(nil); panel = nil
+        recordedEntryIDs.removeAll()
         scanQueue.removeAll()
         scanningSourceID = nil
         refreshRequested = false
@@ -534,22 +537,103 @@ final class LibraryModel {
         notice = ActionNotice(text: text, kind: kind)
     }
 
+    /// Save one edit and show its result. Pass `entryIDs` when the edit changed only columns
+    /// of those entries, such as a reaction, so the library is not read again as a whole.
+    ///
+    /// A single edit runs on the main thread, where its result decides what the interface
+    /// does next. Background writers keep their transactions short for that reason, and
+    /// batches use `editVideos`.
     @discardableResult
-    func change(_ confirmation: String? = nil, kind: ActionNotice.Kind = .success,
+    func change(_ confirmation: String? = nil, kind: ActionNotice.Kind = .success, entryIDs: Set<Int64>? = nil,
                 onFailure: ((String) -> Void)? = nil, _ operation: (Catalog) throws -> Void) -> Bool {
         guard phase == .ready, let catalog else { return false }
         do {
             try operation(catalog)
             if notice?.undo != nil { notice = nil }
-            editRevision &+= 1
-            reload()
+            if let entryIDs { refreshEntries(entryIDs) }
+            else {
+                editRevision &+= 1
+                reload()
+            }
             if let confirmation { notify(confirmation, kind: kind) }
             return true
         } catch {
-            let description = (error as? CatalogError)?.localizedDescription ?? "Couldn’t save the change. Try again."
+            let description = Self.failureDescription(error)
             if let onFailure { onFailure(description) }
             else { notify(description, kind: .error) }
             return false
+        }
+    }
+
+    private static func failureDescription(_ error: Error) -> String {
+        (error as? CatalogError)?.localizedDescription ?? "Couldn’t save the change. Try again."
+    }
+
+    /// Read single entries again after an edit to their own columns. A reaction or recorded
+    /// playback then costs one row instead of a snapshot of the library.
+    func refreshEntries(_ ids: Set<Int64>) {
+        guard phase == .ready, let catalog, !ids.isEmpty else { return }
+        // A snapshot in flight was read before this edit. Let it run again instead.
+        guard work[.snapshot] == nil else {
+            editRevision &+= 1
+            reload()
+            return
+        }
+        var updated = entries
+        var changed = false
+        for index in updated.indices where ids.contains(updated[index].id) {
+            guard let fresh = try? catalog.entry(updated[index].id), fresh.libraryID == libraryID else {
+                // Removed meanwhile. The snapshot also repairs navigation and the players.
+                editRevision &+= 1
+                reload()
+                return
+            }
+            if fresh != updated[index] {
+                updated[index] = fresh
+                changed = true
+            }
+        }
+        guard changed else { return }
+        entries = updated
+        if cinemaMode { _ = mainPlayer.refresh(entries: entries, playlists: playlists) }
+        if let secondPlayer { _ = secondPlayer.refresh(entries: entries, playlists: playlists) }
+    }
+
+    /// A batch can touch thousands of rows. Run it off the main thread and return its receipt.
+    func editVideos(_ ids: [Int64], edit: BulkVideoEdit) async -> Result<BulkEditReceipt, ActionFailure> {
+        guard phase == .ready, let catalog, let library = libraryID, !ids.isEmpty else {
+            return .failure(ActionFailure(description: "The library is not available."))
+        }
+        let stamp = work
+        do {
+            let receipt = try await Task.detached(priority: .userInitiated) {
+                try catalog.editVideos(in: library, entryIDs: ids, edit: edit)
+            }.value
+            // The edit is saved even when the library closed meanwhile.
+            guard phase == .ready, work === stamp else { return .failure(ActionFailure(description: "")) }
+            if notice?.undo != nil { notice = nil }
+            editRevision &+= 1
+            reload()
+            return .success(receipt)
+        } catch { return .failure(ActionFailure(description: Self.failureDescription(error))) }
+    }
+
+    func undoBulkEdit(_ notice: ActionNotice) {
+        guard phase == .ready, self.notice?.id == notice.id, let receipt = notice.undo, libraryID == receipt.libraryID,
+              let catalog else { return }
+        self.notice = nil
+        let stamp = work
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { try catalog.undoVideoEdit(receipt) }.value
+                guard phase == .ready, work === stamp else { return }
+                editRevision &+= 1
+                reload()
+                notify("Edit undone")
+            } catch {
+                guard phase == .ready, work === stamp else { return }
+                notify(Self.failureDescription(error), kind: .error)
+            }
         }
     }
     @discardableResult
@@ -881,15 +965,19 @@ final class LibraryModel {
     }
 
     /// Recorded intervals change Watch History, play counts and the Unplayed filter.
-    /// Coalesce the periodic writes of both players into one snapshot.
-    func playbackRecorded() {
-        guard phase == .ready, work[.playbackRefresh] == nil else { return }
+    /// Coalesce the periodic writes of both players and read only the played entries again.
+    func playbackRecorded(_ entryID: Int64) {
+        guard phase == .ready else { return }
+        recordedEntryIDs.insert(entryID)
+        guard work[.playbackRefresh] == nil else { return }
         let stamp = work
         work[.playbackRefresh] = Task {
             try? await Task.sleep(for: .seconds(2))
             stamp[.playbackRefresh] = nil
             guard work === stamp, !Task.isCancelled else { return }
-            reload()
+            let played = recordedEntryIDs
+            recordedEntryIDs.removeAll()
+            refreshEntries(played)
         }
     }
 
