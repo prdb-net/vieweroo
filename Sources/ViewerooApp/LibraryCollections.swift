@@ -44,7 +44,7 @@ extension Shelf {
     var sortOptions: [VideoSort] {
         switch sortScope {
         case "playlist": [.collection, .title, .added, .played, .duration, .path]
-        case "history": [.collection, .played, .title, .duration]
+        case "history": [.collection, .played, .title, .added, .duration, .path]
         case nil: []
         default: [.title, .added, .played, .duration, .path]
         }
@@ -130,7 +130,9 @@ extension LibraryModel {
     /// kept while the titles of the library are unchanged.
     private func titleRanks() -> [Int64: Int] {
         let titles = entries.map(\.title)
-        if let cache = titleRankCache, cache.titles == titles { return cache.ranks }
+        // Two libraries can list the same titles under different entries, so compare both.
+        if let cache = titleRankCache, cache.titles == titles, cache.ranks.count == entries.count,
+           entries.allSatisfy({ cache.ranks[$0.id] != nil }) { return cache.ranks }
         let order = entries.indices.sorted {
             let result = titles[$0].localizedStandardCompare(titles[$1])
             return result == .orderedSame ? $0 < $1 : result == .orderedAscending

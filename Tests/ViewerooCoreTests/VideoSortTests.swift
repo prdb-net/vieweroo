@@ -20,8 +20,8 @@ import Testing
         try #require(catalog.entries(libraryID: library.id).first { $0.title == title })
     }
     let info = VideoInfo(width: 1280, height: 720, codec: "H.264", container: nil, frameRate: 24)
-    try await catalog.storeVideoInfo(info, duration: 300, for: try entry("b 2"))
-    try await catalog.storeVideoInfo(info, duration: 900, for: try entry("A"))
+    try await catalog.storeVideoInfo(info, duration: 900, for: try entry("b 2"))
+    try await catalog.storeVideoInfo(info, duration: 300, for: try entry("A"))
     let session = try catalog.beginSession(entryID: try entry("b 10").id)
     try catalog.recordInterval(sessionID: session, start: 0, end: 15)
 
@@ -36,11 +36,18 @@ import Testing
     #expect(titles(.title) == ["A", "b 2", "b 10"], "Numbers sort by value and case is ignored")
     #expect(titles(.added) == ["b 2", "A", "b 10"])
     #expect(titles(.played) == ["b 10", "A", "b 2"], "Unplayed videos follow by title")
-    #expect(titles(.duration) == ["A", "b 2", "b 10"], "A video without a duration comes last")
+    #expect(titles(.duration) == ["b 2", "A", "b 10"], "A video without a duration comes last")
     #expect(titles(.collection) == model.entries.map(\.title))
 
     // The chosen order is kept for the next launch, per kind of collection.
+    // Title positions are computed per entry. A second library with the same titles gets its own.
+    let twin = try catalog.createLibrary(name: "Twin")
+    try CatalogScanner(catalog: catalog).scan(source: try catalog.addSource(libraryID: twin.id, url: folder))
+    model.entries = try await catalog.snapshot(libraryID: twin.id).entries
+    #expect(model.entries.map(\.title) != ["A", "b 2", "b 10"], "The twin lists its entries in path order")
+    #expect(titles(.title) == ["A", "b 2", "b 10"])
     #expect(Shelf.all.sortOptions.first == .title && Shelf.frequent.sortOptions.first == .collection)
+    #expect(Set(Shelf.frequent.sortOptions) == Set(VideoSort.allCases))
     #expect(Shelf.playlist(1).sortOptions.first == .collection && Shelf.studios.sortOptions.isEmpty)
     model.videoSorts["library"] = VideoSort.added.rawValue
     let relaunched = LibraryModel(preferences: preferences, directory: folder, cache: PreviewCache(root: folder))

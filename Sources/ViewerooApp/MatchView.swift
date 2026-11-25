@@ -106,7 +106,8 @@ struct MatchView: View {
         .interactiveDismissDisabled(saving != nil || directory != nil)
         .onChange(of: draft) { page = 1 }
         .task(id: request) { await load(request) }
-        .task(id: entry.hasCandidates) {
+        // A lookup that finishes while the dialog is open can replace the suggestions.
+        .task(id: entry) {
             suggested = entry.hasCandidates ? (try? model.catalog?.candidates(entryID: entry.id)) ?? [] : []
         }
         .onDisappear { saving?.cancel() }
