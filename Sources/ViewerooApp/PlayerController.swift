@@ -301,6 +301,11 @@ final class PlayerController: ObservableObject {
         player.isMuted = muted
     }
 
+    /// Raise or lower the audible volume. Starting from mute, the first step up is the first step of sound.
+    func stepVolume(by change: Float) {
+        setVolume((muted ? 0 : volume) + change)
+    }
+
     var isAudible: Bool { wantsPlayback && !muted && volume > 0 }
 
     func toggleMute() {

@@ -167,9 +167,9 @@ private struct CinemaControls: View {
                     }
 
                     HStack(spacing: VSpace.tight) {
-                        step("Previous Video", symbol: "backward.end.fill", to: previous)
+                        step("Previous Video", symbol: "backward.end.fill", to: previous, key: "p")
                         PlaybackButtons(controller: session.playback)
-                        step("Next Video", symbol: "forward.end.fill", to: next)
+                        step("Next Video", symbol: "forward.end.fill", to: next, key: "n")
                         Spacer(minLength: VSpace.group)
                         EntryReactions(model: model, entry: entry)
                         Toggle(isOn: $model.showsCinemaSuggestions) {
@@ -202,13 +202,14 @@ private struct CinemaControls: View {
         }
     }
 
-    private func step(_ label: String, symbol: String, to entry: CatalogEntry?) -> some View {
+    private func step(_ label: String, symbol: String, to entry: CatalogEntry?, key: KeyEquivalent) -> some View {
         Button {
             if let entry { model.play(entry, in: session) }
         } label: { Label(label, systemImage: symbol) }
         .labelStyle(.iconOnly)
+        .keyboardShortcut(key, modifiers: [])
         .disabled(entry == nil)
-        .help(entry.map { "\(label): \($0.title)" } ?? label)
+        .help((entry.map { "\(label): \($0.title)" } ?? label) + " (\(String(key.character).uppercased()))")
     }
 }
 
@@ -236,7 +237,7 @@ private struct PlaybackButtons: View {
                 Label("Back 10 seconds", systemImage: "gobackward.10")
             }
             .keyboardShortcut(.leftArrow, modifiers: [])
-            .help("Back 10 seconds (←)")
+            .help("Back 10 seconds (←), 1 second with Shift")
             Button(action: controller.togglePlayback) {
                 Label(playLabel, systemImage: controller.ended ? "arrow.counterclockwise" : controller.wantsPlayback ? "pause.fill" : "play.fill")
                     .font(.body.weight(.semibold)).frame(minWidth: 22)
@@ -248,10 +249,24 @@ private struct PlaybackButtons: View {
                 Label("Forward 10 seconds", systemImage: "goforward.10")
             }
             .keyboardShortcut(.rightArrow, modifiers: [])
-            .help("Forward 10 seconds (→)")
+            .help("Forward 10 seconds (→), 1 second with Shift")
         }
         .disabled(controller.duration <= 0)
         .labelStyle(.iconOnly)
+        .background {
+            // Shortcuts without a visible button of their own.
+            Group {
+                Button("Back 1 second") { controller.seek(to: controller.position - 1) }
+                    .keyboardShortcut(.leftArrow, modifiers: .shift)
+                Button("Forward 1 second") { controller.seek(to: controller.position + 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: .shift)
+                Button("Volume Up") { controller.stepVolume(by: 0.1) }
+                    .keyboardShortcut(.upArrow, modifiers: [])
+                Button("Volume Down") { controller.stepVolume(by: -0.1) }
+                    .keyboardShortcut(.downArrow, modifiers: [])
+            }
+            .focusable(false).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+        }
     }
 }
 
@@ -286,7 +301,7 @@ private struct PlayerOptions: View {
                        in: 0...1, onEditingChanged: { adjustingSlider = $0 })
                     .frame(width: 72)
                     .accessibilityLabel("Volume")
-                    .help("Playback volume")
+                    .help("Playback volume (↑ and ↓)")
             }
             AirPlayRoute(player: controller.player)
                 .frame(width: 28, height: 24)

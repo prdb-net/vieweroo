@@ -16,6 +16,7 @@ struct BrowserView: View {
     }
     @FocusState private var focusedTitle: Int64?
     @State private var coverCollection: CoverCollection?
+    @State private var keyboard = GridKeyboard()
     @Environment(\.colorScheme) private var scheme
     private var studioIndex: Bool { model.shelf == .studios }
     private var playlistID: Int64? {
@@ -44,6 +45,46 @@ struct BrowserView: View {
         .sheet(item: $coverCollection) { collection in
             CollectionCoverPicker(model: model, collection: collection)
         }
+        .background {
+            GridKeyReader(keyboard: keyboard).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+
+    /// A tile with the identity its grid scrolls to.
+    private struct KeyTile {
+        let tile: BrowseTile
+        let scrollID: AnyHashable
+        var activate: () -> Void
+    }
+
+    /// Arrow keys move the highlight, Return opens or plays the highlighted tile and Space
+    /// shows or hides the details of a video.
+    private func press(_ key: GridKey, tiles: [KeyTile], columns: Int, proxy: ScrollViewProxy) -> Bool {
+        // Edit mode has its own shortcuts, and the search field and sheets take the keys themselves.
+        guard selectionShortcuts, selection == nil, coverCollection == nil, !tiles.isEmpty else { return false }
+        let current = model.visit.selectedTile.flatMap { selected in tiles.firstIndex { $0.tile == selected } }
+        switch key {
+        case .left, .right, .up, .down:
+            let step = key == .left ? -1 : key == .right ? 1 : key == .up ? -columns : columns
+            var target = 0
+            if let current {
+                target = current + step
+                // The last row may be shorter. Down from the row above it goes to the last tile.
+                if key == .down, target >= tiles.count, current / columns < (tiles.count - 1) / columns { target = tiles.count - 1 }
+                guard tiles.indices.contains(target) else { return true }
+            }
+            model.highlight(tiles[target].tile)
+            proxy.scrollTo(tiles[target].scrollID)
+            return true
+        case .activate:
+            guard let current else { return false }
+            tiles[current].activate()
+            return true
+        case .details:
+            guard let current, case let .video(id) = tiles[current].tile else { return false }
+            if model.detailID == id { model.goBack() } else { model.openDetail(id) }
+            return true
+        }
     }
 
     private func collection(columns: [GridItem], records: [CatalogEntry]) -> some View {
@@ -66,7 +107,29 @@ struct BrowserView: View {
             (count, noun) = (records.count, "video")
         }
         let unit = count == 1 ? noun : noun + "s"
-        return ScrollViewReader { proxy in ScrollView {
+        let keyTiles: [KeyTile]
+        if !collections.isEmpty {
+            keyTiles = collections.map { collection in
+                KeyTile(tile: collection.tile, scrollID: collection.id) { model.browse(collection.shelf, from: collection.tile) }
+            }
+        } else if studioIndex {
+            keyTiles = studios.map { item in
+                let tile = BrowseTile.studio(item.studio.name, siteID: item.studio.siteID)
+                return KeyTile(tile: tile, scrollID: item.id) {
+                    model.browse(.studio(item.studio.name, siteID: item.studio.siteID), from: tile)
+                }
+            }
+        } else {
+            keyTiles = records.map { entry in
+                KeyTile(tile: .video(entry.id), scrollID: entry.id) {
+                    if LibraryModel.cinemaPlayable(entry) { model.play(entry) } else { model.openDetail(entry.id) }
+                }
+            }
+        }
+        return ScrollViewReader { proxy in
+            // The grid changes with every update, so the key handler is renewed with it.
+            let _ = keyboard.handle = { press($0, tiles: keyTiles, columns: columns.count, proxy: proxy) }
+            ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
                 // Edit mode names the collection and its count in the selection bar.
                 if selection != nil {

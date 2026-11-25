@@ -418,6 +418,13 @@ final class LibraryModel {
         }
     }
 
+    /// Move the keyboard highlight to a tile. Open details follow it to another video.
+    func highlight(_ tile: BrowseTile) {
+        guard phase == .ready, libraryID != nil, !playing else { return }
+        if case let .video(id) = tile, detailID != nil { openDetail(id) }
+        else { visit.selectedTile = tile }
+    }
+
     func search(_ term: String) {
         refine(query: term, filters: visit.filters)
     }
