@@ -96,3 +96,19 @@ private struct StudioLibrary {
     #expect(automatic.changedCount == 2)
     #expect(try catalog.entries(libraryID: library).allSatisfy { $0.manualStudio == nil })
 }
+
+@Test func studioDirectoryRefreshTimeSurvivesReopening() throws {
+    let base = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let path = base.appending(path: "Catalog.sqlite").path
+    let refreshed = Date(timeIntervalSince1970: 1_800_000_000)
+    do {
+        let catalog = try Catalog(path: path)
+        #expect(try catalog.studioDirectoryRefreshed() == nil)
+        // More sites than one transaction holds.
+        try catalog.saveStudios((0..<450).map { PRDBStudio(id: "site-\($0)", name: "Site \($0)") }, refreshed: refreshed)
+        #expect(try catalog.studios().count == 450)
+    }
+    #expect(try Catalog(path: path).studioDirectoryRefreshed() == refreshed)
+}

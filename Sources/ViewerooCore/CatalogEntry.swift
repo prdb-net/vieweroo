@@ -290,13 +290,29 @@ extension Catalog {
         }
     }
 
-    public func saveStudios(_ studios: [PRDBStudio]) throws {
-        try database.write { db in
-            let before = db.totalChangesCount
-            for studio in studios {
-                try Self.saveSite(db, studio)
+    /// Save a downloaded studio directory and remember when it was refreshed.
+    public func saveStudios(_ studios: [PRDBStudio], refreshed: Date = Date()) throws {
+        // Short transactions, so an edit in the interface never waits behind thousands of sites.
+        var changed = false
+        for start in stride(from: 0, to: studios.count, by: 200) {
+            try database.write { db in
+                let before = db.totalChangesCount
+                for studio in studios[start..<min(start + 200, studios.count)] { try Self.saveSite(db, studio) }
+                if db.totalChangesCount != before { changed = true }
             }
-            if db.totalChangesCount != before { try Self.reconcileStudioCovers(db) }
+        }
+        try database.write { db in
+            if changed { try Self.reconcileStudioCovers(db) }
+            try db.execute(sql: "INSERT OR REPLACE INTO catalogState(key, value) VALUES ('studioDirectoryRefreshed', ?)",
+                           arguments: [String(refreshed.timeIntervalSince1970)])
+        }
+    }
+
+    /// The last successful download of the studio directory, kept across launches.
+    public func studioDirectoryRefreshed() throws -> Date? {
+        try database.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM catalogState WHERE key = 'studioDirectoryRefreshed'")
+                .flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
         }
     }
 

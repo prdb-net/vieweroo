@@ -30,7 +30,6 @@ final class LibraryModel {
     @ObservationIgnored private let preferences: UserDefaults
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private var validated = false
-    @ObservationIgnored private var directoryUpdated: Date?
     @ObservationIgnored private(set) var catalog: Catalog?
     /// Every background task of the open library. Replaced when the library session ends.
     @ObservationIgnored private var work = LibraryWork()
@@ -928,13 +927,14 @@ final class LibraryModel {
                         try Task.checkCancellation()
                         validated = true
                     }
-                    if let id, directoryUpdated.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true {
+                    // The catalog remembers the refresh, so a relaunch does not download the directory again.
+                    let refreshed = try? catalog.studioDirectoryRefreshed()
+                    if let id, refreshed.map({ abs(Date().timeIntervalSince($0)) > 86_400 }) ?? true {
                         lookupActivity = "Updating studio directory…"
                         let directory = try await client.studios(key: key)
                         try Task.checkCancellation()
                         // Thousands of sites in one transaction. Keep the main thread free.
                         try await Task.detached(priority: .utility) { try catalog.saveStudios(directory) }.value
-                        directoryUpdated = Date()
                         try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
                         try Task.checkCancellation()
                         reload()
