@@ -111,8 +111,12 @@ import Testing
     repeat {
         let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
+        // The fixture is drawn and read back in the color space of the current display. On a
+        // wide-gamut display its red arrives as about (0.95, 0.29, 0.15), so test for a red
+        // frame by dominance instead of fixed limits for green and blue.
         if let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB),
-           color.redComponent > 0.8, color.greenComponent < 0.2, color.blueComponent < 0.2 { return }
+           color.redComponent > 0.8, color.redComponent > 2 * color.greenComponent,
+           color.redComponent > 2 * color.blueComponent { return }
         try await Task.sleep(for: .milliseconds(30))
     } while ContinuousClock.now < deadline
     Issue.record("The timeline preview did not display the cached red frame.")
