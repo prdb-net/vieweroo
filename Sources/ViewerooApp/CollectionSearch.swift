@@ -284,21 +284,27 @@ struct CollectionHeading<Actions: View>: View {
                     Spacer(minLength: 0)
                     actions().fixedSize()
                 }
-                if !filters.isEmpty { FilterChips(filters: $filters) }
+                if !filters.isEmpty { wrappingChips }
             }
             // Beside open details the collection can be one tile wide. Give the title its own
             // line there, so it wraps between words.
             VStack(alignment: .leading, spacing: VSpace.tight) {
                 heading
                 actions().fixedSize()
-                if !filters.isEmpty { FilterChips(filters: $filters) }
+                if !filters.isEmpty { wrappingChips }
             }
         }
     }
 
+    /// Chips wrap, so their width must not decide which layout fits.
+    private var wrappingChips: some View {
+        FilterChips(filters: $filters).frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+    }
+
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: VSpace.tight) {
-            Text(title).font(.largeTitle.bold()).accessibilityAddTraits(.isHeader).textSelection(.enabled)
+            Text(title).font(.largeTitle.bold()).minimumScaleFactor(0.6)
+                .accessibilityAddTraits(.isHeader).textSelection(.enabled)
             Text(count).font(.callout.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
         }
     }

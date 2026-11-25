@@ -131,7 +131,10 @@ struct BulkEditBar: View {
         Task {
             if let failure = await apply(edit, to: ids) {
                 if !failure.isEmpty { model.notify(failure, kind: .error) }
-            } else if clearing { selection = [] }
+            } else if clearing, selection != nil {
+                // Done or a change of collection may have ended edit mode while the batch ran.
+                selection = []
+            }
         }
     }
 }
@@ -253,7 +256,7 @@ struct SelectionActionBar<Actions: View>: View {
     private var selectionControls: some View {
         let all = count == visibleIDs.count && count > 0
         return HStack(spacing: VSpace.tight) {
-            Text(title).font(.headline).lineLimit(1)
+            Text(title).font(.headline).lineLimit(1).accessibilityAddTraits(.isHeader)
             Text("\(count) of \(visibleIDs.count) selected").monospacedDigit().foregroundStyle(.secondary).fixedSize()
             // Command–A selects everything. The button offers the opposite once that is the case.
             Button(all ? "Deselect All" : "Select All") { selection = all ? [] : Set(visibleIDs) }
@@ -263,7 +266,7 @@ struct SelectionActionBar<Actions: View>: View {
                     Button("Select All") { selection = Set(visibleIDs) }
                         .keyboardShortcut(shortcutsEnabled ? KeyboardShortcut("a") : nil)
                         .disabled(visibleIDs.isEmpty)
-                        .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+                        .focusable(false).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
                 }
         }
     }

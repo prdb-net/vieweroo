@@ -258,6 +258,8 @@ struct BrowserView: View {
                     .help("\(action) · \(entry.title)")
                     .accessibilityLabel("\(action) \(entry.title)")
                     .accessibilityValue(tileFacts(entry))
+                    // The tile Return plays, and the one Back returned to.
+                    .accessibilityAddTraits(model.visit.selectedTile == tile ? .isSelected : [])
                 }
                 Hovering { hovered in
                     Button { model.openDetail(entry.id) } label: {
@@ -265,8 +267,6 @@ struct BrowserView: View {
                     }
                     .focused($focusedTitle, equals: entry.id)
                     .help("Show details")
-                    // The tile Return plays, and the one Back returned to.
-                    .accessibilityAddTraits(model.visit.selectedTile == tile ? .isSelected : [])
                     .accessibilityLabel("Details for \(entry.title)")
                 }
             }
