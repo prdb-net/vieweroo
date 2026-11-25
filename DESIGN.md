@@ -63,7 +63,7 @@ In an open tag, playlist, studio or performer, All Videos, Favorites, Liked and 
 
 ## Choosing a video
 
-In a tile grid, the arrow keys move a highlight from tile to tile. Return opens a collection or plays the highlighted video, and Space shows or hides its details. Open details follow the highlight. The keys belong to a text field while one is edited, and edit mode keeps its own shortcuts.
+In a tile grid, the arrow keys move a highlight from tile to tile. Return opens a collection or plays the highlighted video, and Space shows or hides its details. Open details follow the highlight. The keys stay with a control that has the keyboard focus, such as the sidebar list or a text field, and a click in the grid takes the focus from it. With Full Keyboard Access, Space and Return keep pressing the focused button. Edit mode keeps its own shortcuts.
 
 Keep **Back** at the upper leading edge of the content, above the scroll area. Enable it when an earlier browsing location exists. Command–[ retraces one step, restoring the search term, filters, scroll position and selected tile. When users reopen a collection from the sidebar, a tile or a link, restore its last applied search, filters and scroll offset in a new visit. Keep chips and the count visible for empty results. Back retraces the actual visits. Clear remembered collections and history on lock, library switch and quit.
 

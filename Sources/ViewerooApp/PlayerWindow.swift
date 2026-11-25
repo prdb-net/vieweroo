@@ -35,10 +35,11 @@ final class PlayerWindow: NSObject, ObservableObject {
         // The library and player share a window. Escape first leaves fullscreen even
         // when the transport is hidden and focus is still in the library view.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let window = self.window, event.window === window,
-                  self.fullScreen, window.attachedSheet == nil else { return event }
+            guard let self, let window = self.window, event.window === window, window.attachedSheet == nil else { return event }
+            // Any key brings back what faded during idle playback, in a window as in full screen.
             self.keyboardActivity.send()
-            guard event.keyCode == 53, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return event }
+            guard self.fullScreen, event.keyCode == 53,
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return event }
             if !event.isARepeat { self.toggle() }
             return nil
         }

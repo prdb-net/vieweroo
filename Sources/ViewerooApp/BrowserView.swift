@@ -46,7 +46,7 @@ struct BrowserView: View {
             CollectionCoverPicker(model: model, collection: collection)
         }
         .background {
-            GridKeyReader(keyboard: keyboard).frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
+            GridKeyReader(keyboard: keyboard).allowsHitTesting(false).accessibilityHidden(true)
         }
     }
 
@@ -258,6 +258,8 @@ struct BrowserView: View {
                     }
                     .focused($focusedTitle, equals: entry.id)
                     .help("Show details")
+                    // The tile Return plays, and the one Back returned to.
+                    .accessibilityAddTraits(model.visit.selectedTile == tile ? .isSelected : [])
                     .accessibilityLabel("Details for \(entry.title)")
                 }
             }

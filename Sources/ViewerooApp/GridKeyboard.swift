@@ -18,31 +18,51 @@ enum GridKey {
 }
 
 /// Arrow keys, Return and Space for a tile grid. SwiftUI buttons take no keyboard focus on a
-/// click, so the grid listens for these keys in its window while no text is being edited.
+/// click, so the grid listens for these keys in its window. The keys stay with a control that
+/// has the keyboard focus, such as the sidebar list or a text field, and a click in the grid
+/// takes the focus from it, as a click in a Finder window does.
 @MainActor
 final class GridKeyboard {
     /// Set by the grid on every update. Returns true when the key was used.
     var handle: (GridKey) -> Bool = { _ in false }
-    private var monitor: Any?
-    private weak var window: NSWindow?
+    private var monitors: [Any] = []
+    private weak var host: NSView?
 
-    func attach(to window: NSWindow?) {
-        guard self.window !== window || (window == nil && monitor != nil) else { return }
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        self.window = window
-        guard window != nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let window = self.window, event.window === window, window.attachedSheet == nil,
+    /// Whether a view with keys of its own has the focus: a text being edited, a list, a slider.
+    private static func focusedControl(in window: NSWindow) -> Bool {
+        window.firstResponder is NSText || window.firstResponder is NSControl
+    }
+
+    func attach(to host: NSView?) {
+        let attached = host?.window == nil ? nil : host
+        guard self.host !== attached || (attached == nil && !monitors.isEmpty) else { return }
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+        self.host = attached
+        guard attached != nil else { return }
+        if let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard let self, let window = self.host?.window, event.window === window, window.attachedSheet == nil,
                   event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                  // A field editor has the keys while a search, tag or file name is typed.
-                  !(window.firstResponder is NSText),
-                  let key = GridKey(keyCode: event.keyCode) else { return event }
+                  !Self.focusedControl(in: window), let key = GridKey(keyCode: event.keyCode) else { return event }
+            if key == .activate || key == .details {
+                // With Full Keyboard Access, Space presses the button that has the focus ring.
+                if NSApp.isFullKeyboardAccessEnabled { return event }
+                // A held key must not play a video in the collection it just opened.
+                if event.isARepeat { return nil }
+            }
             return self.handle(key) ? nil : event
-        }
+        }) { monitors.append(keys) }
+        if let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] event in
+            if let self, let host = self.host, let window = host.window, event.window === window,
+               host.convert(host.bounds, to: nil).contains(event.locationInWindow), Self.focusedControl(in: window) {
+                window.makeFirstResponder(nil)
+            }
+            return event
+        }) { monitors.append(clicks) }
     }
 }
 
+/// Covers the grid it serves, so a click inside its bounds counts as a click in the grid.
 struct GridKeyReader: NSViewRepresentable {
     let keyboard: GridKeyboard
 
@@ -51,7 +71,7 @@ struct GridKeyReader: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            keyboard?.attach(to: window)
+            keyboard?.attach(to: window == nil ? nil : self)
         }
     }
 
