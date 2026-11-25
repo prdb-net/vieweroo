@@ -60,11 +60,19 @@ private struct StudioLibrary {
     #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog, scope: .unassigned) == 1)
     #expect(try fixture.studios() == ["One.mp4": "Velvet Kiln", "Two.mp4": "Night Owl", "Three.mp4": nil])
 
-    // A manual choice is never replaced by a folder clue.
+    // A manual choice is never replaced by a folder clue: "Three.mp4" lies in the folder
+    // "Other", and a studio of that name is created after the manual choice.
     let three = try #require(catalog.entries(libraryID: library).first { $0.filename == "Three.mp4" })
-    try catalog.createStudio(libraryID: library, name: "Other Studio")
     try catalog.setManualStudio(entryID: three.id, name: "Night Owl")
+    try catalog.createStudio(libraryID: library, name: "Other")
     #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog, scope: .unassigned) == 0)
+    let chosen = try #require(try catalog.entry(three.id))
+    #expect(chosen.studio == "Night Owl" && chosen.detectedStudio == nil)
+    // Without the manual choice the folder clue applies.
+    try catalog.setManualStudio(entryID: three.id, name: nil)
+    #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog, scope: .unassigned) == 1)
+    #expect(try fixture.studios()["Three.mp4"] == "Other")
+    try catalog.deleteCustomStudio(libraryID: library, name: "Other")
 
     // Renaming releases the folder, and deleting returns its videos to no studio.
     try catalog.renameCustomStudio(libraryID: library, name: "Velvet Kiln", to: "Kiln")
@@ -111,4 +119,48 @@ private struct StudioLibrary {
         #expect(try catalog.studios().count == 450)
     }
     #expect(try Catalog(path: path).studioDirectoryRefreshed() == refreshed)
+}
+
+@Test func aStudioRemovedDuringRecognitionLeavesNoSharedName() async throws {
+    let fixture = try StudioLibrary(files: ["Velvet Kiln/One.mp4", "HarborFinch/Two.mp4"])
+    defer { fixture.clean() }
+    let catalog = fixture.catalog, library = fixture.library.id
+    try catalog.createStudio(libraryID: library, name: "Velvet Kiln")
+    let one = try #require(catalog.entries(libraryID: library).first { $0.filename == "One.mp4" })
+    let recognized = try #require(catalog.recognizableStudios(libraryID: library).first { $0.name == "Velvet Kiln" })
+    #expect(recognized.isCustom)
+
+    // The recognition run found the studio, and the user deletes it before the result is saved.
+    try catalog.deleteCustomStudio(libraryID: library, name: "Velvet Kiln")
+    #expect(try !catalog.setDetectedStudio(entryID: one.id, studio: recognized, fileSize: one.fileSize, modified: one.modified))
+    try catalog.applyMatch(entryID: one.id, result: PRDBMatch(studio: recognized), fileSize: one.fileSize, modified: one.modified)
+    #expect(try catalog.entry(one.id)?.studio == nil)
+    #expect(try await catalog.snapshot(libraryID: library).studioOptions.isEmpty, "The deleted name must not return as a shared studio")
+    // The name is free for a studio of the user's own again.
+    try catalog.createStudio(libraryID: library, name: "Velvet Kiln")
+    #expect(try await catalog.snapshot(libraryID: library).studioOptions.map(\.isCustom) == [true])
+
+    // A directory studio keeps its folder when the user creates a studio of the same spelling.
+    try catalog.saveStudios([PRDBStudio(id: "site-harbor", name: "Harbor Finch")])
+    try catalog.createStudio(libraryID: library, name: "HarborFinch")
+    #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog) == 1)
+    #expect(try fixture.studios() == ["One.mp4": nil, "Two.mp4": "Harbor Finch"])
+    // The first video finished its lookup above, so the recreated studio claims it afterwards.
+    #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog, scope: .unassigned) == 1)
+    #expect(try fixture.studios() == ["One.mp4": "Velvet Kiln", "Two.mp4": "Harbor Finch"])
+}
+
+@Test func releasingAStudioAlsoClearsTheGuessBehindAMatch() async throws {
+    let fixture = try StudioLibrary(files: ["Velvet Kiln/One.mp4"])
+    defer { fixture.clean() }
+    let catalog = fixture.catalog, library = fixture.library.id
+    try catalog.createStudio(libraryID: library, name: "Velvet Kiln")
+    #expect(try await LibraryJobs.detectStudios(libraryID: library, catalog: catalog) == 1)
+    let one = try #require(catalog.entries(libraryID: library).first)
+    // A title without a studio of its own is confirmed over the folder guess.
+    try catalog.confirmMatch(entryID: one.id, title: PRDBTitle(id: "t", title: "Title"))
+    #expect(try catalog.entry(one.id)?.detectedStudio == "Velvet Kiln")
+    try catalog.deleteCustomStudio(libraryID: library, name: "Velvet Kiln")
+    try catalog.confirmMatch(entryID: one.id, title: nil)
+    #expect(try catalog.entry(one.id)?.studio == nil, "The deleted studio must not return when the match is removed")
 }

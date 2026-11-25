@@ -216,12 +216,20 @@ extension Catalog {
 
     @discardableResult
     public func setDetectedStudio(entryID: Int64, name: String?, fileSize: Int64, modified: Double) throws -> Bool {
+        try setDetectedStudio(entryID: entryID, studio: name.map { PRDBStudio(id: "name:" + $0, name: $0) },
+                              fileSize: fileSize, modified: modified)
+    }
+
+    /// Replace the studio guess of an entry that still awaits its lookup.
+    @discardableResult
+    func setDetectedStudio(entryID: Int64, studio: PRDBStudio?, fileSize: Int64, modified: Double) throws -> Bool {
         try database.write { db in
+            let name = try Self.detectedStudioName(db, studio, entryID: entryID)
             try db.execute(sql: """
-                UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ? AND needsLookup
-                """, arguments: [name, entryID, fileSize, modified])
+                UPDATE entry SET detectedStudio = ?
+                WHERE id = ? AND fileSize = ? AND modified = ? AND needsLookup AND detectedStudio IS NOT ?
+                """, arguments: [name, entryID, fileSize, modified, name])
             guard db.changesCount > 0 else { return false }
-            try Self.rememberDetectedStudio(db, name, entryID: entryID)
             try Self.reconcileStudioCovers(db, entryID: entryID)
             return true
         }
@@ -229,15 +237,14 @@ extension Catalog {
 
     /// Give a studio to an entry whose finished lookup left it without one.
     @discardableResult
-    func fillDetectedStudio(entryID: Int64, name: String?, fileSize: Int64, modified: Double) throws -> Bool {
-        guard let name else { return false }
-        return try database.write { db in
+    func fillDetectedStudio(entryID: Int64, studio: PRDBStudio?, fileSize: Int64, modified: Double) throws -> Bool {
+        try database.write { db in
+            guard let name = try Self.detectedStudioName(db, studio, entryID: entryID) else { return false }
             try db.execute(sql: """
                 UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ?
                     AND NOT needsLookup AND matchData IS NULL AND manualStudio IS NULL AND detectedStudio IS NULL
                 """, arguments: [name, entryID, fileSize, modified])
             guard db.changesCount > 0 else { return false }
-            try Self.rememberDetectedStudio(db, name, entryID: entryID)
             try Self.reconcileStudioCovers(db, entryID: entryID)
             return true
         }
@@ -261,12 +268,13 @@ extension Catalog {
         let matchData = try result.autoTitle.map { try JSONEncoder().encode($0) }
         let candidateData = try JSONEncoder().encode(result.candidates)
         try database.write { db in
+            let studio = try Self.detectedStudioName(db, result.studio, entryID: entryID)
+            // Remembering a studio name is a write of its own. Count the entry update alone.
             try db.execute(sql: """
                 UPDATE entry SET matchData = ?, candidateData = ?, detectedStudio = ?, needsLookup = 0
                 WHERE id = ? AND fileSize = ? AND modified = ? AND NOT confirmed
-                """, arguments: [matchData, candidateData, result.studio?.name, entryID, fileSize, modified])
+                """, arguments: [matchData, candidateData, studio, entryID, fileSize, modified])
             if db.changesCount > 0 {
-                try Self.rememberDetectedStudio(db, result.studio?.name, entryID: entryID)
                 let before = db.totalChangesCount
                 try Self.rememberSite(db, result.autoTitle?.studio)
                 for title in result.candidates { try Self.rememberSite(db, title.studio) }
@@ -280,9 +288,13 @@ extension Catalog {
     @discardableResult
     public func retryUnmatched(libraryID: Int64) throws -> Int {
         try database.write { db in
+            // Lookups read the file, so only videos of reachable sources are queued. The
+            // others would stay pending without a way to finish.
             try db.execute(sql: """
                 UPDATE entry SET needsLookup = 1
                 WHERE libraryID = ? AND NOT confirmed AND matchData IS NULL AND NOT needsLookup
+                    AND EXISTS (SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
+                                WHERE m.entryID = entry.id AND m.present AND s.online)
                 """, arguments: [libraryID])
             return db.changesCount
         }
@@ -303,16 +315,15 @@ extension Catalog {
     /// Save a downloaded studio directory and remember when it was refreshed.
     public func saveStudios(_ studios: [PRDBStudio], refreshed: Date = Date()) throws {
         // Short transactions, so an edit in the interface never waits behind thousands of sites.
-        var changed = false
+        // Each transaction is complete in itself, also when the next one never runs.
         for start in stride(from: 0, to: studios.count, by: 200) {
             try database.write { db in
                 let before = db.totalChangesCount
                 for studio in studios[start..<min(start + 200, studios.count)] { try Self.saveSite(db, studio) }
-                if db.totalChangesCount != before { changed = true }
+                if db.totalChangesCount != before { try Self.reconcileStudioCovers(db) }
             }
         }
         try database.write { db in
-            if changed { try Self.reconcileStudioCovers(db) }
             try db.execute(sql: "INSERT OR REPLACE INTO catalogState(key, value) VALUES ('studioDirectoryRefreshed', ?)",
                            arguments: [String(refreshed.timeIntervalSince1970)])
         }

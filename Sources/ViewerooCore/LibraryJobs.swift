@@ -62,11 +62,11 @@ public enum LibraryJobs {
         try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: false, matching: filter) { batch in
             for entry in batch {
                 try Task.checkCancellation()
-                let name = recognition.match(url: entry.url, sourcePath: entry.sourcePath)?.name
-                guard name != entry.detectedStudio else { continue }
+                let studio = recognition.match(url: entry.url, sourcePath: entry.sourcePath)
+                guard studio?.name != entry.detectedStudio else { continue }
                 let saved = scope == .pending
-                    ? try catalog.setDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
-                    : try catalog.fillDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
+                    ? try catalog.setDetectedStudio(entryID: entry.id, studio: studio, fileSize: entry.fileSize, modified: entry.modified)
+                    : try catalog.fillDetectedStudio(entryID: entry.id, studio: studio, fileSize: entry.fileSize, modified: entry.modified)
                 if saved { changed += 1 }
             }
         }
@@ -122,7 +122,7 @@ public enum LibraryJobs {
                 let studio = recognition.match(url: entry.url, sourcePath: entry.sourcePath, siteHint: result.studio)
                 if result.autoTitle == nil && result.candidates.isEmpty {
                     if studio?.name != entry.detectedStudio {
-                        try catalog.setDetectedStudio(entryID: entry.id, name: studio?.name, fileSize: entry.fileSize, modified: entry.modified)
+                        try catalog.setDetectedStudio(entryID: entry.id, studio: studio, fileSize: entry.fileSize, modified: entry.modified)
                     }
                     fallback.append((entry, studio))
                 } else {

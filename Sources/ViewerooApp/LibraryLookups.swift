@@ -78,7 +78,11 @@ extension LibraryModel {
         let stamp = work
         work[.studioRecognition]?.cancel()
         work[.studioRecognition] = Task(priority: .utility) {
-            let changed = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
+            // Videos that still await their lookup are recognized here as well. Their lookup
+            // may be far off while PRDB is unreachable or a first import runs.
+            var changed = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)) ?? 0
+            guard work === stamp, !Task.isCancelled else { return }
+            changed += (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
             guard work === stamp, !Task.isCancelled, changed > 0 else { return }
             reload()
         }

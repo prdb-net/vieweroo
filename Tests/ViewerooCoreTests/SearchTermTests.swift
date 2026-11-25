@@ -39,6 +39,14 @@ import Testing
     try catalog.confirmMatch(entryID: try entry("Declined.mp4").id, title: nil)
     #expect(try catalog.entries(libraryID: library.id).allSatisfy { !$0.needsLookup })
 
+    // A lookup reads the file, so a video on an unreachable source is not queued.
+    let parked = base.appending(path: "Unmounted")
+    try FileManager.default.moveItem(at: media, to: parked)
+    #expect(try catalog.checkSources(libraryID: library.id))
+    #expect(try catalog.retryUnmatched(libraryID: library.id) == 0)
+    try FileManager.default.moveItem(at: parked, to: media)
+    #expect(try catalog.checkSources(libraryID: library.id))
+
     #expect(try catalog.retryUnmatched(libraryID: library.id) == 1)
     #expect(try catalog.entries(libraryID: library.id).filter(\.needsLookup).map(\.filename) == ["Unmatched.mp4"])
     #expect(try catalog.retryUnmatched(libraryID: library.id) == 0)

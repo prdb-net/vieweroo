@@ -40,6 +40,10 @@ public struct PRDBStudio: Codable, Hashable, Identifiable, Sendable {
         self.id = id
         self.name = name
     }
+
+    /// One of a library's own studios, as a candidate for folder and file name recognition.
+    static func custom(_ name: String) -> PRDBStudio { PRDBStudio(id: "custom:" + name, name: name) }
+    var isCustom: Bool { id.hasPrefix("custom:") }
 }
 
 public struct PRDBPerformer: Codable, Hashable, Identifiable, Sendable {

@@ -30,6 +30,9 @@ public struct StudioRecognition: Sendable {
         let key = words.joined()
         guard key.count >= 3, key.contains(where: \.isLetter),
               !Self.generic.contains(key), !words.allSatisfy(Self.generic.contains) else { return }
+        // A library's own studio must not make a directory studio of the same spelling
+        // ambiguous. The directory is added first and keeps the name.
+        if studio.isCustom, names[key]?.contains(where: { !$0.isCustom }) == true { return }
         names[key, default: []].insert(studio)
         longestName = max(longestName, key.count)
         if words.count > 1 { compounds.insert(key) }

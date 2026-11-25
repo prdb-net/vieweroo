@@ -96,15 +96,19 @@ extension Catalog {
         try db.execute(sql: "INSERT OR IGNORE INTO metadataStudio(name) VALUES (?)", arguments: [name])
     }
 
-    /// A recognized folder may carry the name of one of the library's own studios. Such a
-    /// name must stay out of the shared metadata names, or the studio would stop being custom.
-    static func rememberDetectedStudio(_ db: Database, _ name: String?, entryID: Int64) throws {
-        guard let name, !name.isEmpty else { return }
-        let custom = try Bool.fetchOne(db, sql: """
-            SELECT EXISTS(SELECT 1 FROM customStudio c JOIN entry e ON e.libraryID = c.libraryID
-                          WHERE e.id = ? AND c.name = ?)
-            """, arguments: [entryID, name]) ?? false
-        if !custom { try rememberStudio(db, name) }
+    /// The studio name to store for a recognized studio. A recognition run can outlive a
+    /// rename or deletion of one of the library's own studios, so such a studio is looked up
+    /// again inside the write and yields no name once it is gone. Its name also stays out of
+    /// the shared metadata names, where it would stop being custom.
+    static func detectedStudioName(_ db: Database, _ studio: PRDBStudio?, entryID: Int64) throws -> String? {
+        guard let studio, !studio.name.isEmpty else { return nil }
+        let own = try String.fetchOne(db, sql: """
+            SELECT c.name FROM customStudio c JOIN entry e ON e.libraryID = c.libraryID
+            WHERE e.id = ? AND c.name = ?
+            """, arguments: [entryID, studio.name])
+        if studio.isCustom { return own }
+        if own == nil { try rememberStudio(db, studio.name) }
+        return studio.name
     }
 
     /// The PRDB directory together with the library's own studios, for folder and file name clues.
@@ -114,7 +118,7 @@ extension Catalog {
                 SELECT name FROM customStudio c WHERE libraryID = ?
                     AND NOT EXISTS (SELECT 1 FROM prdbStudioName WHERE name = c.name)
                 """, arguments: [libraryID])
-            return try Self.fetchStudios(db) + custom.map { PRDBStudio(id: "custom:" + $0, name: $0) }
+            return try Self.fetchStudios(db) + custom.map(PRDBStudio.custom)
         }
     }
 
@@ -281,12 +285,15 @@ extension Catalog {
     }
 
     /// Folders recognized under a custom studio's old name are recognized again under the
-    /// current names.
+    /// current names. A matched video keeps the guess out of sight, so release it there too,
+    /// or it would return as a name without a studio when the match is removed.
     private static func releaseDetectedStudio(_ db: Database, libraryID: Int64, name: String) throws {
         try db.execute(sql: """
             UPDATE entry SET detectedStudio = NULL
-            WHERE libraryID = ? AND matchData IS NULL AND detectedStudio = ? COLLATE swiftCaseInsensitiveCompare
+            WHERE libraryID = ? AND detectedStudio = ? COLLATE swiftCaseInsensitiveCompare
             """, arguments: [libraryID, name])
+        // A cover frame may come from a video that was a member through its folder only.
+        if db.changesCount > 0 { try reconcileStudioCovers(db) }
     }
 
     public func deleteCustomStudio(libraryID: Int64, name: String) throws {
