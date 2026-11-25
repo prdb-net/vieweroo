@@ -320,24 +320,37 @@ struct Poster: View {
     var model: LibraryModel
     var entry: CatalogEntry
     var scrubbable = true
-    @State private var local: NSImage?
+    /// The image this tile shows. The view keeps it alive while the cache may drop it.
+    @State private var held: (source: Sources, image: NSImage)?
     @State private var revision = 0
-    @State private var loadedDirectory: URL?
+
+    /// Where the artwork of an entry can come from, in order of preference.
+    private struct Sources: Equatable {
+        var imported: String?
+        var remote: URL?
+        var directory: URL
+        var revision = 0
+
+        var importedKey: String? { imported.map { "poster:" + $0 } }
+        var remoteKey: String? { remote.map { "url:" + $0.absoluteString } }
+        var stillKey: String { "still:" + directory.path }
+    }
+
     var body: some View {
         let directory = model.previewDirectory(entry)
+        let sources = Sources(imported: entry.posterRevision.map { "\(entry.id):" + $0 },
+                              remote: entry.posterRevision == nil ? model.artworkURL(entry.match?.previewURL) : nil,
+                              directory: directory, revision: revision)
+        // An image decoded earlier appears together with the tile.
+        let cache = ArtworkCache.shared
+        let image = (held?.source == sources ? held?.image : nil)
+            ?? sources.importedKey.flatMap(cache.image) ?? sources.remoteKey.flatMap(cache.image)
+            ?? (sources.imported == nil ? cache.image(sources.stillKey) : nil)
         Rectangle().fill(.quaternary.opacity(0.5))
             .aspectRatio(16/9, contentMode: .fit)
             .overlay {
-                if let imported = entry.posterRevision {
-                    ImportedPoster(catalog: model.catalog, entryID: entry.id)
-                        .id(imported)
-                } else {
-                    AsyncImage(url: model.artworkURL(entry.match?.previewURL)) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
-                        else if let local { Image(nsImage: local).resizable().scaledToFill() }
-                        else { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
-                    }
-                }
+                if let image { Image(nsImage: image).resizable().scaledToFill() }
+                else if sources.imported == nil { Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
             }.clipped()
             .overlay {
                 if scrubbable {
@@ -346,36 +359,32 @@ struct Poster: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: VSpace.tight, style: .continuous))
             .onReceive(model.posterPrepared) { ready in
-                if ready == directory { revision &+= 1 }
+                guard ready == directory else { return }
+                cache.remove(sources.stillKey)
+                revision &+= 1
             }
-            .task(id: ImageRequest(directory: directory, revision: revision)) {
-                if loadedDirectory != directory { local = nil; loadedDirectory = directory }
-                let url = PreviewCache.posterURL(in: directory)
-                if local != nil { return }
-                let bytes = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
-                if !Task.isCancelled, let bytes { local = NSImage(data: bytes) }
-            }.accessibilityHidden(true)
+            .task(id: sources) { await load(sources) }
+            .accessibilityHidden(true)
     }
-    private struct ImageRequest: Equatable { var directory: URL; var revision: Int }
-}
 
-
-/// Load imported artwork only for posters actually on screen.
-private struct ImportedPoster: View {
-    let catalog: Catalog?
-    let entryID: Int64
-    @State private var image: NSImage?
-
-    var body: some View {
-        Color.clear.overlay {
-            if let image { Image(nsImage: image).resizable().scaledToFill() }
+    private func load(_ sources: Sources) async {
+        let cache = ArtworkCache.shared
+        if let key = sources.importedKey {
+            let catalog = model.catalog, id = entry.id
+            if let image = await cache.load(key, data: { try? catalog?.importedPoster(entryID: id) }), !Task.isCancelled {
+                held = (sources, image)
+            }
+            return
         }
-        .task(id: entryID) {
-            image = nil
-            let data = await Task.detached(priority: .utility) { [catalog, entryID] in
-                try? catalog?.importedPoster(entryID: entryID)
-            }.value
-            if !Task.isCancelled { image = data.flatMap(NSImage.init(data:)) }
+        // Show the local still until the PRDB preview has loaded, and keep it when there is none.
+        let still = PreviewCache.posterURL(in: sources.directory)
+        if sources.remoteKey.flatMap(cache.image) == nil,
+           let image = await cache.load(sources.stillKey, data: { try? Data(contentsOf: still) }), !Task.isCancelled {
+            held = (sources, image)
+        }
+        if let key = sources.remoteKey, let url = sources.remote,
+           let image = await cache.load(key, data: { await ArtworkCache.fetch(url) }), !Task.isCancelled {
+            held = (sources, image)
         }
     }
 }

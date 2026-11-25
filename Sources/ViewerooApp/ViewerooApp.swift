@@ -19,8 +19,8 @@ struct ViewerooApp: App {
         }
         #endif
         title = "Vieweroo"
-        // Posters and portraits load through AsyncImage. Tiles leave and re-enter the lazy grid
-        // while scrolling, and the default shared cache is too small to keep their artwork.
+        // PRDB previews and portraits load through the shared URL cache. Its default size is too
+        // small to keep the artwork of a library between launches.
         URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20,
                                    directory: URL.cachesDirectory.appending(path: "net.prdb.vieweroo/Artwork"))
         _model = State(initialValue: LibraryModel())

@@ -281,6 +281,7 @@ final class LibraryModel {
     private func conceal(_ gate: Gate) {
         stopCatalogAPI()
         stopWork()
+        ArtworkCache.shared.removeAll()
         phase = gate
         message = nil; libraryID = nil
         resetNavigation()

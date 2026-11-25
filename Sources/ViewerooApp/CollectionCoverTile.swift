@@ -87,9 +87,12 @@ struct CollectionCoverImage: View {
     let id: CoverCollectionID
     let cover: CatalogCover?
     let symbol: String
-    @State private var image: NSImage?
+    @State private var held: (revision: String, image: NSImage)?
 
     var body: some View {
+        // Each saved frame has its own revision, so a decoded cover never goes stale.
+        let key = cover.map { "cover:" + $0.revision }
+        let image = (held?.revision == cover?.revision ? held?.image : nil) ?? key.flatMap(ArtworkCache.shared.image)
         RoundedRectangle(cornerRadius: VSpace.tight).fill(.quaternary.opacity(0.5))
             .aspectRatio(16/9, contentMode: .fit)
             .overlay {
@@ -98,9 +101,10 @@ struct CollectionCoverImage: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: VSpace.tight))
             .task(id: cover?.revision) {
-                guard cover != nil else { image = nil; return }
-                let bytes = try? await model.catalog?.coverImage(id)
-                if !Task.isCancelled { image = bytes.flatMap(NSImage.init(data:)) }
+                guard let cover, let key else { held = nil; return }
+                let catalog = model.catalog, id = id
+                let image = await ArtworkCache.shared.load(key) { try? await catalog?.coverImage(id) }
+                if !Task.isCancelled, let image { held = (cover.revision, image) }
             }
     }
 }
