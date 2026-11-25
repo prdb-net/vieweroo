@@ -16,6 +16,7 @@ public enum LibraryJobs {
 
     // Advance by primary key even if a file could not be read and remains pending.
     private static func pendingBatches(libraryID: Int64, catalog: Catalog, availableOnly: Bool,
+                                       matching filter: String = "needsLookup",
                                        process: ([LookupEntry]) async throws -> Void) async throws {
         let availability = availableOnly ? """
              AND EXISTS (SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
@@ -29,7 +30,7 @@ public enum LibraryJobs {
                 try LookupEntry.fetchAll(db, sql: """
                     SELECT id, path, fileSize, modified, hash, detectedStudio, \(Catalog.studioSourcePathSQL) AS sourcePath
                     FROM entry e
-                    WHERE libraryID = ? AND needsLookup AND id > ?
+                    WHERE libraryID = ? AND \(filter) AND id > ?
                     \(availability)
                     ORDER BY id LIMIT 200
                     """, arguments: [libraryID, after])
@@ -40,20 +41,36 @@ public enum LibraryJobs {
         }
     }
 
+    public enum StudioScope: Sendable {
+        /// Entries that still await their PRDB lookup. Their guess is replaced.
+        case pending
+        /// Finished lookups without a title, a manual studio or a guess. A studio that the
+        /// user created later, or that joined the directory, can still claim their folder.
+        case unassigned
+    }
+
     /// Compute folder clues locally, including when PRDB is temporarily unavailable.
-    public static func detectStudios(libraryID: Int64, catalog: Catalog) async throws {
-        let studios = try catalog.studios()
-        guard !studios.isEmpty else { return }
+    /// Returns the number of entries whose studio changed.
+    @discardableResult
+    public static func detectStudios(libraryID: Int64, catalog: Catalog, scope: StudioScope = .pending) async throws -> Int {
+        let studios = try catalog.recognizableStudios(libraryID: libraryID)
+        guard !studios.isEmpty else { return 0 }
         let recognition = StudioRecognition(studios: studios)
-        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: false) { batch in
+        let filter = scope == .pending ? "needsLookup"
+            : "NOT needsLookup AND matchData IS NULL AND manualStudio IS NULL AND detectedStudio IS NULL"
+        var changed = 0
+        try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: false, matching: filter) { batch in
             for entry in batch {
                 try Task.checkCancellation()
                 let name = recognition.match(url: entry.url, sourcePath: entry.sourcePath)?.name
-                if name != entry.detectedStudio {
-                    try catalog.setDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
-                }
+                guard name != entry.detectedStudio else { continue }
+                let saved = scope == .pending
+                    ? try catalog.setDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
+                    : try catalog.fillDetectedStudio(entryID: entry.id, name: name, fileSize: entry.fileSize, modified: entry.modified)
+                if saved { changed += 1 }
             }
         }
+        return changed
     }
 
     /// Lookups that PRDB rejected for request-specific reasons. Other pending videos keep
@@ -82,7 +99,7 @@ public enum LibraryJobs {
     public static func identify(libraryID: Int64, catalog: Catalog, key: String, client: PRDBClient,
                                 failures: Failures = Failures(), searchPacing: Duration = .milliseconds(250),
                                 updated: @Sendable () async -> Void) async throws {
-        let recognition = StudioRecognition(studios: try catalog.studios())
+        let recognition = StudioRecognition(studios: try catalog.recognizableStudios(libraryID: libraryID))
         try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: true) { pending in
             let batch = pending.filter { !failures.isSuspended($0.id) }
             var files: [PRDBFile] = []

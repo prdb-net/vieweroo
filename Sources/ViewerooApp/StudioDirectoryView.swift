@@ -10,6 +10,9 @@ struct StudioDirectoryView: View {
     let model: LibraryModel
     let libraryID: Int64
     var entry: CatalogEntry?
+    /// Assigns the chosen studio to a selection of videos. No studio returns them to automatic assignment.
+    var videoCount = 0
+    var choose: ((_ name: String?, _ siteID: String?, _ onFailure: @escaping (String) -> Void) -> Bool)?
     @Environment(\.dismiss) private var dismiss
     @State private var editing: StudioEdit?
     @State private var filters = CollectionFilters()
@@ -19,10 +22,12 @@ struct StudioDirectoryView: View {
     @State private var confirmingDeletion = false
 
     private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// Manage the directory, or choose a studio for one video or a selection.
+    private var managing: Bool { entry == nil && choose == nil }
 
     var body: some View {
         let platformNames = model.studioPlatforms
-        let members = entry == nil ? Dictionary(grouping: model.entries) { model.studioDirectory.studio(for: $0).id } : [:]
+        let members = managing ? Dictionary(grouping: model.entries) { model.studioDirectory.studio(for: $0).id } : [:]
         let counts = members.mapValues(\.count)
         let directoryIDs = Set(model.studioOptions.map(\.id))
         let localGroups = members.compactMap { key, videos -> StudioOption? in
@@ -36,16 +41,19 @@ struct StudioDirectoryView: View {
             !model.studioOptions.contains { $0.name.caseInsensitiveCompare(term) == .orderedSame }
         VStack(alignment: .leading, spacing: VSpace.control) {
             HStack {
-                Text(entry == nil ? "Manage Studios" : "Choose Studio").font(.title2.bold())
+                Text(managing ? "Manage Studios" : "Choose Studio").font(.title2.bold())
+                if choose != nil {
+                    Text(videoCount == 1 ? "1 video" : "\(videoCount) videos").foregroundStyle(.secondary)
+                }
                 Spacer()
-                if entry == nil {
+                if managing {
                     IconActionButton(.add, "New Studio…") { editing = .create }
                 }
             }
             HStack(spacing: VSpace.control) {
-                CollectionSearchField(prompt: entry == nil ? "Search studios" : "Find or create a studio", text: $query)
-                if let entry {
-                    Button("Create and Select") { assign(term, to: entry) }.disabled(!canCreate)
+                CollectionSearchField(prompt: managing ? "Search studios" : "Find or create a studio", text: $query)
+                if !managing {
+                    Button("Create and Select") { assign(term) }.disabled(!canCreate)
                 }
                 CollectionFilterButton(shelf: .studios, platforms: platformNames, filters: $filters)
             }
@@ -66,14 +74,18 @@ struct StudioDirectoryView: View {
             }
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
             HStack {
+                if choose != nil {
+                    Button("Use Automatic Studio") { assign(nil) }
+                        .help("Remove the manual studio from the selected videos")
+                }
                 Spacer()
-                Button(entry == nil ? "Done" : "Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(managing ? "Done" : "Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             }
         }
         .padding(VSpace.section)
-        .frame(minWidth: entry == nil ? 600 : 470, idealWidth: entry == nil ? 700 : 470,
-               maxWidth: entry == nil ? 1000 : 470, minHeight: entry == nil ? 420 : 365,
-               idealHeight: entry == nil ? 525 : 365, maxHeight: entry == nil ? 900 : 365)
+        .frame(minWidth: managing ? 600 : 470, idealWidth: managing ? 700 : 470,
+               maxWidth: managing ? 1000 : 470, minHeight: managing ? 420 : 365,
+               idealHeight: managing ? 525 : 365, maxHeight: managing ? 900 : 365)
         .sheet(item: $editing) { edit in
             switch edit {
             case .create:
@@ -81,7 +93,11 @@ struct StudioDirectoryView: View {
                     let saved = model.change("Studio created", onFailure: onFailure) {
                         try $0.createStudio(libraryID: libraryID, name: name)
                     }
-                    if saved { filters = CollectionFilters(group: .custom); reveal(name) }
+                    if saved {
+                        filters = CollectionFilters(group: .custom)
+                        reveal(name)
+                        model.recognizeStudios()
+                    }
                     return saved
                 }
             case let .cover(studio):
@@ -107,13 +123,13 @@ struct StudioDirectoryView: View {
         if !studios.isEmpty {
             Section(title) {
                 ForEach(studios) { studio in
-                    if let entry {
+                    if !managing {
                         HStack {
-                            Button { assign(studio.name, siteID: studio.siteID, to: entry) } label: {
+                            Button { assign(studio.name, siteID: studio.siteID) } label: {
                                 HStack {
                                     Text(studio.name)
                                     Spacer()
-                                    if entry.manualStudio != nil && model.studioDirectory.studio(for: entry).id == studio.id {
+                                    if let entry, entry.manualStudio != nil, model.studioDirectory.studio(for: entry).id == studio.id {
                                         Image(systemName: "checkmark")
                                     }
                                 }.contentShape(Rectangle())
@@ -159,10 +175,16 @@ struct StudioDirectoryView: View {
         if !term.isEmpty && !name.localizedCaseInsensitiveContains(term) { query = name }
     }
 
-    private func assign(_ name: String, siteID: String? = nil, to entry: CatalogEntry) {
-        if model.change("Studio updated", onFailure: { error = $0 }, {
+    private func assign(_ name: String?, siteID: String? = nil) {
+        if let choose {
+            if choose(name, siteID, { error = $0 }) { dismiss() }
+        } else if let entry, model.change("Studio updated", onFailure: { error = $0 }, {
             try $0.setManualStudio(entryID: entry.id, name: name, siteID: siteID)
-        }) { dismiss() }
+        }) {
+            // A newly created name can also claim the folders of other videos.
+            model.recognizeStudios()
+            dismiss()
+        }
     }
 }
 

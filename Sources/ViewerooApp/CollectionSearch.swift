@@ -80,7 +80,7 @@ struct CollectionFilters: Equatable {
 extension Shelf {
     var supportsBulkEdit: Bool {
         switch self {
-        case .all, .favorites, .liked, .frequent, .tag, .playlist, .playlists: true
+        case .all, .favorites, .liked, .frequent, .tag, .playlist, .playlists, .studio, .performer: true
         default: false
         }
     }

@@ -96,6 +96,28 @@ extension Catalog {
         try db.execute(sql: "INSERT OR IGNORE INTO metadataStudio(name) VALUES (?)", arguments: [name])
     }
 
+    /// A recognized folder may carry the name of one of the library's own studios. Such a
+    /// name must stay out of the shared metadata names, or the studio would stop being custom.
+    static func rememberDetectedStudio(_ db: Database, _ name: String?, entryID: Int64) throws {
+        guard let name, !name.isEmpty else { return }
+        let custom = try Bool.fetchOne(db, sql: """
+            SELECT EXISTS(SELECT 1 FROM customStudio c JOIN entry e ON e.libraryID = c.libraryID
+                          WHERE e.id = ? AND c.name = ?)
+            """, arguments: [entryID, name]) ?? false
+        if !custom { try rememberStudio(db, name) }
+    }
+
+    /// The PRDB directory together with the library's own studios, for folder and file name clues.
+    func recognizableStudios(libraryID: Int64) throws -> [PRDBStudio] {
+        try database.read { db in
+            let custom = try String.fetchAll(db, sql: """
+                SELECT name FROM customStudio c WHERE libraryID = ?
+                    AND NOT EXISTS (SELECT 1 FROM prdbStudioName WHERE name = c.name)
+                """, arguments: [libraryID])
+            return try Self.fetchStudios(db) + custom.map { PRDBStudio(id: "custom:" + $0, name: $0) }
+        }
+    }
+
     static func studioOptions(_ db: Database, libraryID: Int64) throws -> [StudioOption] {
         try Row.fetchAll(db, sql: """
             SELECT name, 0 AS isCustom, id, creatorData FROM studio
@@ -254,7 +276,17 @@ extension Catalog {
             try db.execute(sql: """
                 UPDATE entry SET manualStudio = ? WHERE manualSiteID IS NULL AND libraryID = ? AND manualStudio = ? COLLATE swiftCaseInsensitiveCompare
                 """, arguments: [clean, libraryID, name])
+            try Self.releaseDetectedStudio(db, libraryID: libraryID, name: name)
         }
+    }
+
+    /// Folders recognized under a custom studio's old name are recognized again under the
+    /// current names.
+    private static func releaseDetectedStudio(_ db: Database, libraryID: Int64, name: String) throws {
+        try db.execute(sql: """
+            UPDATE entry SET detectedStudio = NULL
+            WHERE libraryID = ? AND matchData IS NULL AND detectedStudio = ? COLLATE swiftCaseInsensitiveCompare
+            """, arguments: [libraryID, name])
     }
 
     public func deleteCustomStudio(libraryID: Int64, name: String) throws {
@@ -271,6 +303,7 @@ extension Catalog {
             try db.execute(sql: """
                 UPDATE entry SET manualStudio = NULL WHERE manualSiteID IS NULL AND libraryID = ? AND manualStudio = ? COLLATE swiftCaseInsensitiveCompare
                 """, arguments: [libraryID, name])
+            try Self.releaseDetectedStudio(db, libraryID: libraryID, name: name)
         }
     }
 }

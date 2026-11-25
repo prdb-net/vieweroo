@@ -9,6 +9,8 @@ public enum BulkVideoEdit: Sendable {
     case addTags([String])
     case removeTag(Int64)
     case removeHistory
+    /// A site identity, a studio name, or neither to return to automatic assignment.
+    case studio(name: String?, siteID: String?)
 }
 
 fileprivate struct RemovedCover: FetchableRecord, Decodable, Sendable {
@@ -26,6 +28,7 @@ public struct BulkEditReceipt: Sendable {
         case tags([Int64])
         case removedTag(id: Int64, assignment: Int64, cover: RemovedCover?)
         case history([RemovedPlaybackSession])
+        case studio(previousName: String?, previousSiteID: String?, appliedName: String?, appliedSiteID: String?)
     }
 
     fileprivate struct PlaylistRemoval: Sendable {
@@ -50,7 +53,7 @@ extension Catalog {
                 receipt.playlistRemoval = .init(playlistID: playlistID, originalOrder: try Self.playlistEntryIDs(db, playlistID))
             }
             for id in entryIDs {
-                guard let row = try Row.fetchOne(db, sql: "SELECT favorite, rating FROM entry WHERE libraryID = ? AND id = ?",
+                guard let row = try Row.fetchOne(db, sql: "SELECT favorite, rating, manualStudio, manualSiteID FROM entry WHERE libraryID = ? AND id = ?",
                                                  arguments: [libraryID, id]) else { throw CatalogError.invalidValue }
                 switch edit {
                 case let .favorite(value):
@@ -77,6 +80,15 @@ extension Catalog {
                 case .removeHistory:
                     let sessions = try Self.removeHistory(db, entryID: id)
                     if !sessions.isEmpty { receipt.changes[id] = .history(sessions) }
+                case let .studio(name, siteID):
+                    let previousName: String? = row["manualStudio"], previousSite: String? = row["manualSiteID"]
+                    try Self.setManualStudio(db, libraryID: libraryID, entryID: id, name: name, siteID: siteID)
+                    let saved = try Row.fetchOne(db, sql: "SELECT manualStudio, manualSiteID FROM entry WHERE id = ?", arguments: [id])
+                    let appliedName: String? = saved?["manualStudio"], appliedSite: String? = saved?["manualSiteID"]
+                    if appliedName != previousName || appliedSite != previousSite {
+                        receipt.changes[id] = .studio(previousName: previousName, previousSiteID: previousSite,
+                                                      appliedName: appliedName, appliedSiteID: appliedSite)
+                    }
                 case let .addTags(names):
                     let added = try names.compactMap { try Self.assignTag(db, name: $0, entryID: id, libraryID: libraryID) }
                     if !added.isEmpty { receipt.changes[id] = .tags(added) }
@@ -113,6 +125,13 @@ extension Catalog {
                                    arguments: [receipt.libraryID, playlistID, id])
                 case let .history(sessions):
                     try Self.restoreHistory(db, sessions: sessions, entryID: id, libraryID: receipt.libraryID)
+                case let .studio(previousName, previousSite, appliedName, appliedSite):
+                    // Only while the batch's assignment is still in place.
+                    try db.execute(sql: """
+                        UPDATE entry SET manualStudio = ?, manualSiteID = ?
+                        WHERE id = ? AND libraryID = ? AND manualStudio IS ? AND manualSiteID IS ?
+                        """, arguments: [previousName, previousSite, id, receipt.libraryID, appliedName, appliedSite])
+                    if db.changesCount > 0 { try Self.reconcileStudioCovers(db, entryID: id) }
                 case let .removedTag(tagID, assignment, cover):
                     try db.execute(sql: """
                         INSERT OR IGNORE INTO tagItem(id,libraryID,tagID,entryID)

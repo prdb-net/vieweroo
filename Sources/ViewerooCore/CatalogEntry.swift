@@ -204,15 +204,32 @@ extension Catalog {
         }
     }
 
-    public func setDetectedStudio(entryID: Int64, name: String?, fileSize: Int64, modified: Double) throws {
+    @discardableResult
+    public func setDetectedStudio(entryID: Int64, name: String?, fileSize: Int64, modified: Double) throws -> Bool {
         try database.write { db in
             try db.execute(sql: """
                 UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ? AND needsLookup
                 """, arguments: [name, entryID, fileSize, modified])
-            if db.changesCount > 0 {
-                try Self.rememberStudio(db, name)
-                try Self.reconcileStudioCovers(db, entryID: entryID)
-            }
+            guard db.changesCount > 0 else { return false }
+            try Self.rememberDetectedStudio(db, name, entryID: entryID)
+            try Self.reconcileStudioCovers(db, entryID: entryID)
+            return true
+        }
+    }
+
+    /// Give a studio to an entry whose finished lookup left it without one.
+    @discardableResult
+    func fillDetectedStudio(entryID: Int64, name: String?, fileSize: Int64, modified: Double) throws -> Bool {
+        guard let name else { return false }
+        return try database.write { db in
+            try db.execute(sql: """
+                UPDATE entry SET detectedStudio = ? WHERE id = ? AND fileSize = ? AND modified = ?
+                    AND NOT needsLookup AND matchData IS NULL AND manualStudio IS NULL AND detectedStudio IS NULL
+                """, arguments: [name, entryID, fileSize, modified])
+            guard db.changesCount > 0 else { return false }
+            try Self.rememberDetectedStudio(db, name, entryID: entryID)
+            try Self.reconcileStudioCovers(db, entryID: entryID)
+            return true
         }
     }
 
@@ -239,7 +256,7 @@ extension Catalog {
                 WHERE id = ? AND fileSize = ? AND modified = ? AND NOT confirmed
                 """, arguments: [matchData, candidateData, result.studio?.name, entryID, fileSize, modified])
             if db.changesCount > 0 {
-                try Self.rememberStudio(db, result.studio?.name)
+                try Self.rememberDetectedStudio(db, result.studio?.name, entryID: entryID)
                 let before = db.totalChangesCount
                 try Self.rememberSite(db, result.autoTitle?.studio)
                 for title in result.candidates { try Self.rememberSite(db, title.studio) }

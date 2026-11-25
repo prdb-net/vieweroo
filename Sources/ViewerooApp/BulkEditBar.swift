@@ -7,6 +7,7 @@ struct BulkEditBar: View {
     let visibleIDs: [Int64]
     let shortcutsEnabled: Bool
     @State private var editingTags = false
+    @State private var choosingStudio = false
     @State private var historyRemoval: [Int64] = []
 
     // Preserve collection order and exclude anything hidden by a filter or a catalog refresh.
@@ -15,7 +16,7 @@ struct BulkEditBar: View {
     var body: some View {
         let ids = targets
         SelectionActionBar(selection: $selection, visibleIDs: visibleIDs, count: ids.count,
-                           shortcutsEnabled: shortcutsEnabled && !editingTags) {
+                           shortcutsEnabled: shortcutsEnabled && !editingTags && !choosingStudio) {
             editActions(ids)
             Button("Done") { selection = nil }
         }
@@ -35,12 +36,19 @@ struct BulkEditBar: View {
                 apply(.addTags(tags), to: ids, onFailure: onFailure)
             }
         }
+        .sheet(isPresented: $choosingStudio) {
+            if let library = model.libraryID {
+                StudioDirectoryView(model: model, libraryID: library, videoCount: ids.count) { name, siteID, onFailure in
+                    apply(.studio(name: name, siteID: siteID), to: ids, onFailure: onFailure)
+                }
+            }
+        }
     }
 
     @ViewBuilder
     private func editActions(_ ids: [Int64]) -> some View {
         Group {
-            if model.shelf == .all {
+            if model.shelf.offersAllBulkActions {
                 additionalActions(ids)
             } else {
                 switch model.shelf {
@@ -80,7 +88,7 @@ struct BulkEditBar: View {
         if model.shelf != .liked {
             Button("Like Videos") { apply(.rating(1), to: ids) }
         }
-        if model.shelf == .all {
+        if model.shelf.offersAllBulkActions {
             Button("Dislike Videos") { apply(.rating(-1), to: ids) }
         }
         Menu("Add to Playlist") {
@@ -91,6 +99,7 @@ struct BulkEditBar: View {
         .fixedSize()
         .disabled(model.playlists.isEmpty)
         Button("Add Tags…") { editingTags = true }
+        Button("Set Studio…") { choosingStudio = true }
     }
 
     @discardableResult
@@ -113,9 +122,22 @@ struct BulkEditBar: View {
         case .removeHistory: text = "Removed \(videos) from Watch History"
         case .removeTag: text = "Removed tag from \(videos)"
         case .addTags: text = count > 0 ? "Tagged \(videos)" : "Tags already applied"
+        case .studio(nil, nil): text = count > 0 ? "\(videos) use their automatic studio" : "Already using the automatic studio"
+        case .studio: text = count > 0 ? "Studio set for \(videos)" : "Studio already set"
         }
+        if case .studio = edit, count > 0 { model.recognizeStudios() }
         model.notice = ActionNotice(text: text, kind: .success, undo: count > 0 ? receipt : nil)
         return true
+    }
+}
+
+extension Shelf {
+    /// Collections without a membership action of their own show every batch action directly.
+    var offersAllBulkActions: Bool {
+        switch self {
+        case .all, .studio, .performer: true
+        default: false
+        }
     }
 }
 

@@ -411,17 +411,33 @@ final class LibraryModel {
 
     func renameStudio(_ name: String, to newName: String, in libraryID: Int64, onFailure: @escaping (String) -> Void) -> Bool {
         guard self.libraryID == libraryID else { return false }
-        return change("Studio renamed", onFailure: onFailure) { catalog in
+        let saved = change("Studio renamed", onFailure: onFailure) { catalog in
             try catalog.renameCustomStudio(libraryID: libraryID, name: name, to: newName)
             history.renameStudio(name, to: newName)
         }
+        if saved { recognizeStudios() }
+        return saved
     }
 
     func deleteStudio(_ name: String, in libraryID: Int64, onFailure: @escaping (String) -> Void) {
         guard self.libraryID == libraryID else { return }
-        change("Studio deleted", onFailure: onFailure) { catalog in
+        let deleted = change("Studio deleted", onFailure: onFailure) { catalog in
             try catalog.deleteCustomStudio(libraryID: libraryID, name: name)
             history.removeStudio(name)
+        }
+        if deleted { recognizeStudios() }
+    }
+
+    /// Folder and file name clues depend on the studio names of the library. Look again at
+    /// videos without a studio after a studio was created, renamed or deleted.
+    func recognizeStudios() {
+        guard phase == .ready, let catalog, let id = libraryID else { return }
+        let stamp = work
+        work[.studioRecognition]?.cancel()
+        work[.studioRecognition] = Task(priority: .utility) {
+            let changed = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
+            guard work === stamp, !Task.isCancelled, changed > 0 else { return }
+            reload()
         }
     }
 
@@ -891,12 +907,18 @@ final class LibraryModel {
         work[.lookups] = Task(priority: .utility) {
             await work[.snapshot]?.value
             guard work === stamp, !Task.isCancelled else { return }
-            if let id, entries.contains(where: \.needsLookup) {
-                lookupActivity = "Recognizing studios…"
-                try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
+            if let id {
+                var recognized = 0
+                if entries.contains(where: \.needsLookup) {
+                    lookupActivity = "Recognizing studios…"
+                    recognized = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)) ?? 0
+                    guard work === stamp, !Task.isCancelled else { return }
+                }
+                // Also covers studios that were created before this version recognized them.
+                recognized += (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
                 guard work === stamp, !Task.isCancelled else { return }
                 lookupActivity = nil
-                reload()
+                if recognized > 0 { reload() }
             }
             while !Task.isCancelled && !subscriptionRequired {
                 do {

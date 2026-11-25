@@ -4,7 +4,7 @@
 @MainActor
 final class LibraryWork {
     enum Slot: CaseIterable {
-        case lookups, availability, scan, videoInfo, previews, snapshot, playbackRefresh
+        case lookups, availability, scan, videoInfo, previews, snapshot, playbackRefresh, studioRecognition
     }
 
     private var tasks: [Slot: Task<Void, Never>] = [:]
