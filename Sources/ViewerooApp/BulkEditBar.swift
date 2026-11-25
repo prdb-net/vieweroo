@@ -16,10 +16,9 @@ struct BulkEditBar: View {
 
     var body: some View {
         let ids = targets
-        SelectionActionBar(selection: $selection, visibleIDs: visibleIDs, count: ids.count,
-                           shortcutsEnabled: shortcutsEnabled && !editingTags && !choosingStudio) {
+        SelectionActionBar(title: model.collectionTitle, selection: $selection, visibleIDs: visibleIDs, count: ids.count,
+                           shortcutsEnabled: shortcutsEnabled && !editingTags && !choosingStudio && historyRemoval.isEmpty) {
             editActions(ids)
-            Button("Done") { selection = nil }
         }
         .alert("Remove from Watch History?", isPresented: Binding(
             get: { !historyRemoval.isEmpty }, set: { if !$0 { historyRemoval = [] } }
@@ -217,7 +216,9 @@ private struct BulkTagSheet: View {
 }
 
 
+/// The header of edit mode. It replaces the collection heading, so the tiles keep their room.
 struct SelectionActionBar<Actions: View>: View {
+    let title: String
     @Binding var selection: Set<Int64>?
     let visibleIDs: [Int64]
     let count: Int
@@ -228,12 +229,17 @@ struct SelectionActionBar<Actions: View>: View {
         VStack(spacing: VSpace.tight) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: VSpace.tight) {
-                    selectionControls(count: count)
-                    Spacer()
+                    selectionControls
+                    Spacer(minLength: VSpace.group)
                     HStack(spacing: VSpace.tight) { actions }.fixedSize()
+                    done
                 }
                 VStack(alignment: .leading, spacing: VSpace.tight) {
-                    HStack { selectionControls(count: count); Spacer() }
+                    HStack(spacing: VSpace.tight) {
+                        selectionControls
+                        Spacer(minLength: VSpace.group)
+                        done
+                    }
                     ChipRows { actions }
                 }
             }
@@ -244,14 +250,29 @@ struct SelectionActionBar<Actions: View>: View {
         .onChange(of: visibleIDs, initial: true) { selection?.formIntersection(visibleIDs) }
     }
 
-    private func selectionControls(count: Int) -> some View {
-        HStack(spacing: VSpace.tight) {
-            Text("\(count) selected").monospacedDigit()
-            Button("Select All") { selection = Set(visibleIDs) }
-                .keyboardShortcut(shortcutsEnabled ? KeyboardShortcut("a") : nil)
+    private var selectionControls: some View {
+        let all = count == visibleIDs.count && count > 0
+        return HStack(spacing: VSpace.tight) {
+            Text(title).font(.headline).lineLimit(1)
+            Text("\(count) of \(visibleIDs.count) selected").monospacedDigit().foregroundStyle(.secondary).fixedSize()
+            // Command–A selects everything. The button offers the opposite once that is the case.
+            Button(all ? "Deselect All" : "Select All") { selection = all ? [] : Set(visibleIDs) }
                 .disabled(visibleIDs.isEmpty)
+                .fixedSize()
+                .background {
+                    Button("Select All") { selection = Set(visibleIDs) }
+                        .keyboardShortcut(shortcutsEnabled ? KeyboardShortcut("a") : nil)
+                        .disabled(visibleIDs.isEmpty)
+                        .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+                }
         }
-        .fixedSize()
     }
 
+    private var done: some View {
+        Button("Done") { selection = nil }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(shortcutsEnabled ? .cancelAction : nil)
+            .help("Finish editing (Esc)")
+            .fixedSize()
+    }
 }

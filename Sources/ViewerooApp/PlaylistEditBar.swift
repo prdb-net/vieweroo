@@ -24,7 +24,7 @@ struct PlaylistEditBar: View {
         let visible = model.visiblePlaylists
         let selected = visible.filter { selection?.contains($0.id) == true }
         let single = selected.count == 1 ? selected[0] : nil
-        SelectionActionBar(selection: $selection, visibleIDs: visible.map(\.id), count: selected.count,
+        SelectionActionBar(title: "Playlists", selection: $selection, visibleIDs: visible.map(\.id), count: selected.count,
                            shortcutsEnabled: shortcutsEnabled && editing == nil && pendingDeletion.isEmpty) {
             IconActionButton(.add, "New Playlist…") { editing = .create }
             IconActionButton(.edit, "Rename Playlist…") {
@@ -39,7 +39,6 @@ struct PlaylistEditBar: View {
             .disabled(single?.memberIDs.isEmpty != false)
             IconActionButton(.delete, "Delete Selected Playlists…") { pendingDeletion = selected }
                 .disabled(selected.isEmpty)
-            Button("Done") { selection = nil }
         }
         .sheet(item: $editing) { edit in
             switch edit {

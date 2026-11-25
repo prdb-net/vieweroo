@@ -68,6 +68,10 @@ struct BrowserView: View {
         let unit = count == 1 ? noun : noun + "s"
         return ScrollViewReader { proxy in ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
+                // Edit mode names the collection and its count in the selection bar.
+                if selection != nil {
+                    if !model.visit.filters.isEmpty { FilterChips(filters: model.filterBinding) }
+                } else {
                 CollectionHeading(title: model.collectionTitle, count: "\(count) \(unit)", filters: model.filterBinding) {
                     if model.shelf.isVideoCollection {
                         Menu {
@@ -81,6 +85,7 @@ struct BrowserView: View {
                     if case let .studio(_, id?) = model.shelf, let account = model.studioDirectory.site(id)?.creator {
                         CreatorProfileView(account: account)
                     }
+                }
                 }
                 if count == 0 { empty }
                 else if !collections.isEmpty {
