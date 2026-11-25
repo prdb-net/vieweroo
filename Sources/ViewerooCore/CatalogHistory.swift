@@ -22,7 +22,7 @@ struct RemovedPlaybackSession: Sendable {
 
 extension Catalog {
     static let visibleSessions = """
-        (SELECT s.id, s.entryID,
+        (SELECT s.id, s.entryID, s.started,
             (SELECT TOTAL(i.end - i.start) FROM interval i WHERE i.sessionID = s.id) AS watchTime
          FROM session s WHERE watchTime >= \(PlaybackHistory.minimumWatchTime))
         """

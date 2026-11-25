@@ -27,15 +27,19 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let duration: Double?
     public let videoInfo: VideoInfo?
     public let weightedPlays: Double
+    /// When the latest counted viewing session began, in seconds since 1970.
+    public let lastPlayed: Double?
     public let availability: CatalogAvailability
     public let playbackFailure: String?
 
     public var url: URL { URL(fileURLWithPath: path, isDirectory: false) }
-    public var filename: String { url.lastPathComponent }
+    // Search and sorting read the file name and title of every entry. Deriving them from a
+    // URL each time made up most of a search over a large library.
+    public let filename: String
     public let localTitle: String?
     public let localDescription: String?
     public let posterRevision: String?
-    public var title: String { localTitle ?? match?.title ?? url.deletingPathExtension().lastPathComponent }
+    public let title: String
     public var studio: String? { manualStudio ?? match?.studio?.name ?? detectedStudio }
 
     private static let log = Logger(subsystem: "net.prdb.vieweroo", category: "catalog")
@@ -62,6 +66,7 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         watchTime = row["watchTime"]
         duration = row["duration"]
         weightedPlays = row["weightedPlays"]
+        lastPlayed = row["lastPlayed"]
         availability = CatalogAvailability(rawValue: row["availability"]) ?? .missing
         playbackFailure = row["playbackFailure"]
         // Cached metadata must never keep the rest of the library from loading. An unreadable
@@ -77,6 +82,9 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         }
         videoInfo = cached(VideoInfo.self, "videoInfo")
         match = cached(PRDBTitle.self, "matchData")
+        let name = (path as NSString).lastPathComponent
+        filename = name
+        title = localTitle ?? match?.title ?? (name as NSString).deletingPathExtension
         // An empty list is stored as the two bytes of "[]".
         hasCandidates = (row["candidateBytes"] as Int? ?? 0) > 2
         let decoder = JSONDecoder()
@@ -117,6 +125,8 @@ extension Catalog {
             (SELECT COALESCE(SUM(s.watchTime),0) FROM \(visibleSessions) s
                 WHERE s.entryID = e.id) AS watchTime,
             \(weightedPlaysQuery) AS weightedPlays,
+            (SELECT MAX(CAST(strftime('%s', s.started) AS INTEGER)) FROM \(visibleSessions) s
+                WHERE s.entryID = e.id) AS lastPlayed,
             CASE WHEN EXISTS(SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID
                 WHERE m.entryID = e.id AND m.present AND s.online) THEN 'available'
             WHEN EXISTS(SELECT 1 FROM membership m JOIN source s ON s.id = m.sourceID

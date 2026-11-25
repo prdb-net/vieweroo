@@ -117,8 +117,12 @@ struct BrowserView: View {
                                     }
                                     if selection == nil, let id = playlistID {
                                         Divider()
-                                        Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }.disabled(records.first?.id == entry.id)
-                                        Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }.disabled(records.last?.id == entry.id)
+                                        // Moving a video changes the playlist's own sequence.
+                                        let sequence = model.videoSort == .collection
+                                        Button("Move Earlier") { move(entry, by: -1, among: records, playlist: id) }
+                                            .disabled(!sequence || records.first?.id == entry.id)
+                                        Button("Move Later") { move(entry, by: 1, among: records, playlist: id) }
+                                            .disabled(!sequence || records.last?.id == entry.id)
                                         Button("Remove from Playlist") { model.change("Removed from playlist") { try $0.removeFromPlaylist(id, entryID: entry.id) } }
                                     }
                                 }
@@ -202,6 +206,10 @@ struct BrowserView: View {
                 .underline(underlined)
             if model.shelf == .frequent {
                 Text(entry.viewingSummary).font(.subheadline).foregroundStyle(.secondary)
+                if model.videoSort == .played, let played = entry.lastPlayed {
+                    Text("Watched " + Date(timeIntervalSince1970: played).formatted(.relative(presentation: .named)))
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             if let subtitle = subtitle(entry) {
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

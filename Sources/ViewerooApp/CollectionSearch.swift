@@ -166,6 +166,28 @@ struct FiltersButton: View {
     }
 }
 
+struct SortButton: View {
+    @Bindable var model: LibraryModel
+
+    var body: some View {
+        let shelf = model.shelf
+        Menu {
+            Picker("Sort By", selection: $model.videoSort) {
+                ForEach(shelf.sortOptions) { option in Text(option.label(in: shelf)).tag(option) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .foregroundStyle(model.videoSort == shelf.sortOptions.first ? Color.primary : Color.accentColor)
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Sort: \(model.videoSort.label(in: shelf))")
+        .accessibilityLabel("Sort")
+        .accessibilityValue(model.videoSort.label(in: shelf))
+    }
+}
+
 struct CollectionFilterButton: View {
     let shelf: Shelf
     var platforms: [String] = []

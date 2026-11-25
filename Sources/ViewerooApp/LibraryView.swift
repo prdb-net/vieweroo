@@ -84,6 +84,7 @@ struct LibraryView: View {
                                 .frame(maxWidth: 230)
                             if model.shelf.isVideoCollection {
                                 FiltersButton(active: !model.visit.filters.isEmpty) { sheet = .videoFilters }
+                                SortButton(model: model)
                             } else {
                                 CollectionFilterButton(shelf: model.shelf, platforms: model.shelf == .studios ? model.studioPlatforms : [],
                                                        filters: model.filterBinding)

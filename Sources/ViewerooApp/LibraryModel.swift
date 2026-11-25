@@ -78,6 +78,15 @@ final class LibraryModel {
     var cinemaRecommendationCount: CinemaRecommendationCount {
         didSet { preferences.set(cinemaRecommendationCount.rawValue, forKey: Self.cinemaCountKey) }
     }
+    /// The chosen order per kind of video collection (see `Shelf.sortScope`), kept across launches.
+    var videoSorts: [String: String] {
+        didSet {
+            collectionRevision &+= 1
+            preferences.set(videoSorts, forKey: Self.videoSortKey)
+        }
+    }
+    @ObservationIgnored var titleRankCache: (titles: [String], ranks: [Int64: Int])?
+    private static let videoSortKey = "videoSort"
     private static let cinemaCountKey = "cinemaRecommendationCount"
     private static let cinemaSuggestionsKey = "showsCinemaSuggestions"
     var playing: Bool { mainPlayer.entryID != nil }
@@ -120,6 +129,7 @@ final class LibraryModel {
         self.client = client
         self.cinemaRecommendationCount = CinemaRecommendationCount(rawValue: preferences.integer(forKey: Self.cinemaCountKey)) ?? .four
         self.showsCinemaSuggestions = preferences.object(forKey: Self.cinemaSuggestionsKey) as? Bool ?? true
+        self.videoSorts = preferences.dictionary(forKey: Self.videoSortKey) as? [String: String] ?? [:]
         self.preferences = preferences
         self.directory = directory
         self.cache = cache
@@ -286,6 +296,7 @@ final class LibraryModel {
         message = nil; libraryID = nil
         resetNavigation()
         libraries = []; sources = []; entries = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); studioCache = nil; orderedIDs = []
+        titleRankCache = nil
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }
         }

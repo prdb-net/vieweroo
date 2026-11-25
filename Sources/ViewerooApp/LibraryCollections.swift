@@ -6,6 +6,49 @@ struct VisibleVideosKey: Equatable {
     let shelf: Shelf
     let term: String
     let filters: CollectionFilters
+    let sort: VideoSort
+}
+
+/// The order of the videos in a collection.
+enum VideoSort: String, CaseIterable, Identifiable {
+    /// The collection's own order: a playlist's sequence, or the Watch History ranking.
+    case collection
+    case title, added, played, duration, path
+
+    var id: Self { self }
+
+    func label(in shelf: Shelf) -> String {
+        switch self {
+        case .collection: shelf == .frequent ? "Most Watched" : "Playlist Order"
+        case .title: "Title"
+        case .added: "Recently Added"
+        case .played: "Recently Watched"
+        case .duration: "Longest First"
+        case .path: "Folder and File Name"
+        }
+    }
+}
+
+extension Shelf {
+    /// Collections of one kind share a remembered order.
+    var sortScope: String? {
+        switch self {
+        case .playlist: "playlist"
+        case .frequent: "history"
+        case .all, .favorites, .liked, .studio, .performer, .tag: "library"
+        case .studios, .playlists, .sources, .settings, .tags: nil
+        }
+    }
+
+    /// The first option is the default.
+    var sortOptions: [VideoSort] {
+        switch sortScope {
+        case "playlist": [.collection, .title, .added, .played, .duration, .path]
+        case "history": [.collection, .played, .title, .duration]
+        case nil: []
+        default: [.title, .added, .played, .duration, .path]
+        }
+    }
 }
 
 struct StudioTile: Identifiable {
@@ -60,13 +103,67 @@ extension LibraryModel {
     var visibleVideos: [CatalogEntry] {
         // Register observation of every input, also when the cached result is returned.
         _ = (entries, tags, orderedIDs, studioDirectory)
-        let key = VisibleVideosKey(revision: collectionRevision, shelf: shelf, term: searchTerm, filters: visit.filters)
+        let key = VisibleVideosKey(revision: collectionRevision, shelf: shelf, term: searchTerm, filters: visit.filters,
+                                   sort: videoSort)
         if let cache = visibleVideosCache, cache.key == key { return cache.videos }
         let scoped = videosInCollection
         let term = key.term
-        let videos = narrowed ? scoped.filter { visit.filters.includes($0, directory: studioDirectory, term: term) } : scoped
+        let matches = narrowed ? scoped.filter { visit.filters.includes($0, directory: studioDirectory, term: term) } : scoped
+        let videos = ordered(matches, by: key.sort)
         visibleVideosCache = (key, videos)
         return videos
+    }
+
+    /// The order chosen for the open kind of collection.
+    var videoSort: VideoSort {
+        get {
+            let options = shelf.sortOptions
+            let saved = shelf.sortScope.flatMap { videoSorts[$0] }.flatMap(VideoSort.init(rawValue:))
+            return saved.flatMap { options.contains($0) ? $0 : nil } ?? options.first ?? .title
+        }
+        set {
+            if let scope = shelf.sortScope { videoSorts[scope] = newValue.rawValue }
+        }
+    }
+
+    /// Positions by title. Comparing titles is the expensive part of sorting, so the table is
+    /// kept while the titles of the library are unchanged.
+    private func titleRanks() -> [Int64: Int] {
+        let titles = entries.map(\.title)
+        if let cache = titleRankCache, cache.titles == titles { return cache.ranks }
+        let order = entries.indices.sorted {
+            let result = titles[$0].localizedStandardCompare(titles[$1])
+            return result == .orderedSame ? $0 < $1 : result == .orderedAscending
+        }
+        var ranks = [Int64: Int](minimumCapacity: order.count)
+        for (rank, index) in order.enumerated() { ranks[entries[index].id] = rank }
+        titleRankCache = (titles, ranks)
+        return ranks
+    }
+
+    func ordered(_ videos: [CatalogEntry], by sort: VideoSort) -> [CatalogEntry] {
+        if sort == .collection { return videos }
+        // Entries arrive in path order. Only a playlist changes it.
+        if sort == .path, !shelf.sortOptions.contains(.collection) { return videos }
+        let ranks = sort == .added || sort == .path ? [:] : titleRanks()
+        func byTitle(_ first: CatalogEntry, _ second: CatalogEntry) -> Bool {
+            ranks[first.id, default: .max] < ranks[second.id, default: .max]
+        }
+        // The largest value first. Videos without a value follow, by title.
+        func descending(_ value: (CatalogEntry) -> Double?) -> [CatalogEntry] {
+            videos.sorted { first, second in
+                let one = value(first) ?? -.infinity, two = value(second) ?? -.infinity
+                return one == two ? byTitle(first, second) : one > two
+            }
+        }
+        switch sort {
+        case .collection: return videos
+        case .title: return videos.sorted(by: byTitle)
+        case .added: return videos.sorted { $0.id > $1.id }
+        case .played: return descending(\.lastPlayed)
+        case .duration: return descending(\.duration)
+        case .path: return videos.sorted { $0.path.compare($1.path, options: .caseInsensitive) == .orderedAscending }
+        }
     }
 
     var videosInCollection: [CatalogEntry] {
