@@ -87,6 +87,10 @@ final class LibraryModel {
     }
     @ObservationIgnored var titleRankCache: (titles: [String], ranks: [Int64: Int])?
     private static let videoSortKey = "videoSort"
+    /// The top-level view each library was last left in, by library ID.
+    private static let landingKey = "lastShelf"
+    /// Set while a library without a remembered view waits for its first snapshot.
+    @ObservationIgnored private var landingPending = false
     private static let cinemaCountKey = "cinemaRecommendationCount"
     private static let cinemaSuggestionsKey = "showsCinemaSuggestions"
     var playing: Bool { mainPlayer.entryID != nil }
@@ -335,7 +339,12 @@ final class LibraryModel {
         loadingLibrary = id != nil
         entries = []; sources = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); studioCache = nil; orderedIDs = []
         resetNavigation()
-        if let id { preferences.set(id, forKey: lastLibrary) }
+        if let id {
+            preferences.set(id, forKey: lastLibrary)
+            let saved = (preferences.dictionary(forKey: Self.landingKey) as? [String: String])?[String(id)]
+            if let shelf = saved.flatMap(Shelf.init(landingName:)) { visit = BrowseVisit(shelf: shelf) }
+            else { landingPending = true }
+        }
         let initialLoad = reload()
         guard let catalog else { return }
         let stamp = work
@@ -359,12 +368,37 @@ final class LibraryModel {
         studioCovers.removeAll()
         favoriteStudioIDs.removeAll()
         history = BrowseHistory()
+        landingPending = false
+    }
+
+    /// Reopen the library in this view next time. A collection inside Tags or Playlists
+    /// returns to its overview, and other views keep the last remembered one.
+    private func rememberLanding() {
+        guard let libraryID, let name = shelf.landingName else { return }
+        var saved = preferences.dictionary(forKey: Self.landingKey) as? [String: String] ?? [:]
+        guard saved[String(libraryID)] != name else { return }
+        saved[String(libraryID)] = name
+        preferences.set(saved, forKey: Self.landingKey)
+    }
+
+    /// A library without a remembered view opens by studio. While fewer than two of its
+    /// studios are identified, that overview shows little, so open All Videos instead.
+    private func chooseLanding() {
+        guard shelf == .studios, !history.canGoBack, detailID == nil, query.isEmpty, !entries.isEmpty else { return }
+        var identified = Set<String>()
+        for entry in entries where entry.studio != nil {
+            identified.insert(studioDirectory.studio(for: entry).id)
+            if identified.count > 1 { return }
+        }
+        visit = BrowseVisit(shelf: .all)
     }
 
     private func navigate(to next: BrowseVisit, from tile: BrowseTile? = nil) {
         guard phase == .ready, libraryID != nil else { return }
         if playing { endPlayback() }
         history.push(next, from: tile)
+        landingPending = false
+        rememberLanding()
         loadPlaylist(recordOpening: true)
     }
 
@@ -459,6 +493,7 @@ final class LibraryModel {
         guard phase == .ready, history.canGoBack else { return }
         if playing { endPlayback() }
         _ = history.pop()
+        rememberLanding()
         loadPlaylist(recordOpening: true)
     }
 
@@ -490,6 +525,10 @@ final class LibraryModel {
                     studioCovers = snapshot.studioCovers
                     favoriteStudioIDs = snapshot.favoriteStudioIDs
                     if snapshot.studioOptionsChanged { studioDirectory = StudioDirectory(snapshot.studioOptions) }
+                    if landingPending {
+                        landingPending = false
+                        chooseLanding()
+                    }
                     tags = snapshot.tags
                     let tagIDs = Set(tags.map(\.id))
                     playlists = snapshot.playlists
@@ -657,6 +696,9 @@ final class LibraryModel {
         let deleted = change("Library deleted") { db in
             stopWork()
             try db.deleteLibrary(libraryID)
+            var landings = preferences.dictionary(forKey: Self.landingKey) as? [String: String] ?? [:]
+            landings[String(libraryID)] = nil
+            preferences.set(landings, forKey: Self.landingKey)
             selectLibrary(try db.libraries().first?.id)
         }
         // Deletion stopped the library's work first. Resume it, or open the next library.

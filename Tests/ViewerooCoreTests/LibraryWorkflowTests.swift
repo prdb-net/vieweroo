@@ -224,7 +224,7 @@ private final class WorkflowSecrets: SecretStore {
     try reopened.unlock(pin: "0000")
     try await until { reopened.networkStatus != nil }
     #expect(reopened.phase == .ready && reopened.libraryID == libraryID)
-    #expect(reopened.shelf == .studios)
+    #expect(reopened.shelf == .favorites, "A library reopens in the view it was left in")
     let saved = try #require(reopened.entries.first)
     #expect(saved.videoInfo == entry.videoInfo)
     #expect(saved.id == entry.id && saved.favorite && saved.rating == 1)
@@ -846,4 +846,55 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     #expect(try await request(route, model.access.catalogKey()).0 == 200)
     model.setCatalogAPIEnabled(false)
     model.lock()
+}
+
+@MainActor
+@Test func libraryReopensInItsLastViewAndStartsInAllVideosWithoutIdentifiedStudios() async throws {
+    let temporary = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    let folder = temporary.appending(path: "Media")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    for name in ["One.mp4", "Two.mp4"] { try Data(name.utf8).write(to: folder.appending(path: name)) }
+    let suite = "vieweroo.landing." + UUID().uuidString
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let server = WorkflowServer()
+    let secrets = WorkflowSecrets()
+    func launch() -> LibraryModel {
+        LibraryModel(access: AccessController(store: secrets, authenticate: { false }),
+                     client: PRDBClient { try await server.respond(to: $0) },
+                     preferences: preferences, directory: temporary.appending(path: "Support"),
+                     cache: PreviewCache(root: temporary.appending(path: "Cache")))
+    }
+    func ready(_ model: LibraryModel) async throws {
+        try await until { model.phase == .ready && !model.loadingLibrary && model.entries.count == 2 }
+    }
+    let first = launch()
+    first.start()
+    try await first.configure(key: "fixture")
+    first.createLibrary("Movies")
+    first.addSources([folder])
+    try await ready(first)
+    #expect(first.shelf == .studios, "A new library keeps its studio overview while the first import runs")
+    first.lock()
+
+    // No view was chosen yet, and no studio is identified.
+    let second = launch()
+    second.start()
+    try await ready(second)
+    #expect(second.shelf == .all && !second.canGoBack)
+    second.browse(.frequent)
+    second.browse(.settings)
+    second.browse(.sources)
+
+    let third = launch()
+    third.start()
+    try await ready(third)
+    #expect(third.shelf == .frequent, "Settings and folders are not a view to reopen in")
+    third.browse(.studios)
+
+    let fourth = launch()
+    fourth.start()
+    try await ready(fourth)
+    #expect(fourth.shelf == .studios, "A chosen studio overview is kept, also without identified studios")
 }

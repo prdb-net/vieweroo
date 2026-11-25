@@ -78,6 +78,26 @@ struct CollectionFilters: Equatable {
 }
 
 extension Shelf {
+    /// The top-level view a library reopens in after this one was shown.
+    var landingName: String? {
+        switch self {
+        case .studios: "studios"
+        case .all: "all"
+        case .favorites: "favorites"
+        case .liked: "liked"
+        case .tags, .tag: "tags"
+        case .frequent: "history"
+        case .playlists, .playlist: "playlists"
+        case .studio, .performer, .settings, .sources: nil
+        }
+    }
+
+    init?(landingName: String) {
+        let views: [Shelf] = [.studios, .all, .favorites, .liked, .tags, .frequent, .playlists]
+        guard let view = views.first(where: { $0.landingName == landingName }) else { return nil }
+        self = view
+    }
+
     var supportsBulkEdit: Bool {
         switch self {
         case .all, .favorites, .liked, .frequent, .tag, .playlist, .playlists, .studio, .performer: true
