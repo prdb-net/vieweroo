@@ -661,18 +661,20 @@ final class LibraryModel {
         work[.videoInfo] = Task(priority: .utility) {
             let updates = DiscoveryUpdates()
             var pendingReload = false
-            for entry in entries where entry.videoInfo == nil {
+            // Older catalogs know the video track of an entry but not yet its duration.
+            for entry in entries where entry.videoInfo == nil || entry.duration == nil {
                 guard !Task.isCancelled else { return }
                 let identity = "\(entry.id):\(entry.fileSize):\(entry.modified)"
                 guard !unreadableVideoInfo.contains(identity) else { continue }
                 do {
-                    guard let info = try await VideoInfo.read(from: entry.url) else {
+                    guard let probe = try await VideoInfo.probe(entry.url) else {
                         unreadableVideoInfo.insert(identity)
                         continue
                     }
                     try Task.checkCancellation()
-                    try await catalog.storeVideoInfo(info, for: entry)
+                    try await catalog.storeVideoInfo(probe.info, duration: probe.duration, for: entry)
                     guard !Task.isCancelled else { return }
+                    if probe.duration == nil { unreadableVideoInfo.insert(identity) }
                     pendingReload = true
                     if entry.id == detailID || updates.shouldRefresh() {
                         reload()
@@ -697,22 +699,6 @@ final class LibraryModel {
         if selection == nil { readVideoInfo(in: pending, catalog: catalog) }
         previews = PreviewProgress(phase: .checking)
         work[.previews] = Task(priority: .utility) {
-            // Older catalogs may already have preview images but lack movie durations.
-            var backfilled = false
-            for entry in pending where entry.playCount > 0 && entry.duration == nil {
-                guard previewToken == token else { return }
-                previews.phase = .readingDurations
-                if let duration = try? await AVURLAsset(url: entry.url).load(.duration).seconds,
-                   duration.isFinite, duration > 0 {
-                    guard previewToken == token else { return }
-                    do {
-                        try catalog.setDuration(duration, for: entry)
-                        backfilled = true
-                    } catch { /* Retry when the library is next opened or refreshed. */ }
-                }
-            }
-            guard previewToken == token else { return }
-            previews.phase = .checking
             guard let missing = try? await PreviewProgress.missing(in: pending, cache: cache),
                   previewToken == token else { return }
             previews = PreviewProgress(phase: .preparing, total: pending.count, remaining: missing[...])
@@ -741,7 +727,7 @@ final class LibraryModel {
             }
             previews.phase = .idle
             previews.remaining = []
-            if backfilled || failuresChanged { reload() }
+            if failuresChanged { reload() }
         }
     }
 

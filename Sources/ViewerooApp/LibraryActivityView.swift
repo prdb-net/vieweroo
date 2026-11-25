@@ -12,7 +12,6 @@ struct LibraryActivityButton: View {
         switch model.previews.phase {
         case .checking: return "Checking previews…"
         case .preparing: return "Preparing previews"
-        case .readingDurations: return "Reading durations…"
         case .idle: break
         }
         if let activity = model.lookupActivity { return activity }
@@ -97,8 +96,6 @@ private struct LibraryActivityView: View {
             Text("Timeline previews").font(.headline)
             if progress.phase == .checking {
                 Text("Checking cached previews…")
-            } else if progress.phase == .readingDurations {
-                Text("Reading movie durations…")
             } else if progress.total > 0 {
                 Text("\(progress.ready) of \(progress.total) available videos ready").monospacedDigit()
                 if let current = progress.remaining.first {

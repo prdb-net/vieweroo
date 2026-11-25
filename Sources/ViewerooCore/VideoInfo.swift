@@ -20,7 +20,17 @@ public struct VideoInfo: Codable, Hashable, Sendable {
         return "SD"
     }
 
+    /// The video track's properties together with the movie duration from the same open asset.
+    public struct Probe: Sendable {
+        public let info: VideoInfo
+        public let duration: Double?
+    }
+
     public static func read(from url: URL) async throws -> VideoInfo? {
+        try await probe(url)?.info
+    }
+
+    public static func probe(_ url: URL) async throws -> Probe? {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first,
               let format = try await track.load(.formatDescriptions).first else { return nil }
@@ -39,8 +49,10 @@ public struct VideoInfo: Codable, Hashable, Sendable {
         case "mp4v": codec = "MPEG-4 Visual"
         default: codec = bytes.allSatisfy { (32...126).contains($0) } ? (code ?? "Unknown") : String(format: "0x%08X", subtype)
         }
-        return VideoInfo(width: Int(size.width), height: Int(size.height), codec: codec,
-                         container: containerName(at: url), frameRate: fps.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
+        let info = VideoInfo(width: Int(size.width), height: Int(size.height), codec: codec,
+                             container: containerName(at: url), frameRate: fps.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
+        let duration = (try? await asset.load(.duration).seconds).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        return Probe(info: info, duration: duration)
     }
 
     private static func containerName(at url: URL) -> String? {

@@ -170,13 +170,16 @@ extension Catalog {
         }
     }
 
-    public func storeVideoInfo(_ info: VideoInfo, for entry: CatalogEntry) async throws {
+    /// Keep a known duration when the probe could not read one.
+    public func storeVideoInfo(_ info: VideoInfo, duration: Double? = nil, for entry: CatalogEntry) async throws {
         let data = try JSONEncoder().encode(info)
+        let seconds = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         try await database.write { db in
             try Task.checkCancellation()
             try db.execute(sql: """
-                UPDATE entry SET videoInfo = ? WHERE id = ? AND path = ? AND fileSize = ? AND modified = ?
-                """, arguments: [data, entry.id, entry.path, entry.fileSize, entry.modified])
+                UPDATE entry SET videoInfo = ?, duration = COALESCE(?, duration)
+                WHERE id = ? AND path = ? AND fileSize = ? AND modified = ?
+                """, arguments: [data, seconds, entry.id, entry.path, entry.fileSize, entry.modified])
         }
     }
 

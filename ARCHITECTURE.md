@@ -50,7 +50,7 @@ Read original media in place. The explicit Rename File action changes the filena
 
 Queue newly added folders alongside pending scans. Leave a running scan in progress. Opening a library checks whether its source folders are reachable. The user can start a full rescan with **Refresh Library**. Make each discovered file available while the scan continues and resolve its metadata in the background.
 
-Read the local video track in the background after discovery, including available entries from older catalogs. Cache encoded dimensions, codec, frame rate and the identified container in SQLite. Derive the quality label from the cached dimensions, retain the information offline and invalidate it when the file changes.
+Read the local video track in the background after discovery, including available entries from older catalogs. Cache encoded dimensions, codec, frame rate, the identified container and the movie duration in SQLite. Derive the quality label from the cached dimensions, retain the information offline and invalidate it when the file changes.
 
 Use OSHash for MVP file identification and reuse the stored hash for unchanged files. Check the Swift implementation against PRDB's reference files and expected results. Defer perceptual hashing (pHash) until after the MVP.
 
@@ -70,7 +70,7 @@ Store the portions of the video timeline actually played in each session. Pausin
 
 Rank Watch History by the sum of weighted plays. For each qualifying session, count 80% of the fraction of the movie timeline covered and 20% of watch time divided by the shorter of the movie duration and 30 minutes. Cap each fraction at one. Merge overlapping intervals within a session for coverage and include repeated passes in watch time. Break ties by total watch time. Show the raw play count and watch time on the tile.
 
-Persist the local movie duration when playback begins. Backfill available movies with qualifying history from older catalogs in the background. Until the duration is known, count only the time component using the 30-minute threshold.
+Read the movie duration together with the local video track and persist it, including for available movies from older catalogs. Playback also stores the duration of a movie that has none yet. Until the duration is known, count only the time component using the 30-minute threshold.
 
 ### 7. Gate the interface, playback and catalog API with the app lock
 

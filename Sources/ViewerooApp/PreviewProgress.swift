@@ -2,7 +2,7 @@ import Foundation
 import ViewerooCore
 
 struct PreviewProgress {
-    enum Phase { case idle, checking, preparing, readingDurations }
+    enum Phase { case idle, checking, preparing }
     struct Failure: Identifiable {
         let entry: CatalogEntry
         let reason: String
