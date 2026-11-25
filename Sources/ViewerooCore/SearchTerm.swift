@@ -4,11 +4,17 @@ import Foundation
 /// `Studio.24.01.05.Some.Title.XXX.1080p.MP4-GRP` contains separators, a date and encoding
 /// labels that never occur in a PRDB title.
 public enum SearchTerm {
-    private static let noise: Set<String> = [
-        "xxx", "hd", "fhd", "uhd", "sd", "hq", "4k", "8k", "hdr", "sdr", "10bit", "8bit",
-        "h264", "h265", "x264", "x265", "hevc", "avc", "av1", "vp9", "aac", "ac3", "mp3",
-        "web", "webrip", "webdl", "hdrip", "bluray", "bdrip", "dvdrip", "hdtv",
-        "mp4", "m4v", "mov", "mkv", "avi", "wmv", "repack", "proper", "internal"
+    /// Encoding and container labels, which no title contains.
+    private static let labels: Set<String> = [
+        "xxx", "fhd", "uhd", "4k", "10bit", "8bit",
+        "h264", "h265", "x264", "x265", "hevc", "avc", "av1", "vp9", "aac", "ac3",
+        "webrip", "webdl", "hdrip", "bluray", "bdrip", "dvdrip", "hdtv",
+        "mp4", "m4v", "mov", "mkv", "avi", "wmv"
+    ]
+    /// Labels that are also ordinary words. They are dropped only from a release-style
+    /// name, which has no spaces, so "The Proper Way" keeps its words.
+    private static let releaseWords: Set<String> = [
+        "hd", "sd", "hq", "8k", "hdr", "sdr", "mp3", "web", "repack", "proper", "internal"
     ]
 
     public static func clean(_ stem: String, studio: String? = nil) -> String {
@@ -21,9 +27,9 @@ public enum SearchTerm {
         if !spaced { text = text.replacingOccurrences(of: "-", with: " ") }
         var words = text.split(whereSeparator: \.isWhitespace).map(String.init)
 
-        words.removeAll { word in
+        func isLabel(_ word: String) -> Bool {
             let lower = word.lowercased()
-            if noise.contains(lower) { return true }
+            if labels.contains(lower) || (!spaced && releaseWords.contains(lower)) { return true }
             // 720p, 1080p, 2160p, 60fps and similar encoding labels.
             for suffix in ["p", "fps", "kbps"] where lower.hasSuffix(suffix) {
                 let number = lower.dropLast(suffix.count)
@@ -31,6 +37,14 @@ public enum SearchTerm {
             }
             return false
         }
+        // A release name ends in its group after a hyphen, as in "….1080p.MP4-GRP". Take the
+        // last word for the group only when it follows a label, so "Some-Title" keeps both words.
+        if !spaced, let group = stem.split(separator: "-").last, stem.contains("-"),
+           !group.contains("."), !group.contains("_"), words.count >= 2, words.last == String(group),
+           isLabel(words[words.count - 2]) {
+            words.removeLast()
+        }
+        words.removeAll(where: isLabel)
         if let index = dateStart(in: words) { words.removeSubrange(index..<(index + 3)) }
         words.removeAll(where: isCompactDate)
         if let studio { removePrefix(studio, from: &words) }
@@ -66,7 +80,7 @@ public enum SearchTerm {
         text.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
-    /// The studio is searched through its own filter. In the term it only narrows the titles.
+    /// A release name starts with its studio, which a PRDB title does not repeat.
     private static func removePrefix(_ studio: String, from words: inout [String]) {
         let target = letters(studio)
         guard !target.isEmpty else { return }

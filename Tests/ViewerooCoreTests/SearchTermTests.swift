@@ -4,7 +4,12 @@ import Testing
 
 @Test func releaseNamesBecomeTitleWords() {
     #expect(SearchTerm.clean("Paper.Lantern.24.01.05.Lanterns.at.Dusk.XXX.1080p.MP4-GRP", studio: "Paper Lantern")
-            == "Lanterns at Dusk GRP")
+            == "Lanterns at Dusk")
+    // Without a label before it, the word after a hyphen belongs to the title.
+    #expect(SearchTerm.clean("Lanterns-Dusk") == "Lanterns Dusk")
+    #expect(SearchTerm.clean("Lanterns.at.Dusk.WEB.x264-GRP") == "Lanterns at Dusk")
+    // Words that are also labels stay in a name written with spaces.
+    #expect(SearchTerm.clean("The Proper Way to Web HD 1080p") == "The Proper Way to Web HD")
     #expect(SearchTerm.clean("PaperLantern_2024-01-05_Copper_Kite_[2160p]", studio: "Paper Lantern") == "Copper Kite")
     #expect(SearchTerm.clean("Low Water (720p) x265") == "Low Water")
     #expect(SearchTerm.clean("Half-Light Harbor 60fps") == "Half-Light Harbor")
