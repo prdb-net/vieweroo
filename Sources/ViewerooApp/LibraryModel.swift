@@ -29,16 +29,18 @@ final class LibraryModel {
     @ObservationIgnored let cache: PreviewCache
     @ObservationIgnored private let preferences: UserDefaults
     @ObservationIgnored private let directory: URL
-    @ObservationIgnored private var validated = false
+    @ObservationIgnored var validated = false
     @ObservationIgnored private(set) var catalog: Catalog?
+    // The state below is written by the model's own files only: this one,
+    // LibraryScanning.swift and LibraryLookups.swift. Views read it.
     /// Every background task of the open library. Replaced when the library session ends.
-    @ObservationIgnored private var work = LibraryWork()
-    @ObservationIgnored private var scanQueue: [CatalogSource] = []
-    @ObservationIgnored private var scanningSourceID: Int64?
-    @ObservationIgnored private var refreshRequested = false
-    @ObservationIgnored private var scanToken = UUID()
-    @ObservationIgnored private var panel: NSOpenPanel?
-    @ObservationIgnored private var previewToken = UUID()
+    @ObservationIgnored var work = LibraryWork()
+    @ObservationIgnored var scanQueue: [CatalogSource] = []
+    @ObservationIgnored var scanningSourceID: Int64?
+    @ObservationIgnored var refreshRequested = false
+    @ObservationIgnored var scanToken = UUID()
+    @ObservationIgnored var panel: NSOpenPanel?
+    @ObservationIgnored var previewToken = UUID()
     var phase = Gate.starting
     @ObservationIgnored private var catalogServer: CatalogAPIServer?
     @ObservationIgnored private let catalogPort: UInt16
@@ -95,23 +97,23 @@ final class LibraryModel {
     private static let cinemaSuggestionsKey = "showsCinemaSuggestions"
     var playing: Bool { mainPlayer.entryID != nil }
     var scanBusy = false
-    private(set) var scanningFolder: String?
-    private(set) var lookupActivity: String?
-    private(set) var previews = PreviewProgress()
-    private(set) var subscriptionRequired = false
-    private var lookupStatus: String?
+    var scanningFolder: String?
+    var lookupActivity: String?
+    var previews = PreviewProgress()
+    var subscriptionRequired = false
+    var lookupStatus: String?
     var networkStatus: String? {
         subscriptionRequired ? PRDBError.subscriptionRequired.localizedDescription : lookupStatus
     }
     @ObservationIgnored let posterPrepared = PassthroughSubject<URL, Never>()
-    @ObservationIgnored private let lookupFailures = LibraryJobs.Failures()
+    @ObservationIgnored let lookupFailures = LibraryJobs.Failures()
     @ObservationIgnored private var studioCache: StudioOptionsCache?
     /// Files whose video track could not be read during this session, by entry, size and date.
-    @ObservationIgnored private var unreadableVideoInfo = Set<String>()
+    @ObservationIgnored var unreadableVideoInfo = Set<String>()
     /// Changes whenever the inputs of `visibleVideos` other than the visit change.
     @ObservationIgnored private(set) var collectionRevision = 0
     @ObservationIgnored var visibleVideosCache: (key: VisibleVideosKey, videos: [CatalogEntry])?
-    @ObservationIgnored private var automaticCovers: AutomaticCollectionCovers?
+    @ObservationIgnored var automaticCovers: AutomaticCollectionCovers?
     @ObservationIgnored private var snapshotRequested = false
     @ObservationIgnored private var editRevision = 0
     /// Entries with newly recorded playback, until the next coalesced refresh.
@@ -157,49 +159,6 @@ final class LibraryModel {
         try enter()
     }
 
-    func replacePRDBKey(_ input: String) async throws {
-        guard phase == .ready else { throw CancellationError() }
-        let stamp = work
-        let key = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if try access.apiKey() == key {
-            do { try await client.validate(key: key) }
-            catch {
-                guard work === stamp, !Task.isCancelled else { throw CancellationError() }
-                handleNetwork(error, key: key)
-                throw error
-            }
-        } else {
-            try await access.validateAndStore(key: key, client: client, while: { self.work === stamp })
-        }
-        try Task.checkCancellation()
-        guard phase == .ready, work === stamp else { throw CancellationError() }
-        validated = true
-        subscriptionRequired = false
-        lookupStatus = nil
-        startLookups()
-        notify("PRDB key verified")
-    }
-
-    /// Videos whose finished lookup found no title and that the user has not decided on.
-    var unmatchedCount: Int {
-        entries.lazy.filter { $0.match == nil && !$0.confirmed && !$0.needsLookup && $0.availability == .available }.count
-    }
-
-    func retryUnmatched() {
-        guard phase == .ready, let libraryID else { return }
-        var queued = 0
-        guard change(nil, { queued = try $0.retryUnmatched(libraryID: libraryID) }) else { return }
-        notify(queued == 1 ? "Checking 1 video again" : "Checking \(queued) videos again")
-        if queued > 0 { startLookups() }
-    }
-
-    func retrySubscription() {
-        guard phase == .ready, subscriptionRequired else { return }
-        validated = false
-        subscriptionRequired = false
-        lookupStatus = nil
-        startLookups()
-    }
     func unlock(pin: String) throws { try access.unlock(pin: pin); try enter() }
     func recover(pin: String) async throws { try await access.recoverPIN(new: pin); try enter() }
 
@@ -292,7 +251,7 @@ final class LibraryModel {
         previews = PreviewProgress(); lookupActivity = nil
     }
 
-    private func conceal(_ gate: Gate) {
+    func conceal(_ gate: Gate) {
         stopCatalogAPI()
         stopWork()
         ArtworkCache.shared.removeAll()
@@ -308,29 +267,6 @@ final class LibraryModel {
     }
 
     func lock() { if pinEnabled { conceal(.locked) } }
-
-    func handleNetwork(_ error: Error, key: String) {
-        guard phase == .ready, (try? access.apiKey()) == key else { return }
-        if case PRDBError.invalidKey = error {
-            validated = false
-            subscriptionRequired = false
-            setupReason = "PRDB rejected the saved key. Enter a valid replacement to reopen your libraries."
-            conceal(pinEnabled ? .locked : .setup)
-            do { try access.reject(key: key) }
-            catch { failure = error.localizedDescription; phase = .failed }
-        } else if !Task.isCancelled {
-            switch error {
-            case PRDBError.subscriptionRequired:
-                subscriptionRequired = true
-                lookupActivity = nil
-                work[.lookups]?.cancel()
-            case PRDBError.rateLimited:
-                lookupStatus = "PRDB’s request limit was reached. Pending lookups will retry."
-            default:
-                lookupStatus = "PRDB unavailable. Pending lookups will retry."
-            }
-        }
-    }
 
     func selectLibrary(_ id: Int64?, reopen: Bool = false) {
         guard phase == .ready, reopen || id == nil || id != libraryID else { return }
@@ -487,19 +423,6 @@ final class LibraryModel {
             history.removeStudio(name)
         }
         if deleted { recognizeStudios() }
-    }
-
-    /// Folder and file name clues depend on the studio names of the library. Look again at
-    /// videos without a studio after a studio was created, renamed or deleted.
-    func recognizeStudios() {
-        guard phase == .ready, let catalog, let id = libraryID else { return }
-        let stamp = work
-        work[.studioRecognition]?.cancel()
-        work[.studioRecognition] = Task(priority: .utility) {
-            let changed = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
-            guard work === stamp, !Task.isCancelled, changed > 0 else { return }
-            reload()
-        }
     }
 
     func goBack() {
@@ -719,96 +642,6 @@ final class LibraryModel {
         let remaining = (try? catalog.libraries()) ?? libraries
         selectLibrary(remaining.contains { $0.id == libraryID } ? libraryID : remaining.first?.id, reopen: true)
     }
-    func pickSource() {
-        guard phase == .ready, libraryID != nil, let window = NSApp.keyWindow, panel == nil else { return }
-        let picker = NSOpenPanel()
-        picker.canChooseDirectories = true; picker.canChooseFiles = false
-        picker.prompt = "Add Folder"; picker.allowsMultipleSelection = true
-        panel = picker
-        let stamp = work
-        picker.beginSheetModal(for: window) { [weak self] response in
-            guard let self, self.work === stamp else { return }
-            self.panel = nil
-            guard response == .OK else { return }
-            self.addSources(picker.urls)
-        }
-    }
-
-    func addSources(_ urls: [URL]) {
-        guard phase == .ready, let libraryID else { return }
-        guard !urls.isEmpty else { return }
-        let saved = change(urls.count == 1 ? "Source folder saved" : "Source folders saved") { db in
-            for url in urls { _ = try db.addSource(libraryID: libraryID, url: url) }
-        }
-        // A multi-folder selection may have saved earlier folders before a later one failed.
-        if !saved { reload() }
-        scanCurrentSources(requested: false)
-    }
-
-    func refresh() {
-        guard phase == .ready, libraryID != nil else { return }
-        work[.availability]?.cancel()
-        unreadableVideoInfo.removeAll()
-        scanCurrentSources(requested: true)
-    }
-
-    private func scanCurrentSources(requested: Bool) {
-        guard let catalog, let libraryID else { return }
-        do {
-            let sources = try catalog.sources(libraryID: libraryID)
-            let pending = requested ? sources : sources.filter { $0.scanPending && $0.online }
-            if requested || !pending.isEmpty { scan(pending, requested: requested) }
-        } catch { message = error.localizedDescription }
-    }
-
-    private func scan(_ list: [CatalogSource], requested: Bool = false) {
-        guard let catalog else { return }
-        refreshRequested = refreshRequested || requested
-        var queued = Set(scanQueue.map(\.id))
-        for source in list where (requested || source.id != scanningSourceID) && queued.insert(source.id).inserted {
-            scanQueue.append(source)
-        }
-        guard !scanBusy else { return }
-        let token = UUID()
-        scanToken = token; scanBusy = true
-        work[.scan] = Task {
-            var errors: [String] = []
-            while true {
-                guard scanToken == token, !Task.isCancelled else { return }
-                if scanQueue.isEmpty {
-                    await reload()?.value
-                    guard scanToken == token, !Task.isCancelled else { return }
-                    if scanQueue.isEmpty { break }
-                }
-                let source = scanQueue.removeFirst()
-                scanningSourceID = source.id
-                scanningFolder = source.url.lastPathComponent
-                let task = Task.detached(priority: .utility) {
-                    // Scanner reports each committed batch serially on its worker.
-                    let throttle = DiscoveryUpdates()
-                    try CatalogScanner(catalog: catalog).scan(source: source) {
-                        if throttle.shouldRefresh() {
-                            Task { @MainActor in if self.scanToken == token { self.reload() } }
-                        }
-                    }
-                }
-                do { try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() } }
-                catch { if !Task.isCancelled { errors.append("\(source.url.lastPathComponent) (\(error.localizedDescription))") } }
-                guard scanToken == token else { return }
-                scanningSourceID = nil
-            }
-            scanBusy = false; scanningFolder = nil
-            if !errors.isEmpty {
-                message = "Some folders could not be scanned: " + errors.joined(separator: ", ")
-            } else if refreshRequested {
-                notify("Library refreshed")
-            }
-            refreshRequested = false
-            generatePreviews()
-            startLookups()
-        }
-    }
-
     func renameFile(_ entry: CatalogEntry, basename: String) async throws {
         guard phase == .ready, detailID == entry.id, let catalog else { throw FileRenameError.unavailable }
         let stamp = work
@@ -833,105 +666,6 @@ final class LibraryModel {
 
     func previewDirectory(_ entry: CatalogEntry) -> URL {
         cache.directory(for: entry)
-    }
-
-    private func readVideoInfo(in entries: [CatalogEntry], catalog: Catalog) {
-        work[.videoInfo]?.cancel()
-        work[.videoInfo] = Task(priority: .utility) {
-            let updates = DiscoveryUpdates()
-            var pendingReload = false
-            // Older catalogs know the video track of an entry but not yet its duration.
-            for entry in entries where entry.videoInfo == nil || entry.duration == nil {
-                guard !Task.isCancelled else { return }
-                let identity = "\(entry.id):\(entry.fileSize):\(entry.modified)"
-                guard !unreadableVideoInfo.contains(identity) else { continue }
-                do {
-                    guard let probe = try await VideoInfo.probe(entry.url) else {
-                        unreadableVideoInfo.insert(identity)
-                        continue
-                    }
-                    try Task.checkCancellation()
-                    try await catalog.storeVideoInfo(probe.info, duration: probe.duration, for: entry)
-                    guard !Task.isCancelled else { return }
-                    if probe.duration == nil { unreadableVideoInfo.insert(identity) }
-                    pendingReload = true
-                    if entry.id == detailID || updates.shouldRefresh() {
-                        reload()
-                        pendingReload = false
-                    }
-                } catch {
-                    // Probe a failing file again after it changes, on refresh or on the next launch.
-                    if !Task.isCancelled { unreadableVideoInfo.insert(identity) }
-                }
-            }
-            if pendingReload && !Task.isCancelled { reload() }
-        }
-    }
-
-    private func generatePreviews(only selection: [CatalogEntry]? = nil) {
-        guard let catalog else { return }
-        work[.previews]?.cancel()
-        let token = UUID()
-        previewToken = token
-        let pending = (selection ?? entries).filter { $0.availability == .available }
-        // A rename keeps the cached video info. Leave a running probe of the library alone.
-        if selection == nil { readVideoInfo(in: pending, catalog: catalog) }
-        previews = PreviewProgress(phase: .checking)
-        work[.previews] = Task(priority: .utility) {
-            guard let missing = try? await PreviewProgress.missing(in: pending, cache: cache),
-                  previewToken == token else { return }
-            previews = PreviewProgress(phase: .preparing, total: pending.count, remaining: missing)
-            var failuresChanged = false
-            let finished = await withTaskGroup(of: (CatalogEntry, URL, (any Error)?).self) { group in
-                var queue = missing.makeIterator()
-                var running = 0
-                while true {
-                    while running < PreviewProgress.workers, let entry = queue.next() {
-                        let directory = previewDirectory(entry)
-                        running += 1
-                        group.addTask { [cache] in
-                            do {
-                                _ = try await cache.prepare(media: entry.url, directory: directory)
-                                return (entry, directory, nil)
-                            } catch { return (entry, directory, error) }
-                        }
-                    }
-                    guard let (entry, directory, failure) = await group.next() else { return true }
-                    running -= 1
-                    guard previewToken == token, !Task.isCancelled else {
-                        group.cancelAll()
-                        return false
-                    }
-                    if let failure {
-                        previews.failures.append(.init(entry: entry, reason: failure.localizedDescription))
-                        if case PreviewError.unsupportedVideo = failure, entry.playbackFailure != failure.localizedDescription {
-                            failuresChanged = true
-                            let message = failure.localizedDescription
-                            // The catalog write must not hold up the main thread behind a scan.
-                            _ = try? await Task.detached(priority: .utility) {
-                                try catalog.setPlaybackFailure(entryID: entry.id, message: message,
-                                                               fileSize: entry.fileSize, modified: entry.modified)
-                            }.value
-                            guard previewToken == token, !Task.isCancelled else {
-                                group.cancelAll()
-                                return false
-                            }
-                        }
-                    } else {
-                        posterPrepared.send(directory)
-                        if automaticCovers?.candidates.values.contains(where: { $0.contains(where: { $0.id == entry.id }) }) == true {
-                            automaticCovers = nil
-                            reload()
-                        }
-                    }
-                    previews.finish(entry)
-                }
-            }
-            guard finished, previewToken == token else { return }
-            previews.phase = .idle
-            previews.remaining = []
-            if failuresChanged { reload() }
-        }
     }
 
     func play(_ selection: CatalogEntry, at position: Double? = nil, suggested: Bool = false) {
@@ -1051,80 +785,5 @@ final class LibraryModel {
     func endPlayback() {
         mainPlayer.stop()
         reload()
-    }
-
-    private func startLookups() {
-        guard let catalog, let key = try? access.apiKey() else { return }
-        work[.lookups]?.cancel()
-        lookupActivity = nil
-        let id = libraryID, stamp = work, client = client
-        work[.lookups] = Task(priority: .utility) {
-            await work[.snapshot]?.value
-            guard work === stamp, !Task.isCancelled else { return }
-            if let id {
-                var recognized = 0
-                if entries.contains(where: \.needsLookup) {
-                    lookupActivity = "Recognizing studios…"
-                    recognized = (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)) ?? 0
-                    guard work === stamp, !Task.isCancelled else { return }
-                }
-                // Also covers studios that were created before this version recognized them.
-                recognized += (try? await LibraryJobs.detectStudios(libraryID: id, catalog: catalog, scope: .unassigned)) ?? 0
-                guard work === stamp, !Task.isCancelled else { return }
-                lookupActivity = nil
-                if recognized > 0 { reload() }
-            }
-            while !Task.isCancelled && !subscriptionRequired {
-                do {
-                    if !validated {
-                        lookupActivity = "Checking access…"
-                        try await client.validate(key: key)
-                        try Task.checkCancellation()
-                        validated = true
-                    }
-                    // The catalog remembers the refresh, so a relaunch does not download the directory again.
-                    let refreshed = try? catalog.studioDirectoryRefreshed()
-                    if let id, refreshed.map({ abs(Date().timeIntervalSince($0)) > 86_400 }) ?? true {
-                        lookupActivity = "Updating studio directory…"
-                        let directory = try await client.studios(key: key)
-                        try Task.checkCancellation()
-                        // Thousands of sites in one transaction. Keep the main thread free.
-                        try await Task.detached(priority: .utility) { try catalog.saveStudios(directory) }.value
-                        try await LibraryJobs.detectStudios(libraryID: id, catalog: catalog)
-                        try Task.checkCancellation()
-                        reload()
-                    }
-                    if let id, entries.contains(where: { $0.needsLookup && $0.availability == .available }) {
-                        lookupActivity = "Matching videos…"
-                        try await LibraryJobs.identify(libraryID: id, catalog: catalog, key: key, client: client,
-                                                      failures: lookupFailures) {
-                            await MainActor.run { if self.work === stamp { _ = self.reload() } }
-                        }
-                    }
-                    guard work === stamp, !Task.isCancelled else { return }
-                    lookupStatus = nil
-                } catch {
-                    guard work === stamp, !Task.isCancelled else { return }
-                    lookupActivity = nil
-                    handleNetwork(error, key: key)
-                    if phase != .ready || subscriptionRequired { return }
-                }
-                lookupActivity = nil
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-    }
-}
-
-// Coalesce incremental discoveries while preserving the first visible result.
-private final class DiscoveryUpdates: @unchecked Sendable {
-    private let lock = NSLock()
-    private var last = Date.distantPast
-    func shouldRefresh() -> Bool {
-        lock.withLock {
-            let now = Date()
-            guard now.timeIntervalSince(last) >= 0.6 else { return false }
-            last = now; return true
-        }
     }
 }
