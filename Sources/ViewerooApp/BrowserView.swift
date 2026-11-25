@@ -207,6 +207,13 @@ struct BrowserView: View {
             guard case let .video(id) = model.visit.selectedTile else { return }
             DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) }
         }
+        .onAppear {
+            // The restored offset may have been saved at another width of the grid, with the
+            // details open or closed. Bring the video the visit returns to into view, after
+            // the scroll anchor has restored the offset. A visible tile does not move.
+            guard case let .video(id) = model.visit.selectedTile else { return }
+            DispatchQueue.main.async { DispatchQueue.main.async { proxy.scrollTo(id) } }
+        }
         }
     }
 
