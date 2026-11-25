@@ -10,6 +10,8 @@ final class ArtworkCache {
     /// The widest tile is 320 pt, drawn at two pixels per point.
     static let tilePixels = 640
     private let images = NSCache<NSString, NSImage>()
+    /// Counts the times the cache was emptied, so a decode that was under way is not kept.
+    private var generation = 0
 
     init() {
         // Decoded bytes. About 370 stills of 480 × 270 pixels.
@@ -21,16 +23,22 @@ final class ArtworkCache {
     func remove(_ key: String) { images.removeObject(forKey: key as NSString) }
 
     /// Locking conceals the library. Decoded artwork must not stay behind in memory.
-    func removeAll() { images.removeAllObjects() }
+    func removeAll() {
+        generation &+= 1
+        images.removeAllObjects()
+    }
 
     /// Return the cached image, or read and decode it off the main thread.
     func load(_ key: String, pixels: Int = tilePixels, data: @escaping @Sendable () async -> Data?) async -> NSImage? {
         if let cached = image(key) { return cached }
-        let decoded = await Task.detached(priority: .utility) { () -> CGImage? in
-            guard let bytes = await data(), !Task.isCancelled else { return nil }
+        let started = generation
+        let work = Task.detached(priority: .utility) { () -> CGImage? in
+            guard !Task.isCancelled, let bytes = await data(), !Task.isCancelled else { return nil }
             return Self.downsample(bytes, pixels: pixels)
-        }.value
-        guard let decoded else { return nil }
+        }
+        // A tile that scrolled away cancels its load, so visible tiles do not wait behind it.
+        let decoded = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+        guard let decoded, started == generation else { return nil }
         let image = NSImage(cgImage: decoded, size: NSSize(width: decoded.width, height: decoded.height))
         images.setObject(image, forKey: key as NSString, cost: decoded.bytesPerRow * decoded.height)
         return image
