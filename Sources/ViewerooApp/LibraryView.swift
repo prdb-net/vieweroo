@@ -215,7 +215,7 @@ struct LibraryView: View {
                     Label("Tags", systemImage: "tag").tag(Shelf.tags)
                     Label("Watch History", systemImage: "clock.arrow.circlepath").tag(Shelf.frequent)
                     Label("Playlists", systemImage: "list.and.film").tag(Shelf.playlists)
-                    Label("Settings", systemImage: "gearshape").tag(Shelf.settings)
+                    Label("Library Settings", systemImage: "gearshape").tag(Shelf.settings)
                 }
                 if !model.recentPlaylists.isEmpty {
                     Section("Recent Playlists") {

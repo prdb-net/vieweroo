@@ -14,7 +14,6 @@ enum ActionSymbol: String {
     case add = "plus"
     case edit = "pencil"
     case delete = "trash"
-    case remove = "minus"
     case manage = "gearshape"
     case refresh = "arrow.clockwise"
     case search = "magnifyingglass"

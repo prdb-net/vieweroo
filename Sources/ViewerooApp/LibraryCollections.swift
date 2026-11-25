@@ -74,7 +74,7 @@ extension LibraryModel {
         case let .performer(person): return person.name
         case let .playlist(id): return playlists.first { $0.id == id }?.name ?? "Playlist"
         case .playlists: return "Playlists"
-        case .settings: return "Settings"
+        case .settings: return "Library Settings"
         case .sources: return "Source Folders"
         }
     }

@@ -10,14 +10,17 @@ struct LibrarySettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VSpace.section) {
-                Text("Settings").font(.largeTitle.bold())
+                Text("Library Settings").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
                 HStack(spacing: VSpace.group) {
                     VStack(alignment: .leading, spacing: VSpace.unit) {
                         Text("Library name").font(.headline)
                         Text(library.name).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    IconActionButton(.edit, "Rename Library…", targetLabel: "Rename Library “\(library.name)”") { renaming = true }
+                    // This page has room for words, and a pencil or a gear here would be the third
+                    // settings symbol on the way to the folders.
+                    Button("Rename…") { renaming = true }
+                        .accessibilityLabel("Rename Library “\(library.name)”")
                 }
                 Divider()
                 HStack(spacing: VSpace.group) {
@@ -27,10 +30,13 @@ struct LibrarySettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    IconActionButton(.manage, "Manage Folders") { model.browse(.sources) }
+                    Button("Manage Folders…") { model.browse(.sources) }
                 }
                 Divider()
-                Button("Delete Library…", role: .destructive) { deleting = true }
+                Button(role: .destructive) { deleting = true } label: {
+                    // A bordered destructive button is not tinted on macOS.
+                    Text("Delete Library…").foregroundStyle(.red)
+                }
             }
             .frame(maxWidth: 640, alignment: .leading)
             .padding(VSpace.section)

@@ -38,10 +38,13 @@ struct SourcesView: View {
                                 }
                                 Spacer()
                                 if !source.online { Text("Offline").foregroundStyle(.secondary) }
-                                IconActionButton(.remove, "Remove Source Folder…", targetLabel: "Remove Source Folder “\(source.path)”") {
+                                Button("Remove…") {
                                     do { affected = try model.catalog?.sourceRemovalCount(source.id) ?? 0; removal = source }
                                     catch { model.message = error.localizedDescription }
-                                }.disabled(model.scanBusy)
+                                }
+                                .help("Remove Source Folder…")
+                                .accessibilityLabel("Remove Source Folder “\(source.path)”")
+                                .disabled(model.scanBusy)
                             }.padding(.vertical, VSpace.tight)
                             Divider()
                         }
