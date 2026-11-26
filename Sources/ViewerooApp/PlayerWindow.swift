@@ -8,6 +8,19 @@ final class PlayerWindow: NSObject, ObservableObject {
     private weak var window: NSWindow?
     @Published private(set) var fullScreen = false
     let keyboardActivity = PassthroughSubject<Void, Never>()
+    /// Marks the start (false) or end (true) of a loop. Returns whether the key was used.
+    var loopKey: ((_ end: Bool) -> Bool)?
+
+    /// The loop keys are [ and ]. Many layouts type them only with Option, as Option-5 and
+    /// Option-6 on a German keyboard, so the two keys at their place on a US keyboard, to the
+    /// right of P, work as well.
+    private static func loopKey(_ event: NSEvent) -> Bool? {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if event.characters == "[" && modifiers.isSubset(of: [.option]) { return false }
+        if event.characters == "]" && modifiers.isSubset(of: [.option]) { return true }
+        guard modifiers.isEmpty else { return nil }
+        return event.keyCode == 33 ? false : event.keyCode == 30 ? true : nil
+    }
     private var keyMonitor: Any?
     private var toolbarWasVisible: Bool?
     private var transitioning = false
@@ -38,6 +51,8 @@ final class PlayerWindow: NSObject, ObservableObject {
             guard let self, let window = self.window, event.window === window, window.attachedSheet == nil else { return event }
             // Any key brings back what faded during idle playback, in a window as in full screen.
             self.keyboardActivity.send()
+            if !(window.firstResponder is NSText), !event.isARepeat, let end = Self.loopKey(event),
+               self.loopKey?(end) == true { return nil }
             guard self.fullScreen, event.keyCode == 53,
                   event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return event }
             if !event.isARepeat { self.toggle() }

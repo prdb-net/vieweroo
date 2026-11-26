@@ -91,7 +91,7 @@ Offer **Cinema Mode** in the heading of each video collection. Disable it when t
 
 Offer full screen in the current window with a visible button, F and a double-click on the video. Escape first leaves full screen with playback continuing. Escape in the windowed player returns to the original browsing context. In full screen, fade the controls after three idle seconds during playback. In a window, fade only the recommendation list this way and keep the transport. Reveal them on pointer movement and keep them visible when paused, while adjusting controls or when VoiceOver is active.
 
-In the player, Space plays or pauses, the arrow keys skip ten seconds and one second with Shift, Up and Down change the volume, M mutes, N and P step to the next and previous video, [ and ] set a loop and F toggles full screen. Name the key in each control’s tooltip.
+In the player, Space plays or pauses, the arrow keys skip ten seconds and one second with Shift, Up and Down change the volume, M mutes, N and P step to the next and previous video, [ and ] set a loop and F toggles full screen. Accept the two keys at the place of [ and ] on a US keyboard too, because many layouts type brackets only with Option. Name the key in each control’s tooltip.
 
 ## Messages and motion
 

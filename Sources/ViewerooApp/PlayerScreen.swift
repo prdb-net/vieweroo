@@ -293,6 +293,15 @@ private struct PlayerOptions: View {
             .fixedSize()
             .disabled(controller.duration <= 0)
             .help("Loop a section between two points ([ and ])")
+            // A shortcut on a menu item works only while its menu is open, so the player
+            // window handles the loop keys itself (PlayerWindow.loopKey).
+            .onAppear {
+                window.loopKey = { [weak controller] end in
+                    guard let controller, controller.duration > 0 else { return false }
+                    if end { controller.markLoopEnd() } else { controller.markLoopStart() }
+                    return true
+                }
+            }
             HStack(spacing: VSpace.unit) {
                 Button(action: controller.toggleMute) {
                     Label(controller.muted ? "Unmute" : "Mute", systemImage: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
