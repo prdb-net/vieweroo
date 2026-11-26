@@ -2,7 +2,8 @@ name: macOS
 on: [push, pull_request]
 jobs:
   verify:
-    runs-on: macos-15
+    # Swift 6.3 and older crash while compiling the app. Xcode 27 has its own runner image.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Build the app
@@ -12,7 +13,7 @@ jobs:
       - name: Package the release ZIP
         run: ./scripts/package
   thread-sanitizer:
-    runs-on: macos-15
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Run isolated tests with Thread Sanitizer

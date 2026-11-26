@@ -4,7 +4,7 @@ Vieweroo is a native macOS video library and player for collections spread acros
 
 ## Build, test, and package
 
-Use an Apple Silicon Mac with Xcode 16.3 or later selected as the active developer directory and a Swift 6.1 or newer toolchain. Swift Package Manager downloads the pinned GRDB dependency on the first build. The app targets macOS 14 and later.
+Use an Apple Silicon Mac with Xcode 27 or later selected as the active developer directory and a Swift 6.4 or newer toolchain. Older Swift compilers crash while building the app. Swift Package Manager downloads the pinned GRDB dependency on the first build. The app targets macOS 14 and later.
 
 Run these three commands from the repository root.
 
