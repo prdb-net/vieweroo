@@ -83,7 +83,8 @@ import ViewerooCore
     // A saved position at or beyond the end (including a shortened file) restarts playback.
     controller.open(url: movie, title: "Colors", startAt: 60, previewDirectory: directory, history: history)
     defer { controller.stop() }
-    let deadline = ContinuousClock.now + .seconds(12)
+    // The CI runner plays and seeks several times slower than a desktop Mac.
+    let deadline = ContinuousClock.now + .seconds(30)
     while controller.position < 0.4, controller.error == nil, ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(30))
     }

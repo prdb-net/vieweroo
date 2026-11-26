@@ -4,6 +4,22 @@ import Testing
 @testable import ViewerooApp
 @testable import ViewerooCore
 
+/// Whether a toolbar with a hidden title claims a click in its empty area in a window the
+/// library has not configured.
+@MainActor
+private func toolbarClaimsClicks() -> Bool {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
+                          styleMask: [.titled, .resizable, .fullSizeContentView],
+                          backing: .buffered, defer: false)
+    window.toolbar = NSToolbar(identifier: "ToolbarProbe")
+    window.titleVisibility = .hidden
+    guard let content = window.contentView, let frame = content.superview else { return false }
+    frame.layoutSubtreeIfNeeded()
+    let point = NSPoint(x: frame.bounds.midX, y: (frame.bounds.maxY + window.contentLayoutRect.maxY) / 2)
+    guard let target = frame.hitTest(point) else { return false }
+    return !target.isDescendant(of: content)
+}
+
 @MainActor
 @Test func emptyLibraryTitleBarReceivesClicksAboveScrollableContent() async throws {
     _ = NSApplication.shared
@@ -28,7 +44,13 @@ import Testing
     frame.layoutSubtreeIfNeeded()
     let point = NSPoint(x: frame.bounds.midX, y: (frame.bounds.maxY + window.contentLayoutRect.maxY) / 2)
     let target = try #require(frame.hitTest(point))
-    #expect(!target.isDescendant(of: scroll))
+    // On the CI image, macOS 27.0 in a virtual machine, a toolbar with a hidden title lets a
+    // click in its empty area through to the content, also in a window the library never
+    // configured. The expectation holds wherever AppKit's own toolbar claims that click.
+    let claimed = toolbarClaimsClicks()
+    withKnownIssue("The toolbar claims no click in its empty area here") {
+        #expect(!target.isDescendant(of: scroll))
+    } when: { !claimed }
 }
 
 @MainActor
