@@ -226,6 +226,14 @@ private struct PlaybackTime: View {
 private struct PlaybackButtons: View {
     @ObservedObject var controller: PlayerController
 
+    /// Ten seconds, or one with Shift held. An arrow key shortcut also fires with Shift, so a
+    /// second shortcut for Shift and the same arrow would compete with it. Reading the
+    /// modifier of the event decides it the same way for the key and for a click.
+    private func skip(_ direction: Double) {
+        let fine = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        controller.seek(to: controller.position + direction * (fine ? 1 : 10))
+    }
+
     private var playLabel: String {
         if controller.ended { return "Replay" }
         return controller.wantsPlayback ? "Pause" : "Play"
@@ -233,7 +241,7 @@ private struct PlaybackButtons: View {
 
     var body: some View {
         HStack(spacing: VSpace.tight) {
-            Button { controller.seek(to: controller.position - 10) } label: {
+            Button { skip(-1) } label: {
                 Label("Back 10 seconds", systemImage: "gobackward.10")
             }
             .keyboardShortcut(.leftArrow, modifiers: [])
@@ -245,7 +253,7 @@ private struct PlaybackButtons: View {
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.space, modifiers: [])
             .help("\(playLabel) (Space)")
-            Button { controller.seek(to: controller.position + 10) } label: {
+            Button { skip(1) } label: {
                 Label("Forward 10 seconds", systemImage: "goforward.10")
             }
             .keyboardShortcut(.rightArrow, modifiers: [])
@@ -256,10 +264,6 @@ private struct PlaybackButtons: View {
         .background {
             // Shortcuts without a visible button of their own.
             Group {
-                Button("Back 1 second") { controller.seek(to: controller.position - 1) }
-                    .keyboardShortcut(.leftArrow, modifiers: .shift)
-                Button("Forward 1 second") { controller.seek(to: controller.position + 1) }
-                    .keyboardShortcut(.rightArrow, modifiers: .shift)
                 Button("Volume Up") { controller.stepVolume(by: 0.1) }
                     .keyboardShortcut(.upArrow, modifiers: [])
                 Button("Volume Down") { controller.stepVolume(by: -0.1) }
