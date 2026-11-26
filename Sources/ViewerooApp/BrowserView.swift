@@ -38,7 +38,10 @@ struct BrowserView: View {
             }
         }
         .onChange(of: model.detailID) { previous, current in
-            if previous != nil, current == nil, case let .video(id) = model.visit.selectedTile {
+            // Only Full Keyboard Access lets a button take the keyboard focus. Without it the
+            // request moved the focus to the search field, which then had the grid's keys.
+            if previous != nil, current == nil, case let .video(id) = model.visit.selectedTile,
+               NSApp.isFullKeyboardAccessEnabled {
                 focusedTitle = id
             }
         }
