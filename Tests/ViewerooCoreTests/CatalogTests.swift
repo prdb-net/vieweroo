@@ -236,6 +236,27 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(entries.contains(where: \.needsLookup))
     }
 
+    func testFilesRemovedBetweenScanAndHashingRemainPending() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        let media = Data(count: 131_072)
+        let first = try fixture.add("Synthetic Hash Probe A.mov", data: media)
+        let second = try fixture.add("Synthetic Hash Probe B.mov", data: media)
+        try fixture.scan()
+        try FileManager.default.removeItem(at: first)
+        try FileManager.default.removeItem(at: second)
+
+        let client = PRDBClient { _ in
+            XCTFail("Unreadable files should remain queued without a request")
+            throw PRDBError.invalidResponse
+        }
+        try await LibraryJobs.identify(libraryID: fixture.library.id, catalog: fixture.catalog,
+                                       key: "synthetic-hash-probe-key", client: client, updated: {})
+        let entries = try fixture.catalog.entries(libraryID: fixture.library.id)
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertTrue(entries.allSatisfy { $0.needsLookup && $0.hash == nil })
+    }
+
     func testRequestSpecificLookupFailuresDoNotHoldBackOtherVideos() async throws {
         let fixture = try LibraryFixture()
         defer { fixture.clean() }

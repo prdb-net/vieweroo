@@ -106,6 +106,12 @@ The library and one optional AppKit player window each own a player session. Eac
 
 The [interface guide](DESIGN.md) defines layout, spacing and feedback. Use one transient action notice in the unlocked window. Clear it on a library or access change. Keep form errors, persistent status and destructive confirmations at their point of use.
 
+### 12. Keep operational diagnostics in the macOS unified log
+
+Use the `net.prdb.vieweroo` subsystem. Write one summary per source scan and title-matching pass, with an outcome, elapsed time and aggregate counts. Count hash read failures and request-specific rejections per pass. Use debug level for idle matching passes. Record when the AirPlay HTTP fallback starts, when AVPlayer reports the item ready, and when the fallback fails.
+
+Use fixed event names, schema field names and technical error codes. Keep media titles, paths, hashes, searches, identifiers, stream URLs, credentials and free-form error descriptions out of diagnostics. macOS manages retention.
+
 ## MVP acceptance checks
 
 - **Identification.** Use the PRDB SDK's OpenAPI contract for `POST /videos/identify`. A batch contains at most 200 files. Associate each result with its input using the client-supplied `ref`. Test four distinct responses: a unique `OsHash` match links the title, a filename match offers a candidate for confirmation, a site-only result supplies a studio when the path supports it, and an ambiguous result leaves the title unresolved. Verify OSHash against the SDK’s [published OSHash tests](https://github.com/prdb-net/prdb-sdk/blob/bf647a6e2164b3cfcdb74bb37d54d9568f939aee/csharp/tests/Prdb.Hashing.Tests/OsHashTests.cs). The SDK’s `docs/video-hashing-vectors.json` covers perceptual hashing.

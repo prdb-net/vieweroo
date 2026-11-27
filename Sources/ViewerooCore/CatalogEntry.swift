@@ -42,8 +42,6 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
     public let title: String
     public var studio: String? { manualStudio ?? match?.studio?.name ?? detectedStudio }
 
-    private static let log = Logger(subsystem: "net.prdb.vieweroo", category: "catalog")
-
     init(_ row: Row) throws {
         localTitle = row["localTitle"]
         localDescription = row["localDescription"]
@@ -71,12 +69,11 @@ public struct CatalogEntry: Hashable, Identifiable, Sendable {
         playbackFailure = row["playbackFailure"]
         // Cached metadata must never keep the rest of the library from loading. An unreadable
         // value reads as absent: video info is probed again and the match can be found again.
-        let id = self.id
         func cached<T: Decodable>(_ type: T.Type, _ column: String) -> T? {
             guard let data: Data = row[column] else { return nil }
             do { return try JSONDecoder().decode(type, from: data) }
             catch {
-                Self.log.error("Ignoring unreadable \(column, privacy: .public) of entry \(id): \(error.localizedDescription, privacy: .public)")
+                ViewerooLog.catalog.error("Ignoring unreadable \(column, privacy: .public) (code \((error as NSError).code))")
                 return nil
             }
         }

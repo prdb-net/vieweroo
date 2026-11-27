@@ -112,6 +112,27 @@ import ViewerooCore
 }
 
 @MainActor
+@Test func airPlayFallbackReportsListenerFailure() async throws {
+    let movie = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".mp4")
+    try await writeColorMovie(to: movie, seconds: 2)
+    defer { try? FileManager.default.removeItem(at: movie) }
+    let controller = PlayerController { _ in
+        throw NSError(domain: NSURLErrorDomain, code: URLError.notConnectedToInternet.rawValue,
+                      userInfo: [NSLocalizedDescriptionKey: "Synthetic listener failure detail"])
+    }
+    let history = PlaybackHistory(begin: { 1 }, append: { _, _, _ in }, resume: { _ in })
+    controller.open(url: movie, title: "Colors", startAt: 0, previewDirectory: movie.deletingLastPathComponent(), history: history)
+    defer { controller.stop() }
+    try await waitUntil { controller.ready }
+    let item = try #require(controller.player.currentItem)
+    let rejection = NSError(domain: AVFoundationErrorDomain, code: AVError.externalPlaybackNotSupportedForAsset.rawValue)
+    NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: item,
+                                    userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey: rejection])
+    try await waitUntil { controller.error?.contains("Synthetic listener failure detail") == true }
+    #expect(!controller.waiting && !controller.wantsPlayback)
+}
+
+@MainActor
 private func waitUntil(_ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(10)
     while !condition() && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(30)) }
