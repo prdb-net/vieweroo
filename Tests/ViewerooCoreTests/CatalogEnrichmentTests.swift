@@ -3,6 +3,62 @@ import GRDB
 import Testing
 @testable import ViewerooCore
 
+@Test func catalogFileRenameChecksRevisionAndPreservesTheEntryOnConflict() throws {
+    let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let original = folder.appending(path: "Original.MOV")
+    let bytes = Data([1, 2, 3])
+    try bytes.write(to: original)
+    let catalog = try Catalog(path: ":memory:")
+    let library = try catalog.createLibrary(name: "Library")
+    let other = try catalog.createLibrary(name: "Other")
+    let source = try catalog.addSource(libraryID: library.id, url: folder)
+    let scanner = CatalogScanner(catalog: catalog)
+    try scanner.scan(source: source)
+    let entry = try #require(try catalog.entries(libraryID: library.id).first)
+    let route = "/v1/libraries/\(library.id)/entries/\(entry.id)/rename"
+    let api = CatalogAPI(catalog: catalog)
+    func revision() throws -> String {
+        try #require(try catalog.apiEntry(library: library.id, id: entry.id).metadata.revision)
+    }
+    func rename(_ name: String, revision: String, target: String? = nil) throws -> CatalogResponse {
+        let body = try JSONEncoder().encode(["basename": name, "revision": revision])
+        return api.respond(method: "POST", target: target ?? route, body: body)
+    }
+
+    let stale = try revision()
+    try catalog.setTags(entryID: entry.id, tags: ["Original"])
+    let current = try revision()
+    let occupied = folder.appending(path: "Taken.MOV")
+    try Data([9]).write(to: occupied)
+    #expect(try rename("New", revision: stale).status == "409 Conflict")
+    #expect(try rename("../Outside", revision: current).status == "400 Bad Request")
+    #expect(try rename(String(repeating: "x", count: 300), revision: current).status == "400 Bad Request")
+    #expect(try rename("Taken", revision: current).status == "409 Conflict")
+    let mismatched = "/v1/libraries/\(other.id)/entries/\(entry.id)/rename"
+    #expect(try rename("New", revision: current, target: mismatched).status == "404 Not Found")
+    #expect(try catalog.entry(entry.id)?.path == entry.path)
+    #expect(try Data(contentsOf: original) == bytes)
+    #expect(try Data(contentsOf: occupied) == Data([9]))
+
+    let session = try catalog.beginSession(entryID: entry.id)
+    try catalog.recordInterval(sessionID: session, start: 3, end: 18)
+    let response = try rename("New", revision: current)
+    #expect(response.status == "200 OK")
+    let json = try #require(JSONSerialization.jsonObject(with: response.data) as? [String: Any])
+    #expect(json["filename"] as? String == "New.MOV")
+    #expect(json["revision"] as? String == (try revision()))
+    #expect(json["revision"] as? String != current)
+    #expect(try Data(contentsOf: folder.appending(path: "New.MOV")) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: original.path))
+    try scanner.scan(source: source)
+    #expect(try catalog.entry(entry.id)?.watchTime == 15)
+    #expect(try catalog.entry(entry.id)?.tags == ["Original"])
+    try FileManager.default.removeItem(at: folder.appending(path: "New.MOV"))
+    #expect(try rename("Missing", revision: revision()).status == "409 Conflict")
+}
+
 @Test func enrichmentsSurviveMigrationAndRescanAndRespectConcurrentLibraryEdits() throws {
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -33,7 +33,7 @@ struct GeneralSettingsView: View {
                     copyStatus = nil
                     model.setCatalogAPIEnabled($0)
                 }))
-                Text("One key grants metadata access to all libraries on this Mac. Turning this off revokes the key.")
+                Text("One key grants access to all libraries on this Mac, including file renames. Turning this off revokes the key.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let url = model.catalogAPIURL {
                     HStack {

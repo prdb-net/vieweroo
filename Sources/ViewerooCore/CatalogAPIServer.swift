@@ -30,7 +30,7 @@ package final class CatalogAPIServer: @unchecked Sendable {
     }
 
     package func start(state: @escaping @Sendable (Result<UInt16, Error>) -> Void,
-                       changed: @escaping @Sendable (Int64) -> Void) {
+                       changed: @escaping @Sendable (CatalogAPIChange) -> Void) {
         listener.stateUpdateHandler = { [weak self] status in
             guard let self, !stopped else { return }
             switch status {
@@ -75,7 +75,7 @@ package final class CatalogAPIServer: @unchecked Sendable {
         }
     }
 
-    private func receive(_ request: CatalogRequest, changed: @escaping @Sendable (Int64) -> Void) {
+    private func receive(_ request: CatalogRequest, changed: @escaping @Sendable (CatalogAPIChange) -> Void) {
         guard !stopped else { return }
         request.connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] bytes, _, eof, error in
             guard let self, !stopped, error == nil else { request.connection.cancel(); return }
@@ -94,11 +94,11 @@ package final class CatalogAPIServer: @unchecked Sendable {
                 guard request.buffer.count == request.length else { request.reject("400 Bad Request"); return }
                 let target = request.target, body = request.buffer
                 work.async { [weak self] in
-                    guard let self else { return }
+                    guard let self, queue.sync(execute: { !self.stopped }) else { return }
                     let response = respond(method, target, body)
                     queue.async { [weak self] in
                         // A completed edit is committed even when the server stopped meanwhile.
-                        if let library = response.changedLibrary { changed(library) }
+                        if let change = response.change { changed(change) }
                         guard let self, !stopped else { return }
                         request.send(response)
                     }

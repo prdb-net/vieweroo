@@ -3,11 +3,12 @@ import Foundation
 import GRDB
 
 public enum FileRenameError: LocalizedError {
-    case invalidName, occupied, unavailable, scanning, recovery(String)
+    case invalidName, nameTooLong, occupied, unavailable, scanning, recovery(String)
 
     public var errorDescription: String? {
         switch self {
         case .invalidName: "Enter a file name without slashes, colons or control characters."
+        case .nameTooLong: "This file name is too long. Choose a shorter name."
         case .occupied: "This name is already in use. Choose another name."
         case .unavailable: "The file has changed or is unavailable. Refresh the library and try again."
         case .scanning: "A folder scan is in progress. Try again when it finishes."
@@ -21,14 +22,29 @@ extension Catalog {
     ///
     /// The catalog commits the new paths with a pending-rename record before the file moves.
     /// If the app stops in between, `finishInterruptedRenames` completes or undoes the rename.
-    public func renameFile(_ selection: CatalogEntry, basename input: String) throws {
+    @discardableResult
+    package func renameFile(_ selection: CatalogEntry, basename: String) throws -> [Int64: Set<Int64>] {
+        try renameFile(entryID: selection.id, basename: basename) { entry in
+            guard entry.path == selection.path, entry.fileSize == selection.fileSize,
+                  entry.modified == selection.modified else { throw FileRenameError.unavailable }
+        }.affectedEntries
+    }
+
+    func renameFile(entryID: Int64, libraryID: Int64, revision: String, basename: String) throws ->
+        (entry: CatalogEntry, affectedEntries: [Int64: Set<Int64>]) {
+        try renameFile(entryID: entryID, basename: basename, missing: EnrichmentError.missing) { entry in
+            guard entry.libraryID == libraryID else { throw EnrichmentError.missing }
+            guard try APIEntryMetadata(entry).revision == revision else { throw EnrichmentError.conflict }
+        }
+    }
+
+    private func renameFile(entryID: Int64, basename input: String, missing: any Error = FileRenameError.unavailable,
+                            validate: (CatalogEntry) throws -> Void) throws ->
+        (entry: CatalogEntry, affectedEntries: [Int64: Set<Int64>]) {
         let basename = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/:"))
         guard !basename.isEmpty, basename != ".", basename != "..",
               basename.rangeOfCharacter(from: forbidden) == nil else { throw FileRenameError.invalidName }
-        let source = selection.url
-        let name = basename + "." + source.pathExtension
-        let destination = source.deletingLastPathComponent().appendingPathComponent(name, isDirectory: false)
 
         let started = fileActivity.withLock { activity in
             guard activity.scans == 0, !activity.renaming else { return false }
@@ -38,22 +54,28 @@ extension Catalog {
         guard started else { throw FileRenameError.scanning }
         defer { fileActivity.withLock { $0.renaming = false } }
 
-        let changed = try database.write { db -> Bool in
-            guard let entry = try Self.fetchEntry(db, id: selection.id), entry.path == selection.path,
-                  entry.availability == .available else { throw FileRenameError.unavailable }
-            let info = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
-            guard info.isRegularFile == true, info.isSymbolicLink == false,
-                  info.fileSize.map(Int64.init) == selection.fileSize,
-                  info.contentModificationDate?.timeIntervalSince1970 == selection.modified else {
+        let (entry, source, affected) = try database.write { db -> (CatalogEntry, URL, [Int64: Set<Int64>]) in
+            guard let entry = try Self.fetchEntry(db, id: entryID) else { throw missing }
+            try validate(entry)
+            let source = entry.url
+            guard entry.availability == .available,
+                  let info = try? source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]),
+                  info.isRegularFile == true, info.isSymbolicLink == false,
+                  info.fileSize.map(Int64.init) == entry.fileSize,
+                  info.contentModificationDate?.timeIntervalSince1970 == entry.modified else {
                 throw FileRenameError.unavailable
             }
-            guard name != entry.filename else { return false }
-            try Self.updatePaths(db, of: source, to: name)
+            let name = basename + "." + source.pathExtension
+            guard name != entry.filename else { return (entry, source, [:]) }
+            let affected = try Self.updatePaths(db, of: source, to: name)
+            guard affected[entry.libraryID]?.contains(entryID) == true,
+                  let updated = try Self.fetchEntry(db, id: entryID) else { throw FileRenameError.unavailable }
             try db.execute(sql: "INSERT OR REPLACE INTO pendingRename(entryID, fromPath, toPath) VALUES (?, ?, ?)",
-                           arguments: [entry.id, source.path, destination.path])
-            return true
+                           arguments: [entryID, source.path, updated.path])
+            return (updated, source, affected)
         }
-        guard changed else { return }
+        guard !affected.isEmpty else { return (entry, affected) }
+        let destination = entry.url
 
         do {
             try Self.moveExclusively(from: source, to: destination)
@@ -62,15 +84,16 @@ extension Catalog {
             do {
                 try database.write { db in
                     try Self.updatePaths(db, of: destination, to: source.lastPathComponent)
-                    try db.execute(sql: "DELETE FROM pendingRename WHERE entryID = ?", arguments: [selection.id])
+                    try db.execute(sql: "DELETE FROM pendingRename WHERE entryID = ?", arguments: [entryID])
                 }
             } catch { throw FileRenameError.recovery(source.lastPathComponent) }
             throw error
         }
         // A remaining record only means that the next launch confirms the completed move.
         try? database.write { db in
-            try db.execute(sql: "DELETE FROM pendingRename WHERE entryID = ?", arguments: [selection.id])
+            try db.execute(sql: "DELETE FROM pendingRename WHERE entryID = ?", arguments: [entryID])
         }
+        return (entry, affected)
     }
 
     /// Complete a rename whose file moved, and undo one whose file did not.
@@ -99,22 +122,26 @@ extension Catalog {
 
     /// A selected source (or its parent) may be a symlink. Retain each library's selected
     /// directory spelling while updating references to this directory entry.
-    private static func updatePaths(_ db: Database, of file: URL, to name: String) throws {
+    @discardableResult
+    private static func updatePaths(_ db: Database, of file: URL, to name: String) throws -> [Int64: Set<Int64>] {
         let suffix = "/" + file.lastPathComponent
         let paths = try String.fetchAll(db, sql: """
             SELECT DISTINCT path FROM entry WHERE substr(path, -length(?)) = ?
             """, arguments: [suffix, suffix])
         let parent = file.deletingLastPathComponent().resolvingSymlinksInPath()
+        var affected: [Int64: Set<Int64>] = [:]
         for path in paths {
             let folder = URL(fileURLWithPath: path).deletingLastPathComponent()
             guard folder.resolvingSymlinksInPath() == parent else { continue }
             do {
-                try db.execute(sql: "UPDATE entry SET path = ? WHERE path = ?",
-                               arguments: [folder.appendingPathComponent(name).path, path])
+                let renamed = try Row.fetchAll(db, sql: "UPDATE entry SET path = ? WHERE path = ? RETURNING libraryID, id",
+                                               arguments: [folder.appendingPathComponent(name).path, path])
+                for row in renamed { affected[row["libraryID"], default: []].insert(row["id"]) }
             } catch let error as DatabaseError where error.extendedResultCode == .SQLITE_CONSTRAINT_UNIQUE {
                 throw FileRenameError.occupied
             }
         }
+        return affected
     }
 
     /// Compare the exact spelling, because a case-only rename leaves both names resolvable.
@@ -126,8 +153,12 @@ extension Catalog {
     private static func moveExclusively(from source: URL, to destination: URL) throws {
         guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
             let code = errno
-            if code == EEXIST { throw FileRenameError.occupied }
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            switch code {
+            case EEXIST: throw FileRenameError.occupied
+            case ENAMETOOLONG: throw FileRenameError.nameTooLong
+            case ENOENT: throw FileRenameError.unavailable
+            default: throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            }
         }
     }
 }

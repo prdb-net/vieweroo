@@ -62,11 +62,14 @@ extension Catalog {
     }
 
     public func createTag(libraryID: Int64, name: String) throws {
-        try database.write { db in
-            try db.execute(sql: "INSERT INTO tag(libraryID,name) VALUES (?,?) ON CONFLICT(libraryID,name) DO NOTHING",
-                           arguments: [libraryID, try Self.checkedTagName(name)])
-            guard db.changesCount == 1 else { throw CatalogError.duplicateTag }
-        }
+        _ = try database.write { db in try Self.createTag(db, libraryID: libraryID, name: name) }
+    }
+
+    static func createTag(_ db: Database, libraryID: Int64, name: String) throws -> Int64 {
+        try db.execute(sql: "INSERT INTO tag(libraryID,name) VALUES (?,?) ON CONFLICT(libraryID,name) DO NOTHING",
+                       arguments: [libraryID, try checkedTagName(name)])
+        guard db.changesCount == 1 else { throw CatalogError.duplicateTag }
+        return db.lastInsertedRowID
     }
 
     public func renameTag(_ id: Int64, to name: String) throws {
