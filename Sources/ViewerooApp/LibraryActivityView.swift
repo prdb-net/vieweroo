@@ -115,23 +115,19 @@ private struct LibraryActivityView: View {
                     let waiting = progress.remaining.dropFirst()
                     if !waiting.isEmpty {
                         DisclosureGroup("Waiting (\(waiting.count))", isExpanded: $showQueue) {
-                            if showQueue {
-                                LazyVStack(alignment: .leading, spacing: VSpace.unit) {
-                                    ForEach(waiting) { Text($0.title).lineLimit(2) }
-                                }
+                            LazyVStack(alignment: .leading, spacing: VSpace.unit) {
+                                ForEach(waiting) { Text($0.title).lineLimit(2) }
                             }
                         }
                     }
                 }
                 if !progress.failures.isEmpty {
                     DisclosureGroup("Failed (\(progress.failures.count))", isExpanded: $showFailures) {
-                        if showFailures {
-                            LazyVStack(alignment: .leading, spacing: VSpace.tight) {
-                                ForEach(progress.failures) { failure in
-                                    VStack(alignment: .leading) {
-                                        Text(failure.entry.title)
-                                        Text(failure.reason).font(.caption).foregroundStyle(.secondary)
-                                    }
+                        LazyVStack(alignment: .leading, spacing: VSpace.tight) {
+                            ForEach(progress.failures) { failure in
+                                VStack(alignment: .leading) {
+                                    Text(failure.entry.title)
+                                    Text(failure.reason).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -146,5 +142,6 @@ private struct LibraryActivityView: View {
             if offline > 0 { Text("\(offline) videos on offline drives").foregroundStyle(.secondary) }
             if missing > 0 { Text("\(missing) missing files").foregroundStyle(.secondary) }
         }
+        .disclosureGroupStyle(FullWidthDisclosureStyle())
     }
 }

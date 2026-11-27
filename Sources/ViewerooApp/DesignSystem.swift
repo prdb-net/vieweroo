@@ -10,6 +10,33 @@ enum VSpace {
     static let page: CGFloat = 32
 }
 
+struct FullWidthDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                configuration.isExpanded.toggle()
+            } label: {
+                HStack(spacing: VSpace.unit) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: VSpace.control)
+                    configuration.label
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, VSpace.unit)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if configuration.isExpanded {
+                configuration.content
+                    .padding(.leading, VSpace.control + VSpace.unit)
+            }
+        }
+    }
+}
+
 enum ActionSymbol: String {
     case add = "plus"
     case edit = "pencil"
