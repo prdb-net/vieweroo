@@ -70,7 +70,8 @@ struct CollectionFilters: Equatable {
         let studio = directory.studio(for: entry)
         guard studios.isEmpty || studios[studio.id] != nil else { return false }
         guard !term.isEmpty else { return true }
-        let fields = [entry.title, entry.filename, studio.name, studio.creator?.platform, studio.creator?.handle.map { "@" + $0 }]
+        let fields = [entry.title, entry.match?.alternativeTitle, entry.filename, studio.name,
+                      studio.creator?.platform, studio.creator?.handle.map { "@" + $0 }]
         return fields.contains { $0?.localizedCaseInsensitiveContains(term) == true }
             || entry.tags.contains { $0.localizedCaseInsensitiveContains(term) }
             || entry.match?.performers.contains { $0.name.localizedCaseInsensitiveContains(term) } == true

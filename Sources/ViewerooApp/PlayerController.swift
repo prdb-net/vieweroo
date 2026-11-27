@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import os
 import ViewerooCore
 
 @MainActor
@@ -131,6 +132,7 @@ final class PlayerController: ObservableObject {
                 guard let self, self.generation == token else { return }
                 if item.status == .failed { self.playbackFailed(item.error) }
                 if item.status == .readyToPlay, !self.ready {
+                    if self.mediaServer != nil { ViewerooLog.airPlay.notice("HTTP fallback item ready to play") }
                     self.ready = true
                     self.waiting = false
                     self.duration = max(0, item.duration.seconds.isFinite ? item.duration.seconds : 0)
@@ -232,6 +234,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func startAirPlayStream() {
+        ViewerooLog.airPlay.notice("Starting HTTP fallback")
         guard let sourceURL, sourceURL.isFileURL else { failAirPlay(nil); return }
         sample(playing: false)
         itemStartAt = handoffPosition
@@ -255,6 +258,11 @@ final class PlayerController: ObservableObject {
     }
 
     private func failAirPlay(_ underlying: Error?) {
+        if let underlying {
+            ViewerooLog.airPlay.error("HTTP fallback failed (code \((underlying as NSError).code))")
+        } else {
+            ViewerooLog.airPlay.error("HTTP fallback failed without an error code")
+        }
         sample(playing: false)
         itemStartAt = handoffPosition
         detachItemObservers()

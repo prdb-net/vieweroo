@@ -254,6 +254,13 @@ extension Catalog {
         migrator.registerMigration("catalog-state-v21") { db in
             try db.execute(sql: "CREATE TABLE catalogState (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)")
         }
+        migrator.registerMigration("catalog-hash-lookup-v22") { db in
+            try db.execute(sql: """
+                -- Keep duplicate hashes in cursor order even when the client omits the byte count.
+                CREATE INDEX entry_by_library_hash ON entry(libraryID, hash COLLATE NOCASE, id, fileSize)
+                WHERE hash IS NOT NULL
+                """)
+        }
         return migrator
     }
 }

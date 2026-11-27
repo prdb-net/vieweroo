@@ -56,6 +56,7 @@ final class LibraryModel {
     var studioDirectory = StudioDirectory() { didSet { collectionRevision &+= 1 } }
     var studioOptions: [StudioOption] { studioDirectory.options }
     var tags: [CatalogTag] = [] { didSet { collectionRevision &+= 1 } }
+    var prdbTagDirectory: PRDBTagDirectory?
     var playlists: [CatalogPlaylist] = []
     var recentPlaylists: [CatalogPlaylist] {
         Array(playlists.filter { $0.lastOpenedOrder > 0 }.sorted { $0.lastOpenedOrder > $1.lastOpenedOrder }.prefix(5))
@@ -173,6 +174,7 @@ final class LibraryModel {
             }
         }
         catalog = database
+        prdbTagDirectory = try? database.prdbTagDirectory()
         libraries = try database.libraries()
         phase = .ready
         startCatalogAPI()
@@ -265,6 +267,7 @@ final class LibraryModel {
         message = nil; libraryID = nil
         resetNavigation()
         libraries = []; sources = []; entries = []; playlists = []; tags = []; studioDirectory = StudioDirectory(); studioCache = nil; orderedIDs = []
+        prdbTagDirectory = nil
         titleRankCache = nil
         for window in NSApp.windows {
             if let sheet = window.attachedSheet { window.endSheet(sheet) }

@@ -126,7 +126,10 @@ def generate(root):
                     make_movie(path, index, palette, Path(stage))
                 actors = [cast[index % len(cast)], cast[(index + 3 + slot) % len(cast)]]
                 video = {"id": video_id, "title": title, "site": site,
-                         "actors": actors, "images": []}
+                         "actors": actors, "images": [],
+                         "alternativeTitle": f"{title} Study" if slot != 4 else None,
+                         "durationSeconds": 25 + index % 9 * 3 if slot != 4 else None,
+                         "tags": ["abstract", "color-study", "geometric", "motion-design"] if slot != 4 else []}
                 records.append({"osHash": oshash(path), "filesize": path.stat().st_size, "video": video})
         if len(set(record["osHash"] for record in records)) != len(records):
             raise ValueError("The test videos must have distinct OSHashes.")

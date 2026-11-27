@@ -65,10 +65,26 @@ Open **Vieweroo → Settings…** (⌘,), enable **Local catalog API** and choos
 
 ## Privacy and access
 
-PRDB receives the filename, file size, and available OSHash for identification. Folder names are evaluated on your Mac. PRDB also supplies candidate titles, artwork, studios, and cast. Ratings, tags, playlists, match corrections, and viewing history stay local.
+PRDB receives the filename, file size, and available OSHash for identification. Folder names are evaluated on your Mac. PRDB also supplies candidate titles, artwork, studios, cast, and catalog metadata. Matched videos show available alternate titles, catalog duration, and PRDB tags in **PRDB Metadata**. Existing matches receive these fields in the background as you open each library. Ratings, personal tags, playlists, match corrections, and viewing history stay local.
 
 If your subscription no longer includes API access, you can still browse and play your local library. After restoring the subscription, open the sidebar activity details and choose **Retry PRDB**. To use a different subscription, open **Vieweroo → Settings…** and click the pencil beside **PRDB API key** to enter and verify the replacement key.
 
 Enable a PIN in **Vieweroo → Settings…** (⌘,) and press ⇧⌘L to lock the app and stop playback. **Forgot PIN?** uses macOS account authentication. PIN protection controls the interface and playback. The settings database sits alongside the catalog and is readable and writable only by your macOS user by default. Anyone with a copy of that file or its backup can read the API key. It contains a salted PIN verifier. The catalog and image cache use ordinary local storage.
+
+## Local diagnostics
+
+Vieweroo uses the macOS unified log. To inspect recent catalog errors, source scan and PRDB matching summaries, and AirPlay HTTP fallback events, run:
+
+```sh
+/usr/bin/log show --last 24h --style compact --predicate 'subsystem == "net.prdb.vieweroo"'
+```
+
+To follow these events while reproducing a problem, use:
+
+```sh
+/usr/bin/log stream --level debug --style compact --predicate 'subsystem == "net.prdb.vieweroo"'
+```
+
+macOS manages log storage and retention. Scan and matching summaries contain counts and elapsed time. Media names, paths, stream URLs and credentials are excluded.
 
 The [product vision](VISION.md), [architecture decisions](ARCHITECTURE.md) and [interface guide](DESIGN.md) describe MVP behavior, hardware acceptance checks and the macOS design conventions.

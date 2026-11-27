@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import GRDB
+import os
 
 public struct CatalogScanner: Sendable {
     public let catalog: Catalog
@@ -46,6 +47,17 @@ public struct CatalogScanner: Sendable {
     /// after each committed batch, so callers can show new tiles while the scan continues.
     public func scan(source: CatalogSource, batchInterval: Duration = .milliseconds(250), batchLimit: Int = 200,
                      onProgress: @Sendable () -> Void = {}) throws {
+        let start = ContinuousClock.now
+        var outcome = ViewerooLog.Outcome.failed
+        var recordedFiles = 0
+        var readErrors = 0
+        defer {
+            let result = outcome == .failed && Task.isCancelled ? .cancelled : outcome
+            ViewerooLog.scan.log(level: result.level, """
+                Source scan \(result.rawValue, privacy: .public): recordedFiles=\(recordedFiles) \
+                readErrors=\(readErrors) durationMs=\(ViewerooLog.milliseconds(since: start))
+                """)
+        }
         // A rename holds the catalog and the file system for a moment. Start once it finishes.
         while !catalog.fileActivity.withLock({ activity in
             guard !activity.renaming else { return false }
@@ -67,10 +79,10 @@ public struct CatalogScanner: Sendable {
         }
         guard Self.isReachable(source) else {
             try setReachability(false, source: source, generation: generation)
+            outcome = .offline
             return
         }
         try setReachability(true, source: source, generation: generation)
-        var discoveredAny = false
 
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
         var traversalError: Error?
@@ -92,6 +104,7 @@ public struct CatalogScanner: Sendable {
             return source.url.appendingPathComponent(relative.joined(separator: "/"), isDirectory: false)
         }
         func rememberError(at item: URL, _ error: Error) {
+            readErrors += 1
             unreadablePaths.insert(selectedURL(for: item).standardizedFileURL.path)
             traversalError = traversalError ?? error
         }
@@ -99,7 +112,10 @@ public struct CatalogScanner: Sendable {
                                                          options: [], errorHandler: { url, error in
             rememberError(at: url, error)
             return true
-        }) else { throw CatalogError.unavailableFolder }
+        }) else {
+            readErrors += 1
+            throw CatalogError.unavailableFolder
+        }
 
         var pending: [DiscoveredFile] = []
         let clock = ContinuousClock()
@@ -107,7 +123,7 @@ public struct CatalogScanner: Sendable {
         func commit() throws {
             guard !pending.isEmpty else { return }
             try record(pending, source: source, generation: generation, boundary: boundary)
-            discoveredAny = true
+            recordedFiles += pending.count
             pending.removeAll(keepingCapacity: true)
             lastCommit = clock.now
             onProgress()
@@ -150,11 +166,12 @@ public struct CatalogScanner: Sendable {
         try Task.checkCancellation()
         guard Self.isReachable(source) else {
             try setReachability(false, source: source, generation: generation)
+            outcome = .offline
             return
         }
         // Learn the volume of an older source only once the folder shows its content.
         let volume = Self.volumeIdentity(of: source.url)
-        let learnVolume = volume != nil && volume != source.volume && (source.volume != nil || discoveredAny)
+        let learnVolume = volume != nil && volume != source.volume && (source.volume != nil || recordedFiles > 0)
         try catalog.database.write { db in
             try verifyGeneration(db, sourceID: source.id, generation: generation)
             if learnVolume {
@@ -193,7 +210,11 @@ public struct CatalogScanner: Sendable {
                 """, arguments: [source.id, generation, generation])
             try db.execute(sql: "UPDATE source SET scanPending = ? WHERE id = ?", arguments: [traversalError != nil, source.id])
         }
-        if let traversalError { throw traversalError }
+        if let traversalError {
+            outcome = .partial
+            throw traversalError
+        }
+        outcome = .completed
     }
 
     private func setReachability(_ online: Bool, source: CatalogSource, generation: Int64) throws {

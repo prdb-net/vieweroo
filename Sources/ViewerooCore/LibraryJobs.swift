@@ -96,25 +96,63 @@ public enum LibraryJobs {
         func clear(_ id: Int64) { _ = suspended.withLock { $0.removeValue(forKey: id) } }
     }
 
+    private struct LookupCounts {
+        var attempted = 0
+        var hashReadErrors = 0
+        var rejected = 0
+    }
+
     public static func identify(libraryID: Int64, catalog: Catalog, key: String, client: PRDBClient,
                                 failures: Failures = Failures(), searchPacing: Duration = .milliseconds(250),
                                 updated: @Sendable () async -> Void) async throws {
+        let start = ContinuousClock.now
+        var counts = LookupCounts()
+        var outcome = ViewerooLog.Outcome.completed
+        var failure = "none"
+        defer {
+            // A retry timer can wake up while every pending entry is still suspended.
+            let level: OSLogType = outcome == .completed && counts.attempted == 0 ? .debug : outcome.level
+            ViewerooLog.matching.log(level: level, """
+                Title lookup \(outcome.rawValue, privacy: .public): attempted=\(counts.attempted) \
+                hashReadErrors=\(counts.hashReadErrors) rejected=\(counts.rejected) \
+                failure=\(failure, privacy: .public) durationMs=\(ViewerooLog.milliseconds(since: start))
+                """)
+        }
+        do {
+            try await identifyPending(libraryID: libraryID, catalog: catalog, key: key, client: client,
+                                      failures: failures, searchPacing: searchPacing, counts: &counts, updated: updated)
+            if counts.hashReadErrors > 0 || counts.rejected > 0 { outcome = .partial }
+        } catch {
+            outcome = error is CancellationError || Task.isCancelled ? .cancelled : .failed
+            if outcome == .failed { failure = ViewerooLog.failureCode(error) }
+            throw error
+        }
+    }
+
+    private static func identifyPending(libraryID: Int64, catalog: Catalog, key: String, client: PRDBClient,
+                                        failures: Failures, searchPacing: Duration, counts: inout LookupCounts,
+                                        updated: @Sendable () async -> Void) async throws {
         let recognition = StudioRecognition(studios: try catalog.recognizableStudios(libraryID: libraryID))
         try await pendingBatches(libraryID: libraryID, catalog: catalog, availableOnly: true) { pending in
             let batch = pending.filter { !failures.isSuspended($0.id) }
             var files: [PRDBFile] = []
             for entry in batch {
                 try Task.checkCancellation()
+                counts.attempted += 1
                 var hash = entry.hash
                 if hash == nil && entry.fileSize >= 131072 {
                     do { hash = try OSHash.compute(url: entry.url) }
-                    catch { continue }
+                    catch {
+                        counts.hashReadErrors += 1
+                        continue
+                    }
                     try catalog.setHash(entryID: entry.id, hash: hash, fileSize: entry.fileSize, modified: entry.modified)
                 }
                 files.append(PRDBFile(ref: String(entry.id), filename: entry.url.lastPathComponent, filesize: entry.fileSize, osHash: hash))
             }
             guard !files.isEmpty else { return }
-            let results = try await identifyIsolating(files, key: key, client: client, failures: failures)
+            let results = try await identifyIsolating(files, key: key, client: client, failures: failures,
+                                                      rejected: &counts.rejected)
             var fallback: [(LookupEntry, PRDBStudio?)] = []
             for entry in batch {
                 try Task.checkCancellation()
@@ -142,6 +180,7 @@ public enum LibraryJobs {
                 do { candidates = try await client.search(title, key: key) }
                 catch let error as PRDBError where error.isRequestSpecific {
                     failures.record(entry.id)
+                    counts.rejected += 1
                     continue
                 }
                 try Task.checkCancellation()
@@ -156,17 +195,20 @@ public enum LibraryJobs {
     /// Narrow a request-specific rejection down to the files that cause it, so one
     /// problematic video cannot hold back the rest of its batch.
     private static func identifyIsolating(_ files: [PRDBFile], key: String, client: PRDBClient,
-                                          failures: Failures) async throws -> [String: PRDBMatch] {
+                                          failures: Failures, rejected: inout Int) async throws -> [String: PRDBMatch] {
         do {
             return try await client.identify(files, key: key)
         } catch let error as PRDBError where error.isRequestSpecific {
             guard files.count > 1 else {
+                rejected += 1
                 if let id = files.first.flatMap({ Int64($0.ref) }) { failures.record(id) }
                 return [:]
             }
             let middle = files.count / 2
-            let first = try await identifyIsolating(Array(files[..<middle]), key: key, client: client, failures: failures)
-            let second = try await identifyIsolating(Array(files[middle...]), key: key, client: client, failures: failures)
+            let first = try await identifyIsolating(Array(files[..<middle]), key: key, client: client,
+                                                    failures: failures, rejected: &rejected)
+            let second = try await identifyIsolating(Array(files[middle...]), key: key, client: client,
+                                                     failures: failures, rejected: &rejected)
             return first.merging(second) { current, _ in current }
         }
     }

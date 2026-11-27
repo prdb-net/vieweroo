@@ -73,6 +73,8 @@ struct CatalogAPI {
         switch (method, parts[3], parts.count) {
         case ("GET", "entries", 4):
             var after: Int64 = 0, limit = 100
+            var osHash: String?
+            var fileSize: Int64?
             var seen = Set<String>()
             for item in url.queryItems ?? [] {
                 guard seen.insert(item.name).inserted, let value = item.value else { throw CatalogError.invalidValue }
@@ -83,10 +85,17 @@ struct CatalogAPI {
                 case "limit":
                     guard let number = Int(value), (1...200).contains(number) else { throw CatalogError.invalidValue }
                     limit = number
+                case "osHash":
+                    guard value.utf8.count == 16, value.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw CatalogError.invalidValue }
+                    osHash = value
+                case "fileSize":
+                    guard let bytes = Int64(value), bytes >= 0 else { throw CatalogError.invalidValue }
+                    fileSize = bytes
                 default: throw CatalogError.invalidValue
                 }
             }
-            let rows = try catalog.apiEntries(library: library, after: after, limit: limit + 1)
+            guard fileSize == nil || osHash != nil else { throw CatalogError.invalidValue }
+            let rows = try catalog.apiEntries(library: library, after: after, limit: limit + 1, osHash: osHash, fileSize: fileSize)
             let entries = Array(rows.prefix(limit))
             return try CatalogResponse(Page(entries: entries, nextAfter: rows.count > limit ? entries.last?.metadata.id : nil))
         case ("GET", "studios", 4):

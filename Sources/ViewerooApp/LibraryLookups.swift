@@ -109,6 +109,8 @@ extension LibraryModel {
                 lookupActivity = nil
                 if recognized > 0 { reload() }
             }
+            var backfilledMetadata = false
+            var nextTagRefresh = Date.distantPast
             while !Task.isCancelled && !subscriptionRequired {
                 do {
                     if !validated {
@@ -136,6 +138,25 @@ extension LibraryModel {
                             await MainActor.run { if self.work === stamp { _ = self.reload() } }
                         }
                     }
+                    if id != nil, Date() >= nextTagRefresh {
+                        if prdbTagDirectory.map({ abs(Date().timeIntervalSince($0.refreshed)) > 86_400 }) ?? true {
+                            lookupActivity = "Updating PRDB tags…"
+                            do {
+                                let directory = PRDBTagDirectory(names: try await client.tagNames(key: key))
+                                try Task.checkCancellation()
+                                try await catalog.savePRDBTagDirectory(directory)
+                                try Task.checkCancellation()
+                                prdbTagDirectory = directory
+                            } catch PRDBError.service(404) {
+                                // A server using an older contract can still supply title matches.
+                            }
+                        }
+                        nextTagRefresh = Date().addingTimeInterval(3600)
+                    }
+                    if let id, !backfilledMetadata {
+                        try await backfillPRDBMetadata(libraryID: id, catalog: catalog, key: key, stamp: stamp)
+                        backfilledMetadata = true
+                    }
                     guard work === stamp, !Task.isCancelled else { return }
                     lookupStatus = nil
                 } catch {
@@ -147,6 +168,24 @@ extension LibraryModel {
                 lookupActivity = nil
                 try? await Task.sleep(for: .seconds(60))
             }
+        }
+    }
+
+    private func backfillPRDBMetadata(libraryID: Int64, catalog: Catalog, key: String, stamp: LibraryWork) async throws {
+        let pending = try await catalog.matchesMissingPRDBMetadata(libraryID: libraryID)
+        guard !pending.isEmpty else { return }
+        try Task.checkCancellation()
+        lookupActivity = "Updating matched titles…"
+        var changed = false
+        defer {
+            if changed && work === stamp && !Task.isCancelled { reload() }
+        }
+        let ids = pending.keys.sorted()
+        let size = PRDBClient.videoBatchSize
+        for start in stride(from: 0, to: ids.count, by: size) {
+            let titles = try await client.videoDetails(ids: Array(ids[start..<min(start + size, ids.count)]), key: key)
+            try Task.checkCancellation()
+            if try await catalog.backfillPRDBMetadata(titles, entries: pending) { changed = true }
         }
     }
 }

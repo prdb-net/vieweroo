@@ -56,6 +56,13 @@ package struct TestLibraryAPI: Sendable {
         func parameter(_ name: String) -> String? { query.first { $0.name == name }?.value }
         let body = request.httpBody ?? Data()
         switch (request.httpMethod, url.path) {
+        case ("GET", "/tags"):
+            return try reply(TagList(items: [
+                PRDBTag(key: "abstract", name: "Abstract"),
+                PRDBTag(key: "color-study", name: "Color Study"),
+                PRDBTag(key: "geometric", name: "Geometric"),
+                PRDBTag(key: "motion-design", name: "Motion Design")
+            ]))
         case ("GET", "/sites"):
             var seen = Set<String>()
             let term = parameter("Search") ?? ""
@@ -82,8 +89,8 @@ package struct TestLibraryAPI: Sendable {
             return try reply(["results": matches])
         case ("POST", "/videos/batch"):
             struct Batch: Decodable { let ids: [String] }
-            let ids = Set(try JSONDecoder().decode(Batch.self, from: body).ids)
-            return try reply(records.map(\.video).filter { ids.contains($0.id) })
+            let ids = Set(try JSONDecoder().decode(Batch.self, from: body).ids.map { $0.lowercased() })
+            return try reply(records.map(\.video).filter { ids.contains($0.id.lowercased()) })
         case ("GET", "/actors"):
             let term = parameter("Search") ?? ""
             var seen = Set<String>()
@@ -101,7 +108,10 @@ package struct TestLibraryAPI: Sendable {
                       term.isEmpty || video.title.localizedCaseInsensitiveContains(term)
                           || site.title.localizedCaseInsensitiveContains(term) else { return nil }
                 return Summary(platformId: site.platformId, platformKey: site.platformKey,
-                               platformTitle: site.platformTitle, accountHandle: site.accountHandle, id: video.id, title: video.title, siteId: site.id, siteTitle: site.title, actors: video.actors)
+                               platformTitle: site.platformTitle, accountHandle: site.accountHandle,
+                               id: video.id, title: video.title, siteId: site.id, siteTitle: site.title,
+                               actors: video.actors, alternativeTitle: video.alternativeTitle,
+                               durationSeconds: video.durationSeconds, tags: video.tags)
             }
             let page = min(rows.count + 1, max(1, Int(parameter("Page") ?? "") ?? 1))
             let size = min(100, max(1, Int(parameter("PageSize") ?? "") ?? 20))

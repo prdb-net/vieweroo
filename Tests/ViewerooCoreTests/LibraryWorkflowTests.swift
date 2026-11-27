@@ -23,6 +23,8 @@ private actor WorkflowServer {
         case "/sites":
             let sites = mode == .subscriptionRequired ? [["id": "studio", "title": "Sky Studio"]] : []
             body = ["items": sites, "totalCount": sites.count] as [String: Any]
+        case "/tags":
+            body = ["items": []]
         case "/videos/identify":
             let bytes = try #require(request.httpBody)
             let json = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
@@ -311,7 +313,7 @@ private final class WorkflowSecrets: SecretStore {
 }
 
 @MainActor
-private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+func until(timeout: Duration = .seconds(12), _ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
     let deadline = ContinuousClock.now + timeout
     while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
     try #require(condition(), "Timed out waiting for the workflow", sourceLocation: sourceLocation)

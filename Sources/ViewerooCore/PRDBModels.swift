@@ -63,14 +63,27 @@ public struct PRDBTitle: Codable, Hashable, Identifiable, Sendable {
     public let studio: PRDBStudio?
     public let performers: [PRDBPerformer]
     public let previewURL: URL?
+    public let alternativeTitle: String?
+    public let durationSeconds: Int?
+    /// Nil for a cached title from before API 0.27. An empty array is a known untagged title.
+    public let tagKeys: [String]?
     public init(id: String, title: String, studio: PRDBStudio? = nil,
-                performers: [PRDBPerformer] = [], previewURL: URL? = nil) {
+                performers: [PRDBPerformer] = [], previewURL: URL? = nil,
+                alternativeTitle: String? = nil, durationSeconds: Int? = nil, tagKeys: [String]? = nil) {
         self.id = id
         self.title = title
         self.studio = studio
         self.performers = performers
         self.previewURL = previewURL
+        self.alternativeTitle = alternativeTitle
+        self.durationSeconds = durationSeconds
+        self.tagKeys = tagKeys
     }
+}
+
+struct PRDBTag: Codable, Sendable {
+    let key: String
+    let name: String
 }
 
 public struct PRDBMatch: Codable, Hashable, Sendable {
