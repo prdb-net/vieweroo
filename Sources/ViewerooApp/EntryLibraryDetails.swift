@@ -104,6 +104,7 @@ struct EntryLibraryDetails: View {
                 }
                 .padding(VSpace.group)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .disclosureGroupStyle(FullWidthDisclosureStyle())
             }
         }
         .disabled(savingName)

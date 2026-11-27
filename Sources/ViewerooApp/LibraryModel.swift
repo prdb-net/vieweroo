@@ -199,11 +199,17 @@ final class LibraryModel {
                         self.catalogAPIError = "Couldn’t start the local catalog API. Check whether its port is in use and retry."
                     }
                 }
-            } changed: { [weak self] library in
+            } changed: { [weak self] change in
                 Task { @MainActor in
-                    guard let self, self.phase == .ready, self.libraryID == library else { return }
-                    self.editRevision &+= 1
-                    self.reload()
+                    guard let self, self.phase == .ready, self.catalog === catalog else { return }
+                    switch change {
+                    case .metadata(let library):
+                        guard self.libraryID == library else { return }
+                        self.editRevision &+= 1
+                        self.reload()
+                    case .renamed(let affected):
+                        await self.refreshRenamedFiles(affected)
+                    }
                 }
             }
         } catch { catalogAPIError = error.localizedDescription }
@@ -645,23 +651,30 @@ final class LibraryModel {
     func renameFile(_ entry: CatalogEntry, basename: String) async throws {
         guard phase == .ready, detailID == entry.id, let catalog else { throw FileRenameError.unavailable }
         let stamp = work
-        try await Task.detached(priority: .userInitiated) {
+        let affected = try await Task.detached(priority: .userInitiated) {
             try catalog.renameFile(entry, basename: basename)
         }.value
-        guard phase == .ready, work === stamp else { return }
+        guard phase == .ready, self.catalog === catalog else { return }
+        await refreshRenamedFiles(affected)
+        if phase == .ready, work === stamp, !affected.isEmpty { notify("File renamed") }
+    }
+
+    private func refreshRenamedFiles(_ affected: [Int64: Set<Int64>]) async {
+        guard let libraryID, let ids = affected[libraryID] else { return }
+        let stamp = work
         editRevision &+= 1
         await reload()?.value
         guard phase == .ready, work === stamp else { return }
-        if let updated = entries.first(where: { $0.id == entry.id }), updated.path != entry.path {
-            if playing && detailID == entry.id {
-                playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
+        let updated = entries.filter { ids.contains($0.id) }
+        guard !updated.isEmpty else { return }
+        for session in [mainPlayer, secondPlayer].compactMap({ $0 }) {
+            if let entry = updated.first(where: { $0.id == session.entryID }) {
+                session.playback.sourceRenamed(to: entry, previewDirectory: previewDirectory(entry))
             }
-            secondPlayer?.playback.sourceRenamed(from: entry.url, to: updated, previewDirectory: previewDirectory(updated))
-            // The preview directory follows the path. Rebuild only this entry unless a run is active.
-            if work[.previews] == nil || previews.phase == .idle { generatePreviews(only: [updated]) }
-            else { generatePreviews() }
-            notify("File renamed")
         }
+        // Preview directories follow file paths. Check the other entries too if a run is active.
+        if work[.previews] == nil || previews.phase == .idle { generatePreviews(only: updated) }
+        else { generatePreviews() }
     }
 
     func previewDirectory(_ entry: CatalogEntry) -> URL {

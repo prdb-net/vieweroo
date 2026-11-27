@@ -45,6 +45,8 @@ Give every icon button a short tooltip naming the action, such as **New Playlist
 
 Keep visible text for menu items, dialog decisions (**Cancel**, **Rename**, **Delete Playlist**, **Done**) and primary actions in empty states. Also show text when it explains a destination, consequence or value, such as **Add to Playlist**, **Remove Library Entry…** or **Resume at 0:12**. Wrap a group of actions when it runs out of room so these labels stay visible.
 
+Make the full header row of a collapsible section one click target, including the chevron, label and empty space in the row. Use `FullWidthDisclosureStyle` for standalone `DisclosureGroup`s to keep keyboard activation and expose the expanded state to VoiceOver. For a menu or popover with a dropdown indicator, make the visible label and indicator part of the same control when they perform the same action.
+
 ## Collection search, filters and settings
 
 Use the same control order across collection overviews. Keep **Back** on the left. On the right, place the search field, **Filters** (sliders), in video collections **Sort** (two arrows), then the edit pencil for in-place editing or the gear for a separate manager. Give each control a tooltip and an accessible action name.

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import Testing
 @testable import ViewerooApp
@@ -789,12 +790,12 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     let key = try #require(try model.access.catalogKey())
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
-    func request(_ route: String, _ token: String?, patch: [String: String]? = nil) async throws -> (Int, Data) {
+    func request(_ route: String, _ token: String?, method: String = "GET", json: [String: Any]? = nil) async throws -> (Int, Data) {
         var request = URLRequest(url: try #require(URL(string: base + route)), timeoutInterval: 3)
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        if let patch {
-            request.httpMethod = "PATCH"
-            request.httpBody = try JSONEncoder().encode(patch)
+        request.httpMethod = method
+        if let json {
+            request.httpBody = try JSONSerialization.data(withJSONObject: json)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await session.data(for: request)
@@ -810,24 +811,68 @@ private func until(timeout: Duration = .seconds(12), _ condition: @MainActor () 
     #expect(names.compactMap { $0["id"] as? Int64 } == [first, second.id])
     let media = root.appending(path: "Media")
     try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
-    try await writeColorMovie(to: media.appending(path: "Colors.mp4"))
+    let originalFile = media.appending(path: "Colors.mp4")
+    try await writeColorMovie(to: originalFile)
+    let firstSource = try catalog.addSource(libraryID: first, url: media)
+    try CatalogScanner(catalog: catalog).scan(source: firstSource)
     let source = try catalog.addSource(libraryID: second.id, url: media)
     try CatalogScanner(catalog: catalog).scan(source: source)
     let entry = try #require(try catalog.entries(libraryID: second.id).first)
     let route = "/libraries/\(second.id)/entries/\(entry.id)"
-    func revision() async throws -> String {
+    func revision(of route: String) async throws -> String {
         let (_, body) = try await request(route, key)
         let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(json["path"] == nil && json["watchTime"] == nil)
         return try #require(json["revision"] as? String)
     }
-    let updated = try await request(route, key, patch: ["title": "Imported", "revision": try await revision()])
+    let updated = try await request(route, key, method: "PATCH", json: ["title": "Imported", "revision": try await revision(of: route)])
     #expect(updated.0 == 200 && model.libraryID == first)
     model.selectLibrary(second.id)
     try await until { model.entries.first?.title == "Imported" && model.entries.first?.needsLookup == false }
-    let next = try await request(route, key, patch: ["title": "Corrected", "revision": try await revision()])
+    let tags = "/libraries/\(second.id)/tags"
+    struct Tag: Decodable, Equatable { let id: Int64; let name: String }
+    let created = try await request(tags, key, method: "POST", json: ["name": " Color study "])
+    #expect(created.0 == 201)
+    let tag = try JSONDecoder().decode(Tag.self, from: created.1)
+    #expect(tag.name == "Color study")
+    try await until { model.tags.contains { $0.id == tag.id && $0.memberIDs.isEmpty } }
+    let listed = try await request(tags, key)
+    #expect(listed.0 == 200)
+    #expect(try JSONDecoder().decode([Tag].self, from: listed.1) == [tag])
+    #expect(try await request(tags, key, method: "POST", json: ["name": "color STUDY"]).0 == 409)
+    #expect(try await request("/libraries/99999/tags", key, method: "POST", json: ["name": "Other"]).0 == 404)
+    let next = try await request(route, key, method: "PATCH", json: [
+        "title": "Corrected", "revision": try await revision(of: route), "addTags": ["COLOR Study", "Indigo"]
+    ])
     #expect(next.0 == 200)
-    try await until { model.entries.first?.title == "Corrected" }
+    try await until { model.entries.first?.title == "Corrected" && model.entries.first?.tags.count == 2 }
+    #expect(model.tags.first(where: { $0.id == tag.id })?.memberIDs == [entry.id])
+    let otherTags = try await request("/libraries/\(first)/tags", key)
+    #expect(try JSONDecoder().decode([Tag].self, from: otherTags.1).isEmpty)
+
+    let current = try #require(model.entries.first)
+    model.play(current)
+    model.playback.togglePlayback()
+    try await until { model.playback.ready }
+    let firstEntry = try #require(try catalog.entries(libraryID: first).first)
+    let firstRoute = "/libraries/\(first)/entries/\(firstEntry.id)"
+    let renameRequest = [
+        "basename": "New colors", "revision": try await revision(of: firstRoute)
+    ]
+    #expect(try await request(firstRoute + "/rename", nil, method: "POST", json: renameRequest).0 == 401)
+    let renamed = try await request(firstRoute + "/rename", key, method: "POST", json: renameRequest)
+    #expect(renamed.0 == 200)
+    let renameBody = try #require(JSONSerialization.jsonObject(with: renamed.1) as? [String: Any])
+    #expect(renameBody["filename"] as? String == "New colors.mp4")
+    #expect(renameBody["path"] == nil)
+    let renamedFile = media.appending(path: "New colors.mp4").standardizedFileURL
+    try await until {
+        guard let asset = model.playback.player.currentItem?.asset as? AVURLAsset else { return false }
+        return model.entries.first?.filename == "New colors.mp4" && asset.url.standardizedFileURL == renamedFile && model.playback.ready
+    }
+    #expect(model.mainPlayer.entryID == entry.id && !model.playback.wantsPlayback)
+    #expect(model.entries.first?.title == "Corrected")
+    #expect(!FileManager.default.fileExists(atPath: originalFile.path))
     try model.access.setPIN(current: nil, new: "1234")
     model.pinEnabled = true
     model.lock()

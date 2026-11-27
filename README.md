@@ -61,7 +61,7 @@ To update, quit Vieweroo and replace the app in Applications with the new copy. 
 
 ## Connect a metadata app
 
-Open **Vieweroo → Settings…** (⌘,), enable **Local catalog API** and choose **Copy Key**. A companion app on this Mac can list all your libraries and enrich their videos while Vieweroo is open and unlocked. Turning the API off revokes the key. See the [catalog API reference](CATALOG_API_IDEA.md) for endpoints, pagination and an example update.
+Open **Vieweroo → Settings…** (⌘,), enable **Local catalog API** and choose **Copy Key**. A companion app on this Mac can list all your libraries, rename video files, list, create and assign tags, and enrich video metadata while Vieweroo is open and unlocked. Turning the API off revokes the key. See the [catalog API reference](CATALOG_API_IDEA.md) for endpoints and request examples.
 
 ## Privacy and access
 

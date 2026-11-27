@@ -88,9 +88,9 @@ final class PlayerController: ObservableObject {
         installItem(url: url, startAt: startAt)
     }
 
-    func sourceRenamed(from oldURL: URL, to entry: CatalogEntry, previewDirectory: URL) {
-        guard sourceURL == oldURL else { return }
-        sourceURL = entry.url
+    func sourceRenamed(to entry: CatalogEntry, previewDirectory: URL) {
+        guard let sourceURL, sourceURL != entry.url else { return }
+        self.sourceURL = entry.url
         title = entry.title
         self.previewDirectory = previewDirectory
         // The active HTTP stream holds its own open file descriptor.
