@@ -140,8 +140,13 @@ struct MatchView: View {
             List(titles, selection: $selection) { title in
                 VStack(alignment: .leading, spacing: VSpace.unit) {
                     Text(title.title).fontWeight(.medium).lineLimit(2)
+                    if let alternative = title.alternativeTitle {
+                        Text("Also known as \(alternative)").font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(1).help(alternative)
+                    }
                     let cast = title.performers.map(\.name).joined(separator: ", ")
-                    let details = [title.studio?.name, cast.isEmpty ? nil : cast].compactMap { $0 }.joined(separator: " · ")
+                    let duration = title.durationSeconds.map { clockLabel(Double($0)) }
+                    let details = [title.studio?.name, duration, cast.isEmpty ? nil : cast].compactMap { $0 }.joined(separator: " · ")
                     if !details.isEmpty {
                         Text(details).font(.callout).foregroundStyle(.secondary).lineLimit(2).help(details)
                     }

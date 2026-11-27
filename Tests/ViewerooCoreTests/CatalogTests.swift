@@ -38,6 +38,45 @@ private struct LibraryFixture {
 }
 
 final class CatalogTests: XCTestCase {
+    func testPRDBBackfillUpdatesCachedMetadataWithoutRestoringRemovedMatches() async throws {
+        let fixture = try LibraryFixture()
+        defer { fixture.clean() }
+        try fixture.add("First.mp4")
+        try fixture.add("Second.mp4")
+        try fixture.add("Third.mp4")
+        try fixture.scan()
+        let catalog = fixture.catalog
+        let libraryID = fixture.library.id
+        let entries = try catalog.entries(libraryID: libraryID)
+        let id = UUID().uuidString
+        let old = PRDBTitle(id: id, title: "Cached title")
+        for entry in entries { try catalog.confirmMatch(entryID: entry.id, title: old) }
+
+        let pending = try await catalog.matchesMissingPRDBMetadata(libraryID: libraryID)
+        XCTAssertEqual(Set(pending[id.lowercased()] ?? []), Set(entries.map(\.id)))
+        try catalog.confirmMatch(entryID: entries[1].id, title: nil)
+        let replacement = PRDBTitle(id: UUID().uuidString, title: "Corrected title", tagKeys: ["different"])
+        try catalog.confirmMatch(entryID: entries[2].id, title: replacement)
+        let olderServer = try await catalog.backfillPRDBMetadata([old], entries: pending)
+        XCTAssertFalse(olderServer)
+        let detail = PRDBTitle(id: id.lowercased(), title: "Server title", alternativeTitle: "Alternate",
+                               durationSeconds: 300, tagKeys: [])
+        let changed = try await catalog.backfillPRDBMetadata([detail], entries: pending)
+        XCTAssertTrue(changed)
+
+        let updated = try catalog.entries(libraryID: libraryID)
+        XCTAssertEqual(updated[0].match?.id, id)
+        XCTAssertEqual(updated[0].match?.title, "Cached title")
+        XCTAssertEqual(updated[0].match?.alternativeTitle, "Alternate")
+        XCTAssertEqual(updated[0].match?.durationSeconds, 300)
+        XCTAssertEqual(updated[0].match?.tagKeys, [])
+        XCTAssertTrue(updated[0].confirmed)
+        XCTAssertNil(updated[1].match)
+        XCTAssertEqual(updated[2].match, replacement)
+        let remaining = try await catalog.matchesMissingPRDBMetadata(libraryID: libraryID)
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     func testVideoQualityForCroppedAndPortraitFrames() {
         for (width, height, quality) in [(3840, 1600, "4K"), (2160, 3840, "4K"), (2560, 1440, "1440p"),
                                          (1920, 800, "1080p"), (720, 1280, "720p"), (720, 576, "SD")] {

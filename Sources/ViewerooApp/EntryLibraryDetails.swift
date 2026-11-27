@@ -84,6 +84,9 @@ struct EntryLibraryDetails: View {
                         Text(description).textSelection(.enabled)
                     }
                     EntryPerformers(model: model, entry: entry)
+                    if let match = entry.match {
+                        EntryPRDBMetadata(title: match, tagNames: model.prdbTagDirectory?.names ?? [:])
+                    }
                     Divider()
                     EntryTagEditor(model: model, entry: entry)
                     Divider()

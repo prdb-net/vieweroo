@@ -1,6 +1,34 @@
 import SwiftUI
 import ViewerooCore
 
+struct EntryPRDBMetadata: View {
+    let title: PRDBTitle
+    let tagNames: [String: String]
+
+    @ViewBuilder var body: some View {
+        let keys = title.tagKeys ?? []
+        if title.alternativeTitle != nil || title.durationSeconds != nil || !keys.isEmpty {
+            VStack(alignment: .leading, spacing: VSpace.tight) {
+                Text("PRDB Metadata").font(.headline).accessibilityAddTraits(.isHeader)
+                if let alternative = title.alternativeTitle {
+                    Text("Also known as \(alternative)").textSelection(.enabled)
+                }
+                if let seconds = title.durationSeconds {
+                    Text("Catalog duration \(clockLabel(Double(seconds)))")
+                }
+                if !keys.isEmpty {
+                    ChipRows {
+                        ForEach(keys, id: \.self) { key in MetadataChip(name: tagNames[key] ?? key) }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("PRDB tags")
+                }
+            }
+            .font(.callout)
+        }
+    }
+}
+
 struct EntryPerformers: View {
     let model: LibraryModel
     let entry: CatalogEntry

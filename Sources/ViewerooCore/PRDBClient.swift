@@ -101,11 +101,9 @@ public struct PRDBClient: Sendable {
                 ids.formUnion(row.candidates)
             }
             let missing = ids.subtracting(videos.keys).sorted()
-            for offset in stride(from: 0, to: missing.count, by: 50) {
-                let ids = Array(missing[offset..<min(missing.count, offset + 50)])
-                let body = try JSONEncoder().encode(["ids": ids])
-                let details: [Video] = try await fetch("videos/batch", key: key, body: body)
-                for detail in details { videos[detail.id] = detail.titleRecord }
+            for offset in stride(from: 0, to: missing.count, by: Self.videoBatchSize) {
+                let ids = Array(missing[offset..<min(missing.count, offset + Self.videoBatchSize)])
+                for detail in try await videoDetails(ids: ids, key: key) { videos[detail.id] = detail }
             }
 
             let hashedRefs = Set(batch.filter { $0.osHash != nil }.map(\.ref))
@@ -160,6 +158,19 @@ public struct PRDBClient: Sendable {
         guard UUID(uuidString: id) != nil else { throw PRDBError.invalidResponse }
         let detail: Video = try await fetch("videos/\(id)", key: key)
         return detail.titleRecord
+    }
+
+    package static let videoBatchSize = 50
+
+    package func videoDetails(ids: [String], key: String) async throws -> [PRDBTitle] {
+        let body = try JSONEncoder().encode(["ids": ids])
+        let details: [Video] = try await fetch("videos/batch", key: key, body: body)
+        return details.map(\.titleRecord)
+    }
+
+    package func tagNames(key: String) async throws -> [String: String] {
+        let directory: TagList = try await fetch("tags", key: key)
+        return Dictionary(directory.items.map { ($0.key, $0.name) }, uniquingKeysWith: { first, _ in first })
     }
 
     public func studios(key: String) async throws -> [PRDBStudio] {
@@ -219,6 +230,7 @@ public struct PRDBClient: Sendable {
 }
 
 private struct Identity: Decodable { let userHash: String }
+struct TagList: Codable { let items: [PRDBTag] }
 private struct Page<T: Decodable>: Decodable {
     let items: [T]
     let totalCount: Int
@@ -284,9 +296,13 @@ struct Video: Codable {
     let site: Site?
     let actors: [Performer]
     let images: [RemoteImage]
+    var alternativeTitle: String?
+    var durationSeconds: Int?
+    var tags: [String]?
     var titleRecord: PRDBTitle {
         PRDBTitle(id: id, title: title, studio: site?.studio, performers: actors.map(\.record),
-                  previewURL: images.lazy.compactMap(\.httpsURL).first)
+                  previewURL: images.lazy.compactMap(\.httpsURL).first,
+                  alternativeTitle: alternativeTitle, durationSeconds: durationSeconds, tagKeys: tags)
     }
 }
 struct Summary: Codable, PlatformFields {
@@ -300,8 +316,12 @@ struct Summary: Codable, PlatformFields {
     let siteId: String
     let siteTitle: String
     let actors: [Performer]
+    var alternativeTitle: String?
+    var durationSeconds: Int?
+    var tags: [String]?
     var titleRecord: PRDBTitle {
         PRDBTitle(id: id, title: title, studio: PRDBStudio(id: siteId, name: siteTitle, creator: creator),
-                  performers: actors.map(\.record))
+                  performers: actors.map(\.record), alternativeTitle: alternativeTitle,
+                  durationSeconds: durationSeconds, tagKeys: tags)
     }
 }

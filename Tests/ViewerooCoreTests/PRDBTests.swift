@@ -56,8 +56,8 @@ struct PRDBTests {
     }
 
     @Test func identifyMapsResultsByRefAndOnlyAutoLinksUniqueHashes() async throws {
-        let film = #"{"id":"one","title":"River","site":{"id":"s","title":"Birch"},"actors":[{"id":"p","name":"Alex","images":[{"imageType":3,"url":"https://img.example/p.jpg"}]}],"images":[{"url":"https://img.example/v.jpg"}]}"#
-        let other = #"{"id":"two","title":"Ridge","actors":[],"images":[]}"#
+        let film = #"{"id":"one","title":"River","alternativeTitle":"Rapids","durationSeconds":75,"durationMs":84000,"tags":["water"],"site":{"id":"s","title":"Birch"},"actors":[{"id":"p","name":"Alex","images":[{"imageType":3,"url":"https://img.example/p.jpg"}]}],"images":[{"url":"https://img.example/v.jpg"}]}"#
+        let other = #"{"id":"two","title":"Ridge","alternativeTitle":null,"durationSeconds":null,"tags":[],"actors":[],"images":[]}"#
         let client = PRDBClient { request in
             #expect(request.value(forHTTPHeaderField: "X-Api-Key") == "test-key")
             #expect(request.httpMethod == "POST")
@@ -95,12 +95,17 @@ struct PRDBTests {
         #expect(auto.performers.first?.portraitURL?.host == "img.example")
         #expect(auto.previewURL?.lastPathComponent == "v.jpg")
         #expect(auto.studio?.name == "Birch")
+        #expect(auto.alternativeTitle == "Rapids")
+        #expect(auto.durationSeconds == 75)
+        #expect(auto.tagKeys == ["water"])
         #expect(results["two"]?.autoTitle == nil)
         #expect(results["two"]?.candidates == [auto])
         #expect(results["three"]?.autoTitle == nil)
         #expect(results["three"]?.studio?.name == "Birch")
         #expect(results["four"]?.autoTitle == nil)
         #expect(results["four"]?.candidates.map(\.id) == ["two", "one"])
+        #expect(results["four"]?.candidates.first?.tagKeys == [])
+        #expect(results["four"]?.candidates.first?.durationSeconds == nil)
     }
 
     @Test func identifySplitsRequestsAtTwoHundred() async throws {
