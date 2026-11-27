@@ -131,11 +131,21 @@ extension Catalog {
         else { throw EnrichmentError.missing }
     }
 
-    func apiEntries(library: Int64, after: Int64, limit: Int) throws -> [APIEntry] {
+    func apiEntries(library: Int64, after: Int64, limit: Int, osHash: String?, fileSize: Int64?) throws -> [APIEntry] {
         try database.read { db in
             try Self.requireLibrary(db, library)
-            return try Row.fetchAll(db, sql: Self.entryQuery + " WHERE e.libraryID = ? AND e.id > ? ORDER BY e.id LIMIT ?",
-                                    arguments: [library, after, limit]).map { try APIEntry(CatalogEntry($0)) }
+            var sql = Self.entryQuery + " WHERE e.libraryID = ? AND e.id > ?"
+            var arguments: StatementArguments = [library, after]
+            if let osHash {
+                sql += " AND e.hash = ? COLLATE NOCASE"
+                arguments += [osHash]
+            }
+            if let fileSize {
+                sql += " AND e.fileSize = ?"
+                arguments += [fileSize]
+            }
+            return try Row.fetchAll(db, sql: sql + " ORDER BY e.id LIMIT ?", arguments: arguments + [limit])
+                .map { try APIEntry(CatalogEntry($0)) }
         }
     }
 

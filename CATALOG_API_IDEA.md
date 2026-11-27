@@ -12,6 +12,7 @@ For POST and PATCH requests use `Content-Type: application/json` and a body with
 | --- | --- | --- |
 | GET | `/libraries` | Array of libraries with numeric `id` and `name`. Repeat to discover new libraries. |
 | GET | `/libraries/{libraryID}/entries?limit=100&after=0` | Object with an `entries` array in ascending entry ID order. If `nextAfter` is present, use it as the next page’s `after`. The default limit is 100 and the maximum is 200. |
+| GET | `/libraries/{libraryID}/entries?osHash={hash}&fileSize={bytes}` | Entries in that library with the given OSHash and optional exact byte count. Supports the same pagination. |
 | GET | `/libraries/{libraryID}/entries/{entryID}` | One entry, including its current metadata revision. |
 | GET | `/libraries/{libraryID}/studios` | Array of studio choices with `name`, `isCustom` and, where available, `siteID`. |
 | POST | `/libraries/{libraryID}/studios` | Send `{"name":"Meadow Studio"}` to create an unassigned custom studio. Returns the new studio and HTTP 201. |
@@ -26,7 +27,9 @@ Every entry includes `libraryID`, `id`, `filename`, display `title`, `tags` and 
 
 Both entry GET endpoints return `fileSize` as an integer number of bytes. When the catalog has an OSHash, they also return `osHash` as a 16-character lowercase hexadecimal string, including leading zeros (for example, `"000000000001ffff"`). If the hash is unavailable, the response omits `osHash` and still includes `fileSize`. Both values come from the catalog, including when the source drive is offline.
 
-To match a renamed file, page through the entries and compare both values with the file’s OSHash and byte count. If several entries match, use their `libraryID` and `id` to present the choices. These fields are read-only. Use the selected entry’s revision for metadata edits and file renames.
+To match a renamed file, request `GET /v1/libraries/3/entries?osHash=000000000001ffff&fileSize=131072`. Supply exactly 16 hexadecimal digits in either case. You can omit `fileSize` to search by hash alone. When supplied, `fileSize` requires `osHash` and must be a nonnegative integer byte count. Invalid filters return HTTP 400.
+
+The search uses the cached hash and size, including for offline files. A successful lookup returns HTTP 200 with an empty `entries` array when nothing matches. If several entries match, present the choices by `libraryID` and `id`. Keep the same filters when following `nextAfter`. Both file identity fields are read-only. Use the selected entry’s revision for metadata edits and file renames.
 
 ## Rename a file
 
